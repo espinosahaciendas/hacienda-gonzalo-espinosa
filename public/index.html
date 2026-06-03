@@ -1,0 +1,916 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gonzalo Espinosa Hacienda</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <section class="login-screen" id="login-screen" hidden>
+      <form class="login-panel" id="login-form">
+        <img src="/logo-espinosa-blanco.png" alt="Gonzalo Espinosa Haciendas">
+        <h1>Gonzalo Espinosa</h1>
+        <p>Hacienda y Liquidaciones</p>
+        <label>Correo<input id="login-email" type="email" autocomplete="username" required></label>
+        <label>Contraseña<input id="login-password" type="password" autocomplete="current-password" required></label>
+        <button type="submit" class="primary-button">Ingresar</button>
+        <p class="form-message" id="login-message"></p>
+      </form>
+    </section>
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="/logo-espinosa-blanco.png" alt="Gonzalo Espinosa Haciendas">
+        <div>
+          <strong>Gonzalo Espinosa</strong>
+          <span>Hacienda y Liquidaciones</span>
+        </div>
+      </div>
+      <nav>
+        <button class="active" data-view="tablero">Tablero</button>
+        <button data-view="clientes">Clientes</button>
+        <button data-view="operaciones">Operaciones</button>
+        <button data-view="cuenta">Cuenta corriente</button>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Sistema web real</p>
+          <h1 id="view-title">Tablero</h1>
+        </div>
+        <div class="topbar-actions">
+          <div class="status" id="status">Conectando...</div>
+          <button type="button" class="ghost-button" id="logout-button" hidden>Salir</button>
+        </div>
+      </header>
+
+      <section id="tablero" class="view active">
+        <div class="metrics">
+          <article>
+            <span>Clientes</span>
+            <strong id="metric-clientes">-</strong>
+          </article>
+          <article>
+            <span>Operaciones</span>
+            <strong id="metric-operaciones">-</strong>
+          </article>
+          <article>
+            <span>Movimientos externos</span>
+            <strong id="metric-movimientos">-</strong>
+          </article>
+          <article>
+            <span>Pagos / cobros</span>
+            <strong id="metric-pagos">-</strong>
+          </article>
+        </div>
+
+        <div class="panel">
+          <h2>Sistema operativo</h2>
+          <p>
+            Gestión de operaciones, ventas, liquidaciones, cuenta corriente y vencimientos.
+          </p>
+        </div>
+      </section>
+
+      <section id="clientes" class="view">
+        <div class="client-layout">
+          <form class="panel client-form" id="client-form">
+            <div class="panel-head">
+              <h2 id="client-form-title">Nuevo cliente</h2>
+              <button type="button" class="ghost-button" id="client-cancel" hidden>Cancelar</button>
+            </div>
+            <input type="hidden" id="client-id">
+            <label>
+              Razon social
+              <input id="client-name" required autocomplete="off">
+            </label>
+            <div class="suggestions" id="client-name-suggestions" hidden></div>
+            <div class="form-grid">
+              <label>
+                CUIT
+                <input id="client-cuit" autocomplete="off">
+              </label>
+              <label>
+                Tipo
+                <select id="client-type">
+                  <option>Cliente</option>
+                  <option>Productor</option>
+                  <option>Comprador</option>
+                  <option>Consignataria</option>
+                  <option>Transportista</option>
+                  <option>Proveedor</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              Observaciones
+              <textarea id="client-notes" rows="3"></textarea>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="primary-button">Guardar cliente</button>
+            </div>
+            <p class="form-message" id="client-message"></p>
+
+            <div class="renspa-panel" id="renspa-panel" hidden>
+              <div class="panel-head">
+                <h2>RENSPA / establecimientos</h2>
+              </div>
+              <div class="renspa-list" id="renspa-list"></div>
+              <div class="form-grid">
+                <label>
+                  Establecimiento
+                  <input id="renspa-name" placeholder="Ej. Campo principal">
+                </label>
+                <label>
+                  RENSPA
+                  <input id="renspa-value" placeholder="Ej. 01.005.0.00000/00">
+                </label>
+              </div>
+              <label>
+                Observacion
+                <input id="renspa-notes">
+              </label>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="renspa-add">Agregar RENSPA</button>
+              </div>
+              <p class="form-message" id="renspa-message"></p>
+            </div>
+          </form>
+
+          <div class="client-list-block">
+            <div class="toolbar">
+              <input id="client-search" type="search" placeholder="Buscar cliente, CUIT o tipo">
+              <button type="button" class="ghost-button" id="client-show-all">Ver todos</button>
+            </div>
+            <p class="subtle" id="client-list-hint">Escriba para buscar un cliente o use Ver todos.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>CUIT</th>
+                    <th>Tipo</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="clientes-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="operaciones" class="view">
+        <div class="panel operation-screen-toolbar">
+          <div>
+            <h2>Operaciones</h2>
+            <p class="subtle">Inicie una carga nueva o abra una operacion existente para continuarla.</p>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="primary-button" id="operation-start-new">Nueva operacion</button>
+            <button type="button" class="ghost-button" id="operation-show-history">Ver operaciones cargadas</button>
+          </div>
+        </div>
+        <div class="operation-layout workspace-mode" id="operation-layout">
+          <form class="panel operation-form" id="operation-form">
+            <div class="panel-head">
+              <div>
+                <h2 id="operation-form-title">Cargar nueva operacion</h2>
+                <p class="subtle" id="operation-form-subtitle">Use este formulario para iniciar una operacion nueva.</p>
+              </div>
+              <button type="button" class="ghost-button" id="operation-new">Cargar nueva</button>
+            </div>
+            <input type="hidden" id="operation-id">
+            <div class="form-grid">
+              <label>
+                Fecha
+                <input id="operation-date" type="date" required>
+              </label>
+              <label>
+                Fecha carga
+                <input id="operation-load-date" type="date">
+              </label>
+              <label>
+                Tipo
+                <select id="operation-type">
+                  <option>DIRECTA</option>
+                  <option>CONSIGNADA</option>
+                </select>
+              </label>
+              <label class="check-label">
+                <input id="operation-anticipated" type="checkbox">
+                Venta anticipada / operacion a termino
+              </label>
+            </div>
+            <label>
+              Destino
+              <select id="operation-destination">
+                <option>INVERNADA</option>
+                <option>CRIA</option>
+                <option>FAENA</option>
+                <option>REPRODUCCION</option>
+              </select>
+            </label>
+            <label>
+              Modalidad de precio
+              <select id="operation-frigo-mode">
+                <option value="NO">Operacion normal</option>
+                <option value="SI">Frigorifico: precio final con IVA incluido</option>
+              </select>
+            </label>
+
+            <div class="party-block">
+              <h2>Vendedor / productor</h2>
+              <label>
+                Cliente
+                <input id="operation-seller-name" autocomplete="off">
+              </label>
+              <input type="hidden" id="operation-seller-id">
+              <div class="suggestions" id="operation-seller-suggestions" hidden></div>
+              <label>
+                RENSPA origen
+                <select id="operation-renspa-origin-select"></select>
+              </label>
+              <label>
+                RENSPA manual
+                <input id="operation-renspa-origin-manual" placeholder="Opcional">
+              </label>
+              <label class="check-label">
+                <input id="operation-save-renspa-origin" type="checkbox">
+                Guardar RENSPA en el vendedor
+              </label>
+            </div>
+
+            <div class="party-block">
+              <h2>Comprador</h2>
+              <label>
+                Cliente
+                <input id="operation-buyer-name" autocomplete="off">
+              </label>
+              <input type="hidden" id="operation-buyer-id">
+              <div class="suggestions" id="operation-buyer-suggestions" hidden></div>
+              <label>
+                RENSPA destino
+                <select id="operation-renspa-destination-select"></select>
+              </label>
+              <label>
+                RENSPA manual
+                <input id="operation-renspa-destination-manual" placeholder="Opcional">
+              </label>
+              <label class="check-label">
+                <input id="operation-save-renspa-destination" type="checkbox">
+                Guardar RENSPA en el comprador
+              </label>
+            </div>
+
+            <div class="party-block" id="operation-consignee-block" hidden>
+              <h2>Consignataria</h2>
+              <label>
+                Cliente
+                <input id="operation-consignee-name" autocomplete="off">
+              </label>
+              <input type="hidden" id="operation-consignee-id">
+              <div class="suggestions" id="operation-consignee-suggestions" hidden></div>
+            </div>
+
+            <label>
+              DTE
+              <input id="operation-dte">
+            </label>
+            <label>
+              Condiciones / minuta
+              <textarea id="operation-conditions" rows="3"></textarea>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="primary-button">Guardar y continuar a venta</button>
+            </div>
+            <p class="form-message" id="operation-message"></p>
+          </form>
+
+          <div class="operation-list-block">
+            <div class="panel workflow-empty" id="operation-workflow-empty">
+              <h2>Alta guiada</h2>
+              <p>Complete los datos principales y continúe a la carga de venta.</p>
+            </div>
+            <div class="workflow-steps" id="operation-workflow-steps" hidden>
+              <button type="button" class="workflow-step" data-operation-step="operation"><strong>1</strong><span>Operacion</span></button>
+              <button type="button" class="workflow-step" data-operation-step="sale"><strong>2</strong><span>Venta</span></button>
+              <button type="button" class="workflow-step" data-operation-step="liquidation"><strong>3</strong><span>Liquidacion</span></button>
+              <button type="button" class="workflow-step" data-operation-step="report"><strong>4</strong><span>Reporte</span></button>
+            </div>
+            <div class="panel sale-panel" id="sale-panel" hidden>
+              <div class="panel-head">
+                <div>
+                  <h2>Carga de venta</h2>
+                  <p class="subtle" id="sale-operation-label"></p>
+                </div>
+                <button type="button" class="ghost-button" data-operation-step="liquidation">Continuar a liquidacion</button>
+              </div>
+              <section class="sale-section">
+                <div class="section-head">
+                  <h3>Detalle cargado</h3>
+                  <span id="sale-lines-summary"></span>
+                </div>
+                <div class="table-wrap compact-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Categoria</th>
+                        <th>Cab.</th>
+                        <th>Kg vend.</th>
+                        <th>Precio</th>
+                        <th>Importe vend.</th>
+                      </tr>
+                    </thead>
+                    <tbody id="sale-lines-body"></tbody>
+                  </table>
+                </div>
+              </section>
+              <section class="sale-section">
+                <div class="section-head">
+                  <h3>Agregar nueva linea</h3>
+                </div>
+              <form class="sale-form" id="sale-form">
+                <label>
+                  Categoria
+                  <input id="sale-category" autocomplete="off">
+                </label>
+                <div class="suggestions" id="sale-category-suggestions" hidden></div>
+                <div class="form-grid">
+                  <label>
+                    Cabezas
+                    <input id="sale-heads" type="number" min="0" step="1">
+                  </label>
+                  <label>
+                    Kg bruto
+                    <input id="sale-kg-bruto" type="number" min="0" step="0.01">
+                  </label>
+                </div>
+                <div class="form-grid">
+                  <label>
+                    Desbaste vendedor %
+                    <input id="sale-desbaste-vend" type="number" step="0.01" value="0">
+                  </label>
+                  <label>
+                    Kg neto vendedor
+                    <input id="sale-kg-neto-vend" type="number" step="0.01" placeholder="Automatico">
+                  </label>
+                </div>
+                <div class="form-grid">
+                  <label>
+                    Tipo precio
+                    <select id="sale-tipo-precio-vend">
+                      <option>KG</option>
+                      <option>CAB</option>
+                    </select>
+                  </label>
+                  <label>
+                    Precio vendedor
+                    <input id="sale-precio-vend" class="money-input" inputmode="decimal">
+                  </label>
+                </div>
+                <div class="advanced-subpanel sale-advanced-box">
+                  <h3>Promedio y TAB vendedor</h3>
+                  <div class="form-grid">
+                    <label>Promedio vendedor<input id="sale-prom-vend" readonly></label>
+                    <label>TAB vendedor<input id="sale-tab-vend" list="sale-tab-rules-list" placeholder="Opcional"></label>
+                    <label>Precio final vendedor<input id="sale-precio-final-vend" readonly></label>
+                    <label>Importe vendedor<input id="sale-importe-vend" readonly></label>
+                  </div>
+                </div>
+                <label class="check-label">
+                  <input id="sale-buyer-different" type="checkbox">
+                  Comprador con kilos/precio diferente
+                </label>
+                <div class="buyer-diff-grid" id="sale-buyer-diff" hidden>
+                  <div class="form-grid">
+                    <label>
+                      Desbaste comprador %
+                      <input id="sale-desbaste-comp" type="number" step="0.01" value="0">
+                    </label>
+                    <label>
+                      Kg comprador
+                      <input id="sale-kg-comp" type="number" step="0.01" placeholder="Automatico">
+                    </label>
+                  </div>
+                  <div class="form-grid">
+                    <label>
+                      Tipo precio comprador
+                      <select id="sale-tipo-precio-comp">
+                        <option>KG</option>
+                        <option>CAB</option>
+                      </select>
+                    </label>
+                    <label>
+                      Precio comprador
+                      <input id="sale-precio-comp" class="money-input" inputmode="decimal">
+                    </label>
+                  </div>
+                  <div class="advanced-subpanel">
+                    <h3>Promedio y TAB comprador</h3>
+                    <div class="form-grid">
+                      <label>Promedio comprador<input id="sale-prom-comp" readonly></label>
+                      <label>TAB comprador<input id="sale-tab-comp" list="sale-tab-rules-list" placeholder="Opcional"></label>
+                      <label>Precio final comprador<input id="sale-precio-final-comp" readonly></label>
+                      <label>Importe comprador<input id="sale-importe-comp" readonly></label>
+                    </div>
+                  </div>
+                </div>
+                <div class="advanced-subpanel">
+                  <h3>Correccion excepcional del calculo</h3>
+                  <p class="subtle">Usar sólo si la liquidación recibida toma otros kilos, promedio, precio final o importe. Si queda vacío, calcula automático.</p>
+                  <div class="form-grid">
+                    <label class="check-line"><input id="sale-use-real-kg-vend" type="checkbox"> Usar kg reales con desbaste vendedor</label>
+                    <label>Kg usado vendedor<input id="sale-kg-calc-vend" inputmode="decimal" placeholder="Automatico"></label>
+                    <label>Promedio usado vendedor<input id="sale-prom-used-vend" inputmode="decimal" placeholder="Automatico"></label>
+                    <label>Precio final manual vendedor<input id="sale-final-price-manual-vend" class="money-input" inputmode="decimal" placeholder="Automatico"></label>
+                    <label>Importe final manual vendedor<input id="sale-amount-manual-vend" class="money-input" inputmode="decimal" placeholder="Automatico"></label>
+                  </div>
+                  <div class="form-grid buyer-correction" id="sale-buyer-correction" hidden>
+                    <label class="check-line"><input id="sale-use-real-kg-comp" type="checkbox"> Usar kg reales con desbaste comprador</label>
+                    <label>Kg usado comprador<input id="sale-kg-calc-comp" inputmode="decimal" placeholder="Automatico"></label>
+                    <label>Promedio usado comprador<input id="sale-prom-used-comp" inputmode="decimal" placeholder="Automatico"></label>
+                    <label>Precio final manual comprador<input id="sale-final-price-manual-comp" class="money-input" inputmode="decimal" placeholder="Automatico"></label>
+                    <label>Importe final manual comprador<input id="sale-amount-manual-comp" class="money-input" inputmode="decimal" placeholder="Automatico"></label>
+                  </div>
+                </div>
+                <div class="advanced-subpanel tab-quick-add">
+                  <h3>Agregar TAB sin salir de la operacion</h3>
+                  <div class="form-grid">
+                    <label>Codigo TAB<input id="tab-code" placeholder="Ej.: TAB230 C/TOPE -5"></label>
+                    <label>Promedio desde<input id="tab-min" inputmode="decimal"></label>
+                    <label>Promedio hasta<input id="tab-max" inputmode="decimal" placeholder="Vacio sin tope"></label>
+                    <label>Ajuste por kg<input id="tab-adjustment" inputmode="decimal" placeholder="-5"></label>
+                    <label>Paso kg<input id="tab-step" inputmode="decimal" value="1"></label>
+                    <label>Modo calculo
+                      <select id="tab-mode">
+                        <option value="ENTERO_ABAJO">Entero hacia abajo</option>
+                        <option value="DECIMAL">Decimal</option>
+                        <option value="ENTERO_ARRIBA">Entero hacia arriba</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="form-actions"><button type="button" class="ghost-button" id="tab-save">Guardar TAB</button></div>
+                  <p class="form-message" id="tab-message"></p>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="primary-button">Agregar linea</button>
+                </div>
+                <p class="form-message" id="sale-message"></p>
+              </form>
+              <datalist id="sale-tab-rules-list"></datalist>
+              </section>
+              <section class="sale-section category-admin">
+                <div class="section-head">
+                  <div>
+                    <h3>Administrar categorias</h3>
+                    <p class="subtle">Corrija o retire de la lista las categorias incompletas. El historial de ventas cargadas no se modifica.</p>
+                  </div>
+                  <button type="button" class="ghost-button" id="category-admin-toggle">Abrir listado</button>
+                </div>
+                <div id="category-admin-panel" hidden>
+                  <input id="category-admin-search" type="search" placeholder="Buscar categoria">
+                  <div class="table-wrap compact-table">
+                    <table>
+                      <thead><tr><th>Categoria</th><th></th></tr></thead>
+                      <tbody id="category-admin-body"></tbody>
+                    </table>
+                  </div>
+                  <p class="form-message" id="category-admin-message"></p>
+                </div>
+              </section>
+            </div>
+            <div class="panel liquidation-panel" id="liquidation-panel" hidden>
+              <div class="panel-head">
+                <div>
+                  <h2>Liquidacion</h2>
+                  <p class="subtle">Facturado y efectivo se mantienen separados.</p>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" data-operation-step="sale">Volver a venta</button>
+                  <button type="button" class="ghost-button" data-operation-step="report">Ver reporte</button>
+                </div>
+              </div>
+              <form class="liquidation-form" id="liquidation-form">
+                <div class="form-grid liquidation-common-grid">
+                  <label>
+                    Importe bruto vendedor
+                    <input id="liq-bruto-vend" readonly>
+                  </label>
+                  <label>
+                    Importe bruto comprador
+                    <input id="liq-bruto-comp" readonly>
+                  </label>
+                  <label class="wide-field">
+                    Importe a liquidar comun / facturado
+                    <input id="liq-facturado" class="money-input" inputmode="decimal">
+                  </label>
+                  <label class="consigned-only">
+                    La consignataria factura / liquida a
+                    <select id="liq-consignee-settled-party">
+                      <option value="VENDEDOR">Vendedor / productor</option>
+                      <option value="COMPRADOR">Comprador</option>
+                      <option value="AMBAS">Ambas partes</option>
+                      <option value="NINGUNA">Ninguna / solo comision propia</option>
+                    </select>
+                  </label>
+                  <label>
+                    Fecha de carga - base de vencimientos
+                    <input id="liq-operation-date" readonly>
+                  </label>
+                  <label>
+                    Modo efectivo
+                    <select id="liq-cash-mode">
+                      <option value="MONTO">Por monto fijo</option>
+                      <option value="PORCENTAJE">Por porcentaje</option>
+                    </select>
+                  </label>
+                  <label>
+                    % efectivo
+                    <input id="liq-cash-percent" inputmode="decimal" placeholder="0">
+                  </label>
+                  <label>
+                    Vencimiento facturado vendedor
+                    <input id="liq-plan-fact-prod" placeholder="30-60 o 54,75@35-45,25@65">
+                  </label>
+                  <label>
+                    Vencimiento facturado comprador
+                    <input id="liq-plan-fact-comp" placeholder="30-60 o $ 63.462.570,04@35">
+                  </label>
+                  <label>
+                    Vencimiento efectivo vendedor
+                    <input id="liq-plan-cash-prod" placeholder="0-30">
+                  </label>
+                  <label>
+                    Vencimiento efectivo comprador
+                    <input id="liq-plan-cash-comp" placeholder="0-30">
+                  </label>
+                </div>
+                <p class="subtle">Los vencimientos admiten dias, porcentajes con decimales o importes exactos: 30-60, 54,75@35-45,25@65 o $ 63.462.570,04@35.</p>
+                <div class="due-grid" id="liq-due-grid"></div>
+
+                <div class="special-operation-box" id="frigo-special-box" hidden>
+                  <div class="section-head">
+                    <h3>Calculo vendedor por venta a frigorifico con IVA incluido</h3>
+                  </div>
+                  <div class="economic-box">
+                    <div><span>Imp. neto final con IVA</span><input id="frigo-neto-final" class="money-input" inputmode="decimal"></div>
+                    <div><span>Imp. bruto OP sin IVA</span><strong id="frigo-bruto-sin-iva">$ 0,00</strong></div>
+                    <div><span>Imp. bruto liquidado</span><strong id="frigo-bruto-liquidado">$ 0,00</strong></div>
+                    <div><span>IVA s/bruto 10,5%</span><strong id="frigo-iva-liquidacion">$ 0,00</strong></div>
+                    <div><span>Efectivo sin IVA</span><strong id="frigo-efectivo-sin-iva">$ 0,00</strong></div>
+                    <div><span>IVA sobre efectivo 10,5%</span><strong id="frigo-iva-efectivo">$ 0,00</strong></div>
+                    <div><span>Efectivo + IVA</span><strong id="frigo-efectivo-con-iva">$ 0,00</strong></div>
+                    <div><span>Total control</span><strong id="frigo-total-control">$ 0,00</strong></div>
+                  </div>
+                </div>
+
+                <div class="special-operation-box warning" id="anticipada-special-box" hidden>
+                  <strong>Venta anticipada / operacion a termino</strong>
+                  <span>Esta operacion requiere circuito especial de anticipo, carga real y ajuste final. No debe liquidarse como operacion comun.</span>
+                </div>
+
+                <div class="advanced-subpanel consigned-only internal-cc-box">
+                  <h3>A cobrar a consignataria</h3>
+                  <p class="subtle">Dato interno para futura cuenta corriente. No modifica los importes del reporte de vendedor ni comprador.</p>
+                  <div class="form-grid">
+                    <label>% comision consignataria<input id="liq-consignee-commission-pct" inputmode="decimal"></label>
+                    <label>Comision a cobrar<input id="liq-consignee-commission" readonly></label>
+                    <label>Concepto ajuste<input id="liq-consignee-adjustment-concept" placeholder="Diferencia, margen o ajuste"></label>
+                    <label>Ajuste a cobrar<input id="liq-consignee-adjustment" class="money-input" inputmode="decimal"></label>
+                    <label class="wide-field">Total a cobrar a consignataria<input id="liq-consignee-total" readonly></label>
+                  </div>
+                </div>
+
+                <div class="liquidation-columns">
+                  <div class="party-block">
+                    <h2>Vendedor / productor</h2>
+                    <label>
+                      Comprobante
+                      <input id="liq-comprobante-prod">
+                    </label>
+                    <label>
+                      IVA liquidacion
+                      <input id="liq-iva-prod" class="money-input" inputmode="decimal">
+                    </label>
+                    <label class="direct-only check-line">
+                      <input id="liq-direct-no-iva" type="checkbox">
+                      Sin IVA / monotributista
+                    </label>
+                    <label>
+                      % comision propia sobre facturado
+                      <input id="liq-comision-fact-prod-pct" inputmode="decimal" value="0">
+                    </label>
+                    <label>
+                      Comision propia sobre facturado
+                      <input id="liq-comision-fact-prod" class="money-input" inputmode="decimal" value="0" readonly>
+                    </label>
+                    <div class="advanced-subpanel consigned-only">
+                      <h3>Gastos de liquidacion consignada</h3>
+                      <div class="form-grid">
+                        <label>Comision<input id="liq-exp-comision-prod" class="money-input" inputmode="decimal"></label>
+                        <label>Fondo de garantia<input id="liq-exp-fondo-gtia-prod" class="money-input" inputmode="decimal"></label>
+                        <label>Control y entrega<input id="liq-exp-control-prod" class="money-input" inputmode="decimal"></label>
+                        <label>Fondo comp. de gastos<input id="liq-exp-fondo-comp-prod" class="money-input" inputmode="decimal"></label>
+                        <label>Ingresos Brutos<input id="liq-exp-iibb-prod" class="money-input" inputmode="decimal"></label>
+                        <label>Retencion Ganancias<input id="liq-exp-ganancias-prod" class="money-input" inputmode="decimal"></label>
+                        <label>Otros gastos<input id="liq-exp-otros-prod" class="money-input" inputmode="decimal"></label>
+                        <label>IVA s/gastos<input id="liq-exp-iva-gastos-prod" class="money-input" inputmode="decimal"></label>
+                      </div>
+                      <label>Observaciones gastos<input id="liq-exp-observ-prod"></label>
+                    </div>
+                    <div class="result-box">
+                      <span>Neto liquidacion</span>
+                      <strong id="liq-neto-liq-prod">$ 0,00</strong>
+                    </div>
+                    <div class="advanced-subpanel cash-block">
+                      <h3>Efectivo</h3>
+                      <label>Importe efectivo<input id="liq-efectivo-prod" class="money-input" inputmode="decimal"></label>
+                      <label class="frigo-only">IVA sobre efectivo<input id="liq-cash-iva-prod" readonly></label>
+                      <label class="frigo-only">Efectivo + IVA<input id="liq-cash-with-iva-prod" readonly></label>
+                      <label>Concepto gasto efectivo<input id="liq-cash-exp-concept-prod" placeholder="Ej.: flete o descuento"></label>
+                      <label>Gasto descontado del efectivo<input id="liq-cash-exp-prod" class="money-input" inputmode="decimal"></label>
+                      <label>% comision sobre efectivo<input id="liq-comision-efect-prod-pct" inputmode="decimal" value="0"></label>
+                      <label>Comision sobre efectivo<input id="liq-comision-efect-prod" class="money-input" inputmode="decimal" value="0" readonly></label>
+                    </div>
+                    <div class="result-box total">
+                      <span>Neto total operacion</span>
+                      <strong id="liq-neto-total-prod">$ 0,00</strong>
+                    </div>
+                    <label class="direct-only">
+                      Detalle o instruccion para liquidar al vendedor
+                      <textarea id="liq-direct-notes" rows="3"></textarea>
+                    </label>
+                  </div>
+
+                  <div class="party-block">
+                    <h2>Comprador</h2>
+                    <label class="direct-only check-line">
+                      <input id="liq-different-buyer-receipt" type="checkbox">
+                      Comprobante comprador diferente
+                    </label>
+                    <label>
+                      Comprobante
+                      <input id="liq-comprobante-comp">
+                    </label>
+                    <label>
+                      IVA liquidacion
+                      <input id="liq-iva-comp" class="money-input" inputmode="decimal">
+                    </label>
+                    <label>
+                      % comision propia sobre facturado
+                      <input id="liq-comision-fact-comp-pct" inputmode="decimal" value="0">
+                    </label>
+                    <label>Comision propia sobre facturado<input id="liq-comision-fact-comp" class="money-input" inputmode="decimal" value="0" readonly></label>
+                    <div class="advanced-subpanel" id="liq-buyer-expenses" hidden>
+                      <h3>Gastos de liquidacion consignada comprador</h3>
+                      <div class="form-grid">
+                        <label>Gastos de procesamiento<input id="liq-exp-procesamiento-comp" class="money-input" inputmode="decimal"></label>
+                        <label>Otros gastos 1<input id="liq-exp-otros-1-comp" class="money-input" inputmode="decimal"></label>
+                        <label>Otros gastos 2<input id="liq-exp-otros-2-comp" class="money-input" inputmode="decimal"></label>
+                      </div>
+                      <label>Observaciones gastos<input id="liq-exp-observ-comp"></label>
+                    </div>
+                    <div class="result-box">
+                      <span>Neto liquidacion</span>
+                      <strong id="liq-neto-liq-comp">$ 0,00</strong>
+                    </div>
+                    <div class="advanced-subpanel cash-block">
+                      <h3>Efectivo</h3>
+                      <label>Importe efectivo<input id="liq-efectivo-comp" class="money-input" inputmode="decimal"></label>
+                      <label>% comision sobre efectivo<input id="liq-comision-efect-comp-pct" inputmode="decimal" value="0"></label>
+                      <label>Comision sobre efectivo<input id="liq-comision-efect-comp" class="money-input" inputmode="decimal" value="0" readonly></label>
+                    </div>
+                    <div class="result-box total">
+                      <span>Neto total operacion</span>
+                      <strong id="liq-neto-total-comp">$ 0,00</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="party-block">
+                  <div class="panel-head">
+                    <h2>Detalle para liquidar</h2>
+                    <button type="button" class="ghost-button" id="liq-rebuild-detail">Recalcular detalle</button>
+                  </div>
+                  <p class="subtle">Sale del importe facturado comun. Sirve para informar al comprador como tiene que salir facturado al vendedor.</p>
+                  <div class="table-wrap compact-table">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Cant.</th>
+                          <th>Categoria</th>
+                          <th>Precio/cab.</th>
+                          <th>Neto</th>
+                          <th>IVA</th>
+                          <th>Bruto</th>
+                        </tr>
+                      </thead>
+                      <tbody id="liq-detail-body"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <label>
+                  Observaciones
+                  <textarea id="liq-observaciones" rows="3"></textarea>
+                </label>
+                <div class="form-actions">
+                  <button type="submit" class="primary-button">Guardar liquidacion</button>
+                  <button type="button" class="ghost-button" data-operation-step="report">Ver reporte</button>
+                </div>
+                <p class="form-message" id="liquidation-message"></p>
+              </form>
+            </div>
+            <div class="panel report-panel" id="report-panel" hidden>
+              <div class="panel-head">
+                <h2>Reporte imprimible</h2>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" data-operation-step="liquidation">Volver a liquidacion</button>
+                  <button type="button" class="primary-button" id="print-report">Imprimir / PDF</button>
+                </div>
+              </div>
+              <div class="report-sheet" id="report-sheet"></div>
+            </div>
+            <div class="table-wrap operation-history-wrap" id="operation-history-wrap" hidden>
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Vendedor</th>
+                    <th>Comprador</th>
+                    <th>Total</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="operaciones-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="cuenta" class="view">
+        <div class="panel">
+          <h2>Resumen de cuenta corriente</h2>
+          <div class="cc-grid">
+            <div>
+              <span>Total movimientos externos</span>
+              <strong id="cc-total-movimientos">-</strong>
+            </div>
+            <div>
+              <span>Total pagos / cobros</span>
+              <strong id="cc-total-pagos">-</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel cc-workspace">
+          <div class="panel-head">
+            <div>
+              <h2>Estado por cliente</h2>
+              <p class="subtle">Positivo: importe a cobrar. Negativo: importe a pagar.</p>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="primary-button" id="cc-open-payment">Registrar pago / cobro</button>
+              <button type="button" class="ghost-button" id="cc-open-external">Movimiento externo</button>
+            </div>
+          </div>
+          <div class="cc-report-toolbar">
+            <label>
+              Reporte para PDF
+              <select id="cc-report-type">
+                <option value="SALDOS">Estado de cuenta completo</option>
+                <option value="VENCIMIENTOS">Vencimientos pendientes</option>
+                <option value="PENDIENTES">Movimientos pendientes</option>
+              </select>
+            </label>
+            <button type="button" class="ghost-button" id="cc-print-report">Generar reporte / PDF</button>
+          </div>
+          <div class="form-grid cc-filters">
+            <label>Buscar cliente<input id="cc-client-search" list="cc-client-list" autocomplete="off" placeholder="Escribir razon social, CUIT o concepto"></label>
+            <label>Estado<select id="cc-status-filter"><option value="TODOS">Todos</option><option value="PENDIENTE">Pendientes</option><option value="PARCIAL">Parciales</option><option value="IMPUTADO">Imputados</option><option value="ANULADO">Anulados</option></select></label>
+            <label>Concepto<select id="cc-concept-filter"><option value="TODOS">Todos</option><option value="COMISION">Comisiones pendientes</option></select></label>
+            <label>Vencimiento<select id="cc-due-filter"><option value="TODOS">Todos</option><option value="VENCIDOS">Vencidos</option><option value="7">Proximos 7 dias</option><option value="15">Proximos 15 dias</option><option value="30">Proximos 30 dias</option></select></label>
+          </div>
+          <datalist id="cc-client-list"></datalist>
+          <div class="cc-entry-panel" id="cc-external-panel" hidden>
+            <div class="panel-head"><h3>Movimiento externo</h3><button type="button" class="ghost-button" id="cc-close-external">Cerrar</button></div>
+            <div class="form-grid">
+              <label>Cliente<input id="cc-external-client" list="cc-client-list"></label>
+              <label>Tipo<select id="cc-external-direction"><option value="PAGAR">A pagar al cliente</option><option value="COBRAR">A cobrar al cliente</option></select></label>
+              <label>Concepto<input id="cc-external-concept" value="Venta Mercado Agroganadero"></label>
+              <label>Comprobante<input id="cc-external-receipt" placeholder="Liquidacion / factura"></label>
+              <label>Fecha venta<input id="cc-external-date" type="date"></label>
+              <label>Vencimiento<input id="cc-external-due" type="date"></label>
+              <label>Importe<input id="cc-external-amount" class="money-input" inputmode="decimal"></label>
+              <label>Observacion<input id="cc-external-notes"></label>
+            </div>
+            <div class="form-actions"><button type="button" class="primary-button" id="cc-save-external">Guardar movimiento externo</button></div>
+            <p class="form-message" id="cc-external-message"></p>
+          </div>
+          <div class="cc-entry-panel" id="cc-payment-panel" hidden>
+            <div class="panel-head"><h3>Registrar pago / cobro</h3><button type="button" class="ghost-button" id="cc-close-payment">Cerrar</button></div>
+            <div class="form-grid">
+              <label>Tipo<select id="cc-payment-type"><option value="COBRO">Cobro recibido</option><option value="PAGO">Pago realizado</option></select></label>
+              <label>Cliente<input id="cc-payment-client" list="cc-client-list"></label>
+              <label>Fecha<input id="cc-payment-date" type="date"></label>
+              <label>Importe<input id="cc-payment-amount" class="money-input" inputmode="decimal"></label>
+              <label>Medio<select id="cc-payment-method"><option>Transferencia</option><option>E-cheq</option><option>Cheque</option><option>Efectivo</option><option>Otro</option></select></label>
+              <label>Referencia<input id="cc-payment-reference" placeholder="Comprobante, recibo o detalle"></label>
+              <label>Observacion<input id="cc-payment-notes"></label>
+            </div>
+            <div class="cc-subpanel">
+              <div class="panel-head"><h3>Detalle de instrumentos</h3><span class="subtle" id="cc-instrument-summary">Sin instrumentos cargados</span></div>
+              <div class="form-grid">
+                <label>Medio<select id="cc-instrument-method"><option>E-cheq</option><option>Cheque</option><option>Transferencia</option><option>Efectivo</option><option>Otro</option></select></label>
+                <label>Vencimiento / fecha<input id="cc-instrument-date" type="date"></label>
+                <label>Importe<input id="cc-instrument-amount" class="money-input" inputmode="decimal"></label>
+                <label>Referencia<input id="cc-instrument-reference" placeholder="Numero, banco o detalle"></label>
+              </div>
+              <div class="form-actions"><button type="button" class="ghost-button" id="cc-add-instrument">Agregar instrumento</button></div>
+              <div class="table-wrap compact-table"><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th><th></th></tr></thead><tbody id="cc-instrument-body"></tbody></table></div>
+            </div>
+            <div class="cc-subpanel cc-counterparty-option">
+              <div class="cc-counterparty-heading">
+                <strong>Imputacion doble</strong>
+                <span>Opcional</span>
+              </div>
+              <label class="check-field cc-counterparty-toggle"><input type="checkbox" id="cc-counterparty-enabled"> Registrar pago / cobro simultaneo para la contraparte</label>
+              <div id="cc-counterparty-panel" hidden>
+                <div class="form-grid">
+                  <label>Cliente contraparte<input id="cc-counterparty-client" list="cc-client-list" placeholder="Ej.: productor que recibe el pago"></label>
+                  <label>Tipo contraparte<select id="cc-counterparty-type"><option value="PAGO">Pago realizado</option><option value="COBRO">Cobro recibido</option></select></label>
+                </div>
+                <div class="panel-head"><h3>Imputar pendientes de contraparte</h3><span class="subtle" id="cc-counterparty-summary">Seleccione una contraparte</span></div>
+                <div class="table-wrap compact-table"><table><thead><tr><th></th><th>Vto.</th><th>Concepto</th><th>Comprobante</th><th>Importe</th></tr></thead><tbody id="cc-counterparty-body"></tbody></table></div>
+              </div>
+            </div>
+            <div class="cc-subpanel">
+              <div class="panel-head"><h3>Imputar a movimientos pendientes</h3><span class="subtle" id="cc-imputation-summary">Seleccione un cliente</span></div>
+              <div class="table-wrap compact-table"><table><thead><tr><th></th><th>Vto.</th><th>Concepto</th><th>Comprobante</th><th>Importe</th></tr></thead><tbody id="cc-imputation-body"></tbody></table></div>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="primary-button" id="cc-save-payment">Guardar pago / cobro</button>
+              <button type="button" class="ghost-button" id="cc-save-payment-receipt">Guardar y generar comprobante</button>
+            </div>
+            <p class="form-message" id="cc-payment-message"></p>
+          </div>
+          <div class="cc-summary-strip">
+            <div><span>Cliente</span><strong id="cc-selected-client">Todos</strong></div>
+            <div><span>Saldo</span><strong id="cc-selected-balance">$ 0,00</strong></div>
+            <div><span>Movimientos</span><strong id="cc-selected-count">0</strong></div>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Vto.</th>
+                  <th>Cliente</th>
+                  <th>Concepto</th>
+                  <th>Comprobante</th>
+                  <th>Operacion</th>
+                  <th>Importe</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="cc-movements-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Vencimientos pendientes</h2>
+              <p class="subtle">Ordenados por fecha de vencimiento.</p>
+            </div>
+            <button type="button" class="ghost-button" id="cc-print-due-report">Reporte vencimientos</button>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Vto.</th>
+                  <th>Cliente</th>
+                  <th>Concepto</th>
+                  <th>Comprobante</th>
+                  <th>Importe</th>
+                </tr>
+              </thead>
+              <tbody id="cc-due-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

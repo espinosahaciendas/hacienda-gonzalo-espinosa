@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: hacienda-gonzalo-espinosa
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: AUTH_REQUIRED
+        value: "1"
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
