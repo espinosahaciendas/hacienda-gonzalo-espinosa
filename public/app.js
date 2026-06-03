@@ -157,35 +157,64 @@ function amountClass(value) {
   return Number(value || 0) < 0 ? "amount-negative" : "amount-positive";
 }
 
+function movementAccountEntities(movement) {
+  return [
+    movement.cliente,
+    movement.consignataria || (String(movement.origen || "").toUpperCase() === "CONSIGNATARIA" ? movement.cliente : "")
+  ].map(normalizeSearch).filter(Boolean);
+}
+
 function getExactCurrentAccountClient(query) {
   if (!query) return "";
-  return (state.cuenta.movimientos || []).some((movement) => normalizeSearch(movement.cliente) === query) ? query : "";
+  return (state.cuenta.movimientos || []).some((movement) => movementAccountEntities(movement).includes(query)) ? query : "";
+}
+
+function getExactCurrentAccountConsignee(query) {
+  if (!query) return "";
+  return (state.cuenta.movimientos || []).some((movement) => normalizeSearch(movement.consignataria || movement.cliente) === query) ? query : "";
+}
+
+function movementConsigneeKey(movement) {
+  return normalizeSearch(movement.consignataria || (String(movement.origen || "").toUpperCase() === "CONSIGNATARIA" ? movement.cliente : ""));
 }
 
 function matchesCurrentAccountClientSearch(movement, words, exactClient = "") {
-  if (exactClient) return normalizeSearch(movement.cliente) === exactClient;
+  if (exactClient) return movementAccountEntities(movement).includes(exactClient);
   if (!words.length) return true;
-  const haystack = normalizeSearch(`${movement.cliente} ${movement.comprobante} ${movement.concepto}`);
+  const haystack = normalizeSearch(`${movement.cliente} ${movement.contraparte || ""} ${movement.consignataria || ""} ${movement.comprobante} ${movement.concepto}`);
+  return words.every((word) => haystack.includes(word));
+}
+
+function matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee = "") {
+  const consignee = movementConsigneeKey(movement);
+  if (exactConsignee) return consignee === exactConsignee;
+  if (!words.length) return true;
+  const haystack = normalizeSearch(`${movement.consignataria || ""} ${movement.cliente || ""} ${movement.contraparte || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
   return words.every((word) => haystack.includes(word));
 }
 
 function renderCuentaCorriente() {
   if (!state.cuenta) return;
   const query = normalizeSearch($("#cc-client-search").value);
+  const viewMode = $("#cc-view-mode").value;
   const statusFilter = $("#cc-status-filter").value;
   const conceptFilter = $("#cc-concept-filter").value;
   const dueFilter = $("#cc-due-filter").value;
   const words = query.split(" ").filter(Boolean);
-  const exactClient = getExactCurrentAccountClient(query);
+  const exactClient = viewMode === "CONSIGNATARIA" ? "" : getExactCurrentAccountClient(query);
+  const exactConsignee = viewMode === "CONSIGNATARIA" ? getExactCurrentAccountConsignee(query) : "";
   const allMovements = state.cuenta.movimientos || [];
   const movements = allMovements.filter((movement) => {
-    if (!matchesCurrentAccountClientSearch(movement, words, exactClient)) return false;
+    const matchesEntity = viewMode === "CONSIGNATARIA"
+      ? matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee)
+      : matchesCurrentAccountClientSearch(movement, words, exactClient);
+    if (!matchesEntity) return false;
     if (statusFilter !== "TODOS" && String(movement.estado || "").toUpperCase() !== statusFilter) return false;
     if (conceptFilter === "COMISION" && (String(movement.origen || "").toUpperCase() !== "COMISION" || String(movement.estado || "").toUpperCase() === "IMPUTADO")) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
   const balance = movements.reduce((sum, movement) => sum + Number(movement.importe || 0), 0);
-  const selectedClient = words.length ? $("#cc-client-search").value.trim() : "Todos";
+  const selectedClient = words.length ? $("#cc-client-search").value.trim() : (viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos");
 
   $("#cc-selected-client").textContent = selectedClient || "Todos";
   $("#cc-selected-balance").textContent = moneyValue(balance);
@@ -198,7 +227,7 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.fecha || "-")}</td>
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
-          <td>${escapeHtml(movement.concepto || "-")}</td>
+          <td>${escapeHtml(viewMode === "CONSIGNATARIA" && movement.consignataria ? `${movement.concepto || "-"} | Consignataria: ${movement.consignataria}` : movement.concepto || "-")}</td>
           <td>${escapeHtml(movement.comprobante || "-")}</td>
           <td>${escapeHtml(movement.operacion || "-")}</td>
           <td class="${amountClass(movement.importe)}">${moneyValue(Math.sign(movement.importe) * Number(movement.importePendiente ?? Math.abs(movement.importe)))}</td>
@@ -209,7 +238,10 @@ function renderCuentaCorriente() {
     : `<tr><td colspan="9">Sin movimientos para esta busqueda.</td></tr>`;
 
   const due = (state.cuenta.vencimientos || []).filter((movement) => {
-    if (!matchesCurrentAccountClientSearch(movement, words, exactClient)) return false;
+    const matchesEntity = viewMode === "CONSIGNATARIA"
+      ? matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee)
+      : matchesCurrentAccountClientSearch(movement, words, exactClient);
+    if (!matchesEntity) return false;
     if (conceptFilter === "COMISION" && String(movement.origen || "").toUpperCase() !== "COMISION") return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
@@ -240,8 +272,16 @@ function matchesCurrentAccountDueFilter(movement, filter) {
 }
 
 function populateCurrentAccountClients() {
-  $("#cc-client-list").innerHTML = state.clientes
-    .map((client) => `<option value="${escapeHtml(client.nombre)}"></option>`)
+  const consignees = Array.from(new Set((state.cuenta?.movimientos || [])
+    .map((movement) => movement.consignataria || (String(movement.origen || "").toUpperCase() === "CONSIGNATARIA" ? movement.cliente : ""))
+    .filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, "es"));
+  const names = Array.from(new Set([
+    ...state.clientes.map((client) => client.nombre),
+    ...consignees
+  ].filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"));
+  $("#cc-client-list").innerHTML = names
+    .map((name) => `<option value="${escapeHtml(name)}"></option>`)
     .join("");
 }
 
@@ -2005,6 +2045,11 @@ async function init() {
   $("#operation-buyer-name").addEventListener("input", () => renderPartySuggestions("#operation-buyer-name", "#operation-buyer-suggestions", "#operation-buyer-id"));
   $("#operation-consignee-name").addEventListener("input", () => renderPartySuggestions("#operation-consignee-name", "#operation-consignee-suggestions", "#operation-consignee-id"));
   $("#cc-client-search").addEventListener("input", renderCuentaCorriente);
+  $("#cc-view-mode").addEventListener("change", () => {
+    const label = document.querySelector("label:has(#cc-client-search)");
+    if (label) label.childNodes[0].nodeValue = $("#cc-view-mode").value === "CONSIGNATARIA" ? "Buscar consignataria" : "Buscar cliente";
+    renderCuentaCorriente();
+  });
   $("#cc-status-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-concept-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-due-filter").addEventListener("change", renderCuentaCorriente);

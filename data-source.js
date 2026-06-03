@@ -179,6 +179,7 @@ function pushMovement(list, movement) {
     operacion: movement.operacion || "",
     paymentId: movement.paymentId || "",
     contraparte: movement.contraparte || "",
+    consignataria: movement.consignataria || "",
     importe: Math.round(Number(movement.importe || 0) * 100) / 100,
     estado: movement.estado || "PENDIENTE",
     observacion: movement.observacion || ""
@@ -191,6 +192,7 @@ function buildOperationAccountMovements(operation) {
   const operationDate = operation.fecha || draft.fecha || "";
   const dueBaseDate = draft.fechaCarga || operationDate;
   const typeText = `${operation.tipo || draft.tipo || "Operacion"} ${operation.destino || draft.destino || ""}`.trim();
+  const operationConsignee = operation.consignataria || draft.consignataria || "";
   const movements = [];
   const conceptWithCounterpart = (suffix, counterpart) => `${typeText} - ${suffix}${counterpart ? ` - por ${counterpart}` : ""}`;
 
@@ -207,6 +209,7 @@ function buildOperationAccountMovements(operation) {
         comprobante,
         operacion: operation.id,
         contraparte: counterpart,
+        consignataria: operationConsignee,
         importe: signedAmount,
         estado: "PENDIENTE"
       });
@@ -270,6 +273,7 @@ function buildOperationAccountMovements(operation) {
       comprobante,
       operacion: operation.id,
       contraparte: counterpart,
+      consignataria: operationConsignee,
       importe: Math.abs(Number(amount || 0)),
       estado: "PENDIENTE"
     });
@@ -319,6 +323,7 @@ function buildOperationAccountMovements(operation) {
       comprobante: liq.comprobanteProd || draft.comprobanteProd || liq.comprobanteComp || draft.comprobanteComp,
       operacion: operation.id,
       contraparte: operation.vendedor || draft.vendedor || operation.comprador || draft.comprador,
+      consignataria: draft.consignataria,
       importe: Math.abs(totalCobrarConsignataria),
       estado: "PENDIENTE"
     });
