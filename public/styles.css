@@ -337,6 +337,11 @@ label textarea {
   gap: 10px;
 }
 
+.sale-faena-line-grid {
+  grid-template-columns: minmax(95px, 0.65fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(190px, 1fr);
+  align-items: end;
+}
+
 .wide-field {
   grid-column: 1 / -1;
 }

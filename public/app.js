@@ -998,7 +998,6 @@ function syncFaenaSaleInputs() {
   $("#sale-tipo-precio-comp").value = "KG";
   $("#sale-tab-vend").value = "";
   $("#sale-tab-comp").value = "";
-  $("#sale-buyer-different").checked = false;
   $("#sale-use-real-kg-vend").checked = false;
   $("#sale-use-real-kg-comp").checked = false;
   $("#sale-kg-calc-vend").value = "";
@@ -1009,13 +1008,16 @@ function syncFaenaSaleInputs() {
 
 function syncSaleMode() {
   const faena = isFaenaSaleOperation();
+  const faenaBuyerDifferent = faena && $("#sale-buyer-different-faena").checked;
   $all(".sale-not-faena").forEach((element) => { element.hidden = faena; });
+  $all(".sale-faena-buyer-toggle").forEach((element) => { element.hidden = !faena; });
+  $all(".sale-buyer-kg-grid").forEach((element) => { element.hidden = faena; });
   $("#sale-tipo-precio-vend").disabled = faena;
   $("#sale-tipo-precio-comp").disabled = faena;
   $("#sale-buyer-different").disabled = faena;
   if (faena) {
     syncFaenaSaleInputs();
-    $("#sale-buyer-diff").hidden = true;
+    $("#sale-buyer-diff").hidden = !faenaBuyerDifferent;
     $("#sale-buyer-correction").hidden = true;
   }
 }
@@ -1741,7 +1743,7 @@ async function saveSaleLine(event) {
   setSaleMessage("Guardando linea...");
   syncSaleMode();
   const faena = isFaenaSaleOperation();
-  const buyerDifferent = faena ? false : $("#sale-buyer-different").checked;
+  const buyerDifferent = faena ? $("#sale-buyer-different-faena").checked : $("#sale-buyer-different").checked;
   const payload = {
     categoria: $("#sale-category").value,
     cabezas: $("#sale-heads").value,
@@ -1760,7 +1762,7 @@ async function saveSaleLine(event) {
     desbasteComp: faena ? "0" : $("#sale-desbaste-comp").value,
     kgComp: faena ? "" : $("#sale-kg-comp").value,
     tipoPrecioComp: faena ? "KG" : $("#sale-tipo-precio-comp").value,
-    precioComp: parseMoneyInput($("#sale-precio-comp").value),
+    precioComp: buyerDifferent ? parseMoneyInput($("#sale-precio-comp").value) : parseMoneyInput($("#sale-precio-vend").value),
     tabComp: faena ? "" : $("#sale-tab-comp").value,
     usarKgRealComp: faena ? false : $("#sale-use-real-kg-comp").checked,
     kgCalculoComp: faena ? "" : $("#sale-kg-calc-comp").value,
@@ -2235,6 +2237,7 @@ async function init() {
   $("#sale-form").addEventListener("submit", saveSaleLine);
   $("#liquidation-form").addEventListener("submit", saveLiquidation);
   $("#sale-buyer-different").addEventListener("change", syncBuyerDiff);
+  $("#sale-buyer-different-faena").addEventListener("change", syncBuyerDiff);
   $("#tab-save").addEventListener("click", saveTabRule);
   $("#sale-category").addEventListener("input", renderCategorySuggestions);
   $("#category-admin-toggle").addEventListener("click", () => {

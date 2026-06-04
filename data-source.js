@@ -1241,6 +1241,7 @@ class BackupDataSource {
     if (!Array.isArray(operation.draftData.saleLines)) operation.draftData.saleLines = [];
 
     const isFaena = normalizeKey(operation.destino || operation.draftData.destino).includes("FAENA");
+    const faenaBuyerDifferent = Boolean(input.compradorDiferente);
     const saleInput = isFaena
       ? {
           ...input,
@@ -1248,7 +1249,7 @@ class BackupDataSource {
           kgNetoVend: "",
           tipoPrecioVend: "KG",
           tabVend: "",
-          compradorDiferente: false,
+          compradorDiferente: faenaBuyerDifferent,
           desbasteComp: 0,
           kgComp: "",
           tipoPrecioComp: "KG",
