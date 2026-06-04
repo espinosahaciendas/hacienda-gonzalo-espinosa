@@ -8,7 +8,7 @@ const DEFAULT_APP_DATA_PATH = path.join(__dirname, "data", "local-db.json");
 function readJson(filePath) {
   const raw = fs.readFileSync(filePath, "utf8");
   const parsed = JSON.parse(raw);
-  return parsed.data || parsed;
+  return repairLegacyOperationAmounts(parsed.data || parsed);
 }
 
 function asArray(value) {
@@ -18,6 +18,85 @@ function asArray(value) {
 function writeJson(filePath, data) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+}
+
+function repairLegacyOperationAmounts(data) {
+  asArray(data.operations).forEach((operation) => repairLegacyOperation(operation));
+  return data;
+}
+
+function repairLegacyOperation(operation) {
+  const draft = operation.draftData || {};
+  const lines = asArray(draft.saleLines);
+  if (!lines.length) {
+    mirrorSinglePartyConsignedLiquidacion(operation);
+    return;
+  }
+
+  lines.forEach((line) => {
+    const tipoVend = normalizeText(line.tipoPrecioVend || draft.tipoPrecioVend || "KG").toUpperCase();
+    const tipoComp = normalizeText(line.tipoPrecioComp || draft.tipoPrecioComp || tipoVend).toUpperCase();
+    const cabezas = Number(line.cabezas || draft.cabezas || 0);
+    const kgBruto = parseMoney(line.kgBruto || draft.kgBruto);
+    const desbasteVend = parseMoney(line.desbasteVend || draft.desbasteVend);
+    const desbasteComp = parseMoney(line.desbasteComp || draft.desbasteComp);
+    const kgNetoVend = parseMoney(line.kgNetoVend) || roundCommercial(kgBruto * (1 - desbasteVend / 100));
+    const kgComp = parseMoney(line.kgComp) || roundCommercial(kgBruto * (1 - desbasteComp / 100));
+    const kgCalculoVend = parseMoney(line.kgCalculoVend) || kgNetoVend;
+    const kgCalculoComp = parseMoney(line.kgCalculoComp) || kgComp || kgCalculoVend;
+    const precioFinalVend = parseMoney(line.precioFinalManualVend || line.precioFinalVend);
+    const precioFinalComp = parseMoney(line.precioFinalManualComp || line.precioFinalComp) || precioFinalVend;
+    const precioBaseVend = parseMoney(line.precioVend || draft.precioVend) || precioFinalVend;
+    const precioBaseComp = parseMoney(line.precioComp || draft.precioComp) || precioFinalComp || precioBaseVend;
+
+    if (precioFinalVend && !Number(line.importeVend || 0)) {
+      line.precioVend = precioBaseVend;
+      line.precioFinalVend = precioFinalVend;
+      line.importeVend = tipoVend === "CAB" ? cabezas * precioFinalVend : kgCalculoVend * precioFinalVend;
+    }
+    if (precioFinalComp && !Number(line.importeComp || 0)) {
+      line.precioComp = precioBaseComp;
+      line.precioFinalComp = precioFinalComp;
+      line.importeComp = tipoComp === "CAB" ? cabezas * precioFinalComp : kgCalculoComp * precioFinalComp;
+    }
+  });
+
+  const totalVend = lines.reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
+  const totalComp = lines.reduce((sum, line) => sum + Number(line.importeComp || line.importeVend || 0), 0);
+  if (totalVend) {
+    draft.totalVentaVend = totalVend;
+    operation.total = formatMoney(totalVend);
+  }
+
+  const liq = draft.liquidacion;
+  if (liq && totalVend) {
+    liq.brutoVend = totalVend;
+    liq.brutoComp = totalComp || totalVend;
+    const detailIsEmpty = !asArray(liq.detalleLiquidar).length
+      || asArray(liq.detalleLiquidar).every((item) => !Number(item.importeNeto || 0) && !Number(item.precioCabeza || 0));
+    if (detailIsEmpty) liq.detalleLiquidar = buildDetalleLiquidar(lines, parseMoney(liq.importeFacturado || totalVend));
+  }
+  mirrorSinglePartyConsignedLiquidacion(operation);
+}
+
+function mirrorSinglePartyConsignedLiquidacion(operation) {
+  const draft = operation.draftData || {};
+  const liq = draft.liquidacion;
+  if (!liq) return;
+  const operationType = normalizeKey(operation.tipo || draft.tipo);
+  const consigned = operationType === "CONSIGNADA"
+    || (operationType.includes("ANTICIPADA") && Boolean(operation.consignataria || draft.consignataria));
+  if (!consigned) return;
+  const settledParty = normalizeKey(liq.liquidacionConsignatariaA || draft.liquidacionConsignatariaA || "VENDEDOR");
+  liq.liquidacionConsignatariaA = settledParty;
+  if (settledParty === "VENDEDOR") {
+    liq.netoLiquidacionComp = liq.netoLiquidacionProd;
+    liq.netoTotalComp = liq.netoTotalProd;
+  }
+  if (settledParty === "COMPRADOR") {
+    liq.netoLiquidacionProd = liq.netoLiquidacionComp;
+    liq.netoTotalProd = liq.netoTotalComp;
+  }
 }
 
 function normalizeKey(value) {
@@ -664,10 +743,20 @@ function calculateLiquidacion(operation, input = {}) {
   const porcComisionConsignataria = parseMoney(source.porcComisionConsignataria);
   const ajusteConsignataria = parseMoney(source.ajusteConsignataria);
   const comisionConsignataria = facturado * porcComisionConsignataria / 100;
-  const netoLiquidacionProd = consignada
+  let netoLiquidacionProd = consignada
     ? netoGravadoProd + ivaProd - retIibbProd - retGananciasProd - ivaGastosProd
     : facturado + ivaProd;
-  const netoLiquidacionComp = facturado + ivaComp + totalGastosComp;
+  let netoLiquidacionComp = facturado + ivaComp + totalGastosComp;
+  let netoTotalProd = netoLiquidacionProd + efectivoConIvaProd - gastoEfectivoProd - comisionEfectivoProd;
+  let netoTotalComp = netoLiquidacionComp + efectivoComp;
+  if (consignada && liquidacionConsignatariaA === "VENDEDOR") {
+    netoLiquidacionComp = netoLiquidacionProd;
+    netoTotalComp = netoTotalProd;
+  }
+  if (consignada && liquidacionConsignatariaA === "COMPRADOR") {
+    netoLiquidacionProd = netoLiquidacionComp;
+    netoTotalProd = netoTotalComp;
+  }
   const detalleLiquidar = normalizeDetalleLiquidar(operation, source.detalleLiquidar, facturado);
 
   return {
@@ -723,8 +812,8 @@ function calculateLiquidacion(operation, input = {}) {
     detalleLiquidacionDirectaProd: normalizeText(source.detalleLiquidacionDirectaProd),
     netoLiquidacionProd,
     netoLiquidacionComp,
-    netoTotalProd: netoLiquidacionProd + efectivoConIvaProd - gastoEfectivoProd - comisionEfectivoProd,
-    netoTotalComp: netoLiquidacionComp + efectivoComp,
+    netoTotalProd,
+    netoTotalComp,
     detalleLiquidar,
     observaciones: normalizeText(source.observaciones),
     confirmadoEn: new Date().toISOString()
@@ -1151,7 +1240,28 @@ class BackupDataSource {
     if (!operation.draftData) operation.draftData = {};
     if (!Array.isArray(operation.draftData.saleLines)) operation.draftData.saleLines = [];
 
-    const line = calculateSaleLine(input, data.tabRules);
+    const isFaena = normalizeKey(operation.destino || operation.draftData.destino).includes("FAENA");
+    const saleInput = isFaena
+      ? {
+          ...input,
+          desbasteVend: 0,
+          kgNetoVend: "",
+          tipoPrecioVend: "KG",
+          tabVend: "",
+          compradorDiferente: false,
+          desbasteComp: 0,
+          kgComp: "",
+          tipoPrecioComp: "KG",
+          tabComp: "",
+          usarKgRealVend: false,
+          usarKgRealComp: false,
+          kgCalculoVend: "",
+          kgCalculoComp: "",
+          promUsadoVend: "",
+          promUsadoComp: ""
+        }
+      : input;
+    const line = calculateSaleLine(saleInput, data.tabRules);
     if (!line.categoria) {
       const error = new Error("Falta cargar la categoria.");
       error.statusCode = 400;

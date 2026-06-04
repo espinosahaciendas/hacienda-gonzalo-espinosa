@@ -151,10 +151,47 @@ function renderMetrics() {
   $("#metric-pagos").textContent = state.cuenta ? state.cuenta.pagosCobros : "-";
   $("#cc-total-movimientos").textContent = state.cuenta ? currency.format(state.cuenta.totalMovimientos) : "-";
   $("#cc-total-pagos").textContent = state.cuenta ? currency.format(state.cuenta.totalPagos) : "-";
+  renderDashboardDueLists();
 }
 
 function amountClass(value) {
   return Number(value || 0) < 0 ? "amount-negative" : "amount-positive";
+}
+
+function dayDiffFromToday(value) {
+  const due = parseDisplayDate(value);
+  if (!due) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  return Math.round((due.getTime() - today.getTime()) / 86400000);
+}
+
+function dashboardDueRow(movement, mode) {
+  const amount = Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
+  if (mode === "today") {
+    return `<tr><td>${escapeHtml(movement.cliente || "-")}</td><td>${escapeHtml(movement.concepto || "-")}</td><td class="${amountClass(amount)}">${moneyValue(amount)}</td></tr>`;
+  }
+  return `<tr><td>${escapeHtml(movement.vencimiento || "-")}</td><td>${escapeHtml(movement.cliente || "-")}</td><td class="${amountClass(amount)}">${moneyValue(amount)}</td></tr>`;
+}
+
+function renderDashboardDueLists() {
+  if (!state.cuenta) return;
+  const due = (state.cuenta.vencimientos || [])
+    .filter((movement) => !["IMPUTADO", "ANULADO"].includes(String(movement.estado || "").toUpperCase()))
+    .map((movement) => ({ ...movement, days: dayDiffFromToday(movement.vencimiento) }))
+    .filter((movement) => movement.days !== null)
+    .sort((a, b) => a.days - b.days || String(a.cliente || "").localeCompare(String(b.cliente || ""), "es"));
+  const today = due.filter((movement) => movement.days === 0);
+  const week = due.filter((movement) => movement.days >= 0 && movement.days <= 7);
+  $("#dashboard-due-today-count").textContent = `${today.length} pendiente/s`;
+  $("#dashboard-due-week-count").textContent = `${week.length} pendiente/s`;
+  $("#dashboard-due-today-body").innerHTML = today.length
+    ? today.slice(0, 8).map((movement) => dashboardDueRow(movement, "today")).join("")
+    : `<tr><td colspan="3">Sin vencimientos para hoy.</td></tr>`;
+  $("#dashboard-due-week-body").innerHTML = week.length
+    ? week.slice(0, 10).map((movement) => dashboardDueRow(movement, "week")).join("")
+    : `<tr><td colspan="3">Sin vencimientos esta semana.</td></tr>`;
 }
 
 function movementAccountEntities(movement) {
@@ -463,7 +500,7 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
 }
 
 function currentAccountReportStyles() {
-  return `body{font-family:Arial,sans-serif;margin:12mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:9px;margin-top:9px}th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8.5px}.allocation-label{padding-left:16px!important}.status{font-weight:700}.compact{max-width:560px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 portrait;margin:8mm}button{display:none}}`;
+  return `body{font-family:Arial,sans-serif;margin:12mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:9px;margin-top:9px}th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8.5px}.allocation-label{padding-left:16px!important}.status{font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 portrait;margin:8mm}button{display:none}}`;
 }
 
 function currentAccountImputationsByMovement() {
@@ -519,6 +556,10 @@ function currentAccountReportMovementRows(rows, imputationsByMovement) {
   }).join("");
 }
 
+function pendingSignedAmount(movement) {
+  return Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
+}
+
 function printCurrentAccountReport(forcedType = "") {
   const type = forcedType || $("#cc-report-type").value;
   const filters = getCurrentAccountReportFilters();
@@ -542,18 +583,31 @@ function printCurrentAccountReport(forcedType = "") {
     .reduce((sum, movement) => sum + Number(movement.importeImputado || 0), 0);
   const imputationsByMovement = currentAccountImputationsByMovement();
   const balances = new Map();
-  rows.forEach((movement) => balances.set(movement.cliente, (balances.get(movement.cliente) || 0) + Number(movement.importe || 0)));
+  const commissionBalances = new Map();
+  rows.forEach((movement) => {
+    balances.set(movement.cliente, (balances.get(movement.cliente) || 0) + Number(movement.importe || 0));
+    if (String(movement.origen || "").toUpperCase() === "COMISION" && String(movement.estado || "").toUpperCase() !== "IMPUTADO") {
+      commissionBalances.set(movement.cliente, (commissionBalances.get(movement.cliente) || 0) + pendingSignedAmount(movement));
+    }
+  });
+  const commissionTotal = [...commissionBalances.values()].reduce((sum, amount) => sum + Number(amount || 0), 0);
   const balanceRows = [...balances.entries()]
+    .map(([cliente, saldo]) => ({ cliente, saldo, comision: commissionBalances.get(cliente) || 0 }))
+    .filter((item) => Math.abs(item.saldo) > 0.01 || Math.abs(item.comision) > 0.01)
+    .sort((a, b) => Math.abs(b.comision || 0) - Math.abs(a.comision || 0) || Math.abs(b.saldo) - Math.abs(a.saldo));
+  const commissionRows = [...commissionBalances.entries()]
     .map(([cliente, saldo]) => ({ cliente, saldo }))
     .filter((item) => Math.abs(item.saldo) > 0.01)
     .sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo));
-  const balancesTable = type === "SALDOS" ? `<h2>Saldo por cliente</h2><table class="compact"><thead><tr><th>Cliente</th><th>Saldo</th></tr></thead><tbody>${balanceRows.length ? balanceRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td></tr>`).join("") : `<tr><td colspan="2">Sin saldos para los filtros aplicados.</td></tr>`}</tbody></table>` : "";
+  const balancesTable = type === "SALDOS" ? `<h2>Saldo por cliente</h2><table class="compact"><thead><tr><th>Cliente</th><th>Saldo</th><th>Comision pendiente</th></tr></thead><tbody>${balanceRows.length ? balanceRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td><td class="amount ${item.comision < 0 ? "negative" : "positive"}">${Math.abs(item.comision) > 0.01 ? moneyValue(item.comision) : "-"}</td></tr>`).join("") : `<tr><td colspan="3">Sin saldos para los filtros aplicados.</td></tr>`}</tbody></table>` : "";
+  const commissionsTable = commissionRows.length ? `<h2>Comisiones pendientes</h2><table class="compact"><thead><tr><th>Cliente / productor</th><th>Comision pendiente</th></tr></thead><tbody>${commissionRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td></tr>`).join("")}<tr><th>Total comisiones</th><td class="amount ${commissionTotal < 0 ? "negative" : "positive"}">${moneyValue(commissionTotal)}</td></tr></tbody></table>` : "";
 
   const filterLabel = $("#cc-client-search").value.trim() || "Todos los clientes";
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${currentAccountReportStyles()}</style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${escapeHtml(title)}</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
-  <div class="summary"><div><span>Filtro de cliente</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Saldo de los movimientos</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>Saldo pendiente</span><strong>${moneyValue(pendingBalance)}</strong></div></div>
+  <div class="summary"><div><span>Filtro de cliente</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Saldo de los movimientos</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>Saldo pendiente</span><strong>${moneyValue(pendingBalance)}</strong></div><div><span>Comisiones pendientes</span><strong>${moneyValue(commissionTotal)}</strong></div></div>
   ${balancesTable}
+  ${commissionsTable}
   <h2>Detalle de movimientos e imputaciones</h2>
   <table><thead><tr><th>Fecha</th><th>Vencimiento</th><th>Cliente</th><th>Concepto</th><th>Comprobante</th><th>Operacion</th><th>Importe original</th><th>Imputado</th><th>Saldo pendiente</th><th>Estado</th></tr></thead><tbody>${currentAccountReportMovementRows(rows, imputationsByMovement)}</tbody></table><button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
   popup.document.close();
@@ -894,6 +948,7 @@ function optionalInputNumber(selector, fallback) {
 }
 
 function calculateSalePreview() {
+  syncFaenaSaleInputs();
   const heads = Number($("#sale-heads").value || 0);
   const grossKg = Number($("#sale-kg-bruto").value || 0);
   const vendWaste = Number($("#sale-desbaste-vend").value || 0);
@@ -916,6 +971,7 @@ function calculateSalePreview() {
 }
 
 function renderSalePreview() {
+  syncSaleMode();
   const calc = calculateSalePreview();
   $("#sale-prom-vend").value = `${calc.averageVend.toFixed(2).replace(".", ",")} kgs/cab`;
   $("#sale-prom-comp").value = `${calc.averageComp.toFixed(2).replace(".", ",")} kgs/cab`;
@@ -923,6 +979,44 @@ function renderSalePreview() {
   $("#sale-precio-final-comp").value = moneyValue(calc.compFinalPrice);
   $("#sale-importe-vend").value = moneyValue(calc.vendAmount);
   $("#sale-importe-comp").value = moneyValue(calc.compAmount);
+}
+
+function isFaenaSaleOperation() {
+  const operation = state.currentOperation || {};
+  const draft = operation.draftData || {};
+  return normalizeSearch(operation.destino || draft.destino || $("#operation-destination")?.value).includes("faena");
+}
+
+function syncFaenaSaleInputs() {
+  if (!isFaenaSaleOperation()) return;
+  $("#sale-desbaste-vend").value = "0";
+  $("#sale-desbaste-comp").value = "0";
+  $("#sale-kg-neto-vend").value = "";
+  $("#sale-kg-comp").value = "";
+  $("#sale-tipo-precio-vend").value = "KG";
+  $("#sale-tipo-precio-comp").value = "KG";
+  $("#sale-tab-vend").value = "";
+  $("#sale-tab-comp").value = "";
+  $("#sale-buyer-different").checked = false;
+  $("#sale-use-real-kg-vend").checked = false;
+  $("#sale-use-real-kg-comp").checked = false;
+  $("#sale-kg-calc-vend").value = "";
+  $("#sale-kg-calc-comp").value = "";
+  $("#sale-prom-used-vend").value = "";
+  $("#sale-prom-used-comp").value = "";
+}
+
+function syncSaleMode() {
+  const faena = isFaenaSaleOperation();
+  $all(".sale-not-faena").forEach((element) => { element.hidden = faena; });
+  $("#sale-tipo-precio-vend").disabled = faena;
+  $("#sale-tipo-precio-comp").disabled = faena;
+  $("#sale-buyer-different").disabled = faena;
+  if (faena) {
+    syncFaenaSaleInputs();
+    $("#sale-buyer-diff").hidden = true;
+    $("#sale-buyer-correction").hidden = true;
+  }
 }
 
 function formatMoneyInput(input) {
@@ -1434,6 +1528,8 @@ async function openSale(operationId, step = "sale") {
   fillLiquidationForm(operation.liquidacion || {});
   renderReport();
   setOperationStep(step);
+  syncSaleMode();
+  renderSalePreview();
   setSaleMessage("");
   setLiquidationMessage("");
 }
@@ -1499,6 +1595,7 @@ function resetOperationForm() {
   $("#report-sheet").innerHTML = "";
   $("#sale-desbaste-vend").value = "0";
   $("#sale-desbaste-comp").value = "0";
+  syncSaleMode();
   setSelectOptions("#operation-renspa-origin-select", [], "Elegir RENSPA origen");
   setSelectOptions("#operation-renspa-destination-select", [], "Elegir RENSPA destino");
   renderSaleLines([]);
@@ -1623,6 +1720,11 @@ async function saveOperation(event) {
 }
 
 function syncBuyerDiff() {
+  if (isFaenaSaleOperation()) {
+    syncSaleMode();
+    renderSalePreview();
+    return;
+  }
   const enabled = $("#sale-buyer-different").checked;
   $("#sale-buyer-diff").hidden = !enabled;
   $("#sale-buyer-correction").hidden = !enabled;
@@ -1636,30 +1738,32 @@ async function saveSaleLine(event) {
     return;
   }
   setSaleMessage("Guardando linea...");
-  const buyerDifferent = $("#sale-buyer-different").checked;
+  syncSaleMode();
+  const faena = isFaenaSaleOperation();
+  const buyerDifferent = faena ? false : $("#sale-buyer-different").checked;
   const payload = {
     categoria: $("#sale-category").value,
     cabezas: $("#sale-heads").value,
     kgBruto: $("#sale-kg-bruto").value,
-    desbasteVend: $("#sale-desbaste-vend").value,
+    desbasteVend: faena ? "0" : $("#sale-desbaste-vend").value,
     kgNetoVend: $("#sale-kg-neto-vend").value,
-    tipoPrecioVend: $("#sale-tipo-precio-vend").value,
+    tipoPrecioVend: faena ? "KG" : $("#sale-tipo-precio-vend").value,
     precioVend: parseMoneyInput($("#sale-precio-vend").value),
     compradorDiferente: buyerDifferent,
-    tabVend: $("#sale-tab-vend").value,
-    usarKgRealVend: $("#sale-use-real-kg-vend").checked,
-    kgCalculoVend: $("#sale-kg-calc-vend").value,
-    promUsadoVend: $("#sale-prom-used-vend").value,
+    tabVend: faena ? "" : $("#sale-tab-vend").value,
+    usarKgRealVend: faena ? false : $("#sale-use-real-kg-vend").checked,
+    kgCalculoVend: faena ? "" : $("#sale-kg-calc-vend").value,
+    promUsadoVend: faena ? "" : $("#sale-prom-used-vend").value,
     precioFinalManualVend: parseMoneyInput($("#sale-final-price-manual-vend").value) || "",
     importeManualVend: parseMoneyInput($("#sale-amount-manual-vend").value) || "",
-    desbasteComp: $("#sale-desbaste-comp").value,
-    kgComp: $("#sale-kg-comp").value,
-    tipoPrecioComp: $("#sale-tipo-precio-comp").value,
+    desbasteComp: faena ? "0" : $("#sale-desbaste-comp").value,
+    kgComp: faena ? "" : $("#sale-kg-comp").value,
+    tipoPrecioComp: faena ? "KG" : $("#sale-tipo-precio-comp").value,
     precioComp: parseMoneyInput($("#sale-precio-comp").value),
-    tabComp: $("#sale-tab-comp").value,
-    usarKgRealComp: $("#sale-use-real-kg-comp").checked,
-    kgCalculoComp: $("#sale-kg-calc-comp").value,
-    promUsadoComp: $("#sale-prom-used-comp").value,
+    tabComp: faena ? "" : $("#sale-tab-comp").value,
+    usarKgRealComp: faena ? false : $("#sale-use-real-kg-comp").checked,
+    kgCalculoComp: faena ? "" : $("#sale-kg-calc-comp").value,
+    promUsadoComp: faena ? "" : $("#sale-prom-used-comp").value,
     precioFinalManualComp: parseMoneyInput($("#sale-final-price-manual-comp").value) || "",
     importeManualComp: parseMoneyInput($("#sale-amount-manual-comp").value) || ""
   };
@@ -1684,6 +1788,7 @@ async function saveSaleLine(event) {
     $("#sale-category-suggestions").innerHTML = "";
     $("#sale-desbaste-vend").value = "0";
     $("#sale-desbaste-comp").value = "0";
+    syncSaleMode();
     syncBuyerDiff();
     setSaleMessage("Linea agregada correctamente.", "ok");
   } catch (error) {
