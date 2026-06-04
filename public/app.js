@@ -158,10 +158,12 @@ function amountClass(value) {
 }
 
 function movementAccountEntities(movement) {
-  return [
-    movement.cliente,
-    movement.consignataria || (String(movement.origen || "").toUpperCase() === "CONSIGNATARIA" ? movement.cliente : "")
-  ].map(normalizeSearch).filter(Boolean);
+  const entities = [movement.cliente];
+  const isConsigneeOwnMovement = String(movement.origen || "").toUpperCase() === "CONSIGNATARIA";
+  if (movement.consignatariaCuenta || isConsigneeOwnMovement) {
+    entities.push(movement.consignataria || movement.cliente);
+  }
+  return entities.map(normalizeSearch).filter(Boolean);
 }
 
 function getExactCurrentAccountClient(query) {
@@ -171,11 +173,13 @@ function getExactCurrentAccountClient(query) {
 
 function getExactCurrentAccountConsignee(query) {
   if (!query) return "";
-  return (state.cuenta.movimientos || []).some((movement) => normalizeSearch(movement.consignataria || movement.cliente) === query) ? query : "";
+  return (state.cuenta.movimientos || []).some((movement) => movementConsigneeKey(movement) === query) ? query : "";
 }
 
 function movementConsigneeKey(movement) {
-  return normalizeSearch(movement.consignataria || (String(movement.origen || "").toUpperCase() === "CONSIGNATARIA" ? movement.cliente : ""));
+  const isConsigneeOwnMovement = String(movement.origen || "").toUpperCase() === "CONSIGNATARIA";
+  if (!movement.consignatariaCuenta && !isConsigneeOwnMovement) return "";
+  return normalizeSearch(movement.consignataria || movement.cliente);
 }
 
 function matchesCurrentAccountClientSearch(movement, words, exactClient = "") {
@@ -273,7 +277,10 @@ function matchesCurrentAccountDueFilter(movement, filter) {
 
 function populateCurrentAccountClients() {
   const consignees = Array.from(new Set((state.cuenta?.movimientos || [])
-    .map((movement) => movement.consignataria || (String(movement.origen || "").toUpperCase() === "CONSIGNATARIA" ? movement.cliente : ""))
+    .map((movement) => {
+      const isConsigneeOwnMovement = String(movement.origen || "").toUpperCase() === "CONSIGNATARIA";
+      return movement.consignatariaCuenta || isConsigneeOwnMovement ? movement.consignataria || movement.cliente : "";
+    })
     .filter(Boolean)))
     .sort((a, b) => a.localeCompare(b, "es"));
   const names = Array.from(new Set([

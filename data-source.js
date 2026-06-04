@@ -180,6 +180,7 @@ function pushMovement(list, movement) {
     paymentId: movement.paymentId || "",
     contraparte: movement.contraparte || "",
     consignataria: movement.consignataria || "",
+    consignatariaCuenta: Boolean(movement.consignatariaCuenta),
     importe: Math.round(Number(movement.importe || 0) * 100) / 100,
     estado: movement.estado || "PENDIENTE",
     observacion: movement.observacion || ""
@@ -193,8 +194,16 @@ function buildOperationAccountMovements(operation) {
   const dueBaseDate = draft.fechaCarga || operationDate;
   const typeText = `${operation.tipo || draft.tipo || "Operacion"} ${operation.destino || draft.destino || ""}`.trim();
   const operationConsignee = operation.consignataria || draft.consignataria || "";
+  const settledByConsignee = normalizeKey(liq.liquidacionConsignatariaA || draft.liquidacionConsignatariaA || "VENDEDOR");
   const movements = [];
   const conceptWithCounterpart = (suffix, counterpart) => `${typeText} - ${suffix}${counterpart ? ` - por ${counterpart}` : ""}`;
+  const consigneeAppliesToRole = (role) => {
+    if (!operationConsignee) return false;
+    if (settledByConsignee === "AMBAS") return true;
+    if (String(role || "").startsWith("VENDEDOR")) return settledByConsignee === "VENDEDOR";
+    if (String(role || "").startsWith("COMPRADOR")) return settledByConsignee === "COMPRADOR";
+    return false;
+  };
 
   const addPlan = ({ cliente, role, amount, plan, comprobante, counterpart, conceptSuffix }) => {
     parsePlanItems(plan, amount, dueBaseDate).forEach((item, index) => {
@@ -210,6 +219,7 @@ function buildOperationAccountMovements(operation) {
         operacion: operation.id,
         contraparte: counterpart,
         consignataria: operationConsignee,
+        consignatariaCuenta: consigneeAppliesToRole(role),
         importe: signedAmount,
         estado: "PENDIENTE"
       });
@@ -274,6 +284,7 @@ function buildOperationAccountMovements(operation) {
       operacion: operation.id,
       contraparte: counterpart,
       consignataria: operationConsignee,
+      consignatariaCuenta: consigneeAppliesToRole(role),
       importe: Math.abs(Number(amount || 0)),
       estado: "PENDIENTE"
     });
@@ -324,6 +335,7 @@ function buildOperationAccountMovements(operation) {
       operacion: operation.id,
       contraparte: operation.vendedor || draft.vendedor || operation.comprador || draft.comprador,
       consignataria: draft.consignataria,
+      consignatariaCuenta: true,
       importe: Math.abs(totalCobrarConsignataria),
       estado: "PENDIENTE"
     });
