@@ -984,7 +984,8 @@ function renderSalePreview() {
 function isFaenaSaleOperation() {
   const operation = state.currentOperation || {};
   const draft = operation.draftData || {};
-  return normalizeSearch(operation.destino || draft.destino || $("#operation-destination")?.value).includes("faena");
+  const formDestination = $("#operation-destination") ? $("#operation-destination").value : "";
+  return normalizeSearch(formDestination || operation.destino || draft.destino).includes("faena");
 }
 
 function syncFaenaSaleInputs() {
@@ -2220,6 +2221,10 @@ async function init() {
     await openSale(reportButton.dataset.ccOperationReport, "report");
   });
   $("#operation-type").addEventListener("change", syncOperationType);
+  $("#operation-destination").addEventListener("change", () => {
+    syncSaleMode();
+    renderSalePreview();
+  });
   $("#operation-form").addEventListener("submit", saveOperation);
   $("#operation-new").addEventListener("click", resetOperationForm);
   $("#operation-start-new").addEventListener("click", resetOperationForm);
