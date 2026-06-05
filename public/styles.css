@@ -1218,6 +1218,37 @@ label textarea {
   font-style: italic;
 }
 
+.cc-detail-row td {
+  background: #f8fbf9;
+  padding: 10px;
+}
+
+.cc-commissionist-detail {
+  display: grid;
+  gap: 7px;
+}
+
+.cc-commissionist-detail span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cc-commissionist-detail table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.cc-commissionist-detail th,
+.cc-commissionist-detail td {
+  border: 1px solid var(--line);
+  padding: 5px 6px;
+}
+
+.cc-commissionist-detail th {
+  background: #edf3f1;
+}
+
 .mobile-list-item.movement-cash {
   font-style: italic;
 }

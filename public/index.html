@@ -933,6 +933,18 @@
               <label>Importe<input id="cc-external-amount" class="money-input" inputmode="decimal"></label>
               <label>Observacion<input id="cc-external-notes"></label>
             </div>
+            <div class="cc-subpanel">
+              <div class="panel-head">
+                <h3>Comisionista asociado</h3>
+                <span class="subtle">Opcional. No modifica el neto de la cuenta del cliente.</span>
+              </div>
+              <div class="form-grid">
+                <label>Comisionista<input id="cc-external-commissionist" list="commissionist-client-list" autocomplete="off"></label>
+                <label>Base comision<input id="cc-external-commission-base" class="money-input" inputmode="decimal" placeholder="Importe bruto o base acordada"></label>
+                <label>% comision<input id="cc-external-commission-percent" inputmode="decimal" placeholder="Opcional"></label>
+                <label>Importe comision<input id="cc-external-commission-amount" class="money-input" inputmode="decimal" placeholder="Opcional si no es porcentaje fijo"></label>
+              </div>
+            </div>
             <div class="form-actions"><button type="button" class="primary-button" id="cc-save-external">Guardar movimiento externo</button></div>
             <p class="form-message" id="cc-external-message"></p>
           </div>

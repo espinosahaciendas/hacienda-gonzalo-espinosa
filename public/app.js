@@ -348,6 +348,30 @@ function matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee = 
   return words.every((word) => haystack.includes(word));
 }
 
+function commissionistDetailFromObservation(observation) {
+  const text = String(observation || "").trim();
+  if (!text.startsWith("COMISIONISTA_DETALLE:")) return null;
+  try {
+    return JSON.parse(text.slice("COMISIONISTA_DETALLE:".length));
+  } catch (error) {
+    return null;
+  }
+}
+
+function commissionistDetailHtml(detail) {
+  const rows = Array.isArray(detail.items) ? detail.items : [];
+  if (!rows.length) return "";
+  return `
+    <div class="cc-commissionist-detail">
+      <strong>Detalle comisionista: ${escapeHtml(detail.comisionista || "-")} - ${escapeHtml(detail.porcentaje || "0")}%</strong>
+      <span>Base ${moneyValue(detail.base)} | Comision ${moneyValue(detail.comision)}</span>
+      <table>
+        <thead><tr><th>Origen</th><th>Fecha</th><th>Operacion / mov.</th><th>Comprobante</th><th>Base</th><th>%</th><th>Comision</th></tr></thead>
+        <tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.origen || "-")}</td><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.id || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td>${moneyValue(row.base)}</td><td>${row.porcentaje ? escapeHtml(row.porcentaje) : "-"}</td><td>${moneyValue(row.comision)}</td></tr>`).join("")}</tbody>
+      </table>
+    </div>`;
+}
+
 function renderCuentaCorriente() {
   if (!state.cuenta) return;
   const query = normalizeSearch($("#cc-client-search").value);
@@ -377,7 +401,9 @@ function renderCuentaCorriente() {
   $("#cc-selected-count").textContent = movements.length;
 
   $("#cc-movements-body").innerHTML = movements.length
-    ? movements.slice(0, 200).map((movement) => `
+    ? movements.slice(0, 200).map((movement) => {
+        const detail = commissionistDetailFromObservation(movement.observacion);
+        return `
         <tr class="${normalizeSearch(movement.concepto).includes("efectivo") ? "movement-cash" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
           <td>${escapeHtml(movement.fecha || "-")}</td>
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
@@ -389,7 +415,9 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.estado || "-")}</td>
           <td>${movement.paymentId ? `<button type="button" class="small-button" data-cc-payment-receipt="${escapeHtml(movement.paymentId)}">Ver comprobante</button>${movement.estado === "ANULADO" ? "" : ` <button type="button" class="small-button danger-button" data-cc-payment-cancel="${escapeHtml(movement.paymentId)}">Anular</button>`}` : movement.operacion ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>` : ""}</td>
         </tr>
-      `).join("")
+        ${detail ? `<tr class="cc-detail-row"><td colspan="9">${commissionistDetailHtml(detail)}</td></tr>` : ""}
+      `;
+      }).join("")
     : `<tr><td colspan="9">Sin movimientos para esta busqueda.</td></tr>`;
 
   const due = (state.cuenta.vencimientos || []).filter((movement) => {
@@ -469,6 +497,10 @@ function openCurrentAccountPanel(panelId) {
     $("#cc-external-date").value = today;
     $("#cc-external-due").value = today;
     setMoneyInput("#cc-external-amount", 0);
+    $("#cc-external-commissionist").value = "";
+    setMoneyInput("#cc-external-commission-base", 0);
+    $("#cc-external-commission-percent").value = "";
+    setMoneyInput("#cc-external-commission-amount", 0);
   } else {
     $("#cc-payment-client").value = $("#cc-client-search").value;
     $("#cc-payment-date").value = today;
@@ -484,6 +516,14 @@ function openCurrentAccountPanel(panelId) {
     renderCurrentAccountImputations();
     renderCurrentAccountCounterpartyImputations();
   }
+}
+
+function syncExternalCommissionAmount() {
+  const base = numberValue("#cc-external-commission-base");
+  const percent = percentValue("#cc-external-commission-percent");
+  const amountInput = $("#cc-external-commission-amount");
+  if (document.activeElement === amountInput) return;
+  if (base && percent) setMoneyInput("#cc-external-commission-amount", base * percent / 100);
 }
 
 function getPaymentPendingMovements(clientSelector = "#cc-payment-client", typeSelector = "#cc-payment-type") {
@@ -594,6 +634,10 @@ async function saveExternalCurrentAccountMovement() {
         fechaVenta: $("#cc-external-date").value,
         vencimiento: $("#cc-external-due").value,
         importe: numberValue("#cc-external-amount"),
+        comisionista: $("#cc-external-commissionist").value,
+        baseComision: numberValue("#cc-external-commission-base"),
+        porcComision: percentValue("#cc-external-commission-percent"),
+        importeComision: numberValue("#cc-external-commission-amount"),
         observacion: $("#cc-external-notes").value
       })
     });
@@ -816,13 +860,13 @@ function renderCommissionistRows() {
   const percent = percentValue("#commissionist-percent");
   const selectedRows = state.commissionistRows.filter((row) => row.selected);
   const selectedBase = selectedRows.reduce((sum, row) => sum + Number(row.base || 0), 0);
-  const selectedCommission = selectedBase * percent / 100;
+  const selectedCommission = selectedRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
   $("#commissionist-summary").textContent = selectedRows.length
     ? `${selectedRows.length} item/s - base ${moneyValue(selectedBase)} - comision ${moneyValue(selectedCommission)}`
     : state.commissionistRows.length ? "Seleccione operaciones para liquidar." : "Sin operaciones seleccionadas";
   $("#commissionist-body").innerHTML = state.commissionistRows.length
     ? state.commissionistRows.map((row) => {
-        const commission = Number(row.base || 0) * percent / 100;
+        const commission = commissionistRowCommission(row, percent);
         return `<tr>
           <td><input type="checkbox" data-commissionist-row="${escapeHtml(row.id)}" ${row.selected ? "checked" : ""}></td>
           <td>${escapeHtml(row.fecha || "-")}</td>
@@ -838,10 +882,17 @@ function renderCommissionistRows() {
     : `<tr><td colspan="9">Busque operaciones y movimientos externos por periodo.</td></tr>`;
 }
 
+function commissionistRowCommission(row, fallbackPercent) {
+  if (Number(row.comisionManual || 0)) return Number(row.comisionManual || 0);
+  const percent = Number(row.porcentaje || fallbackPercent || 0);
+  return Number(row.base || 0) * percent / 100;
+}
+
 async function loadCommissionistOperations() {
   const from = $("#commissionist-from").value ? parseDisplayDate($("#commissionist-from").value) : null;
   const to = $("#commissionist-to").value ? parseDisplayDate($("#commissionist-to").value) : null;
-  if (!$("#commissionist-client").value.trim()) {
+  const selectedCommissionist = $("#commissionist-client").value.trim();
+  if (!selectedCommissionist) {
     $("#commissionist-message").textContent = "Seleccione un comisionista.";
     $("#commissionist-message").className = "form-message error";
     return;
@@ -872,6 +923,7 @@ async function loadCommissionistOperations() {
   const externalRows = (state.cuenta?.movimientos || [])
     .filter((movement) => String(movement.origen || "").toUpperCase() === "EXTERNO")
     .filter((movement) => !normalizeSearch(movement.concepto).includes("comisionista"))
+    .filter((movement) => !movement.comisionista || normalizeSearch(movement.comisionista) === normalizeSearch(selectedCommissionist))
     .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
     .map((movement) => ({
       id: movement.id,
@@ -880,7 +932,9 @@ async function loadCommissionistOperations() {
       vendedor: movement.cliente,
       comprador: movement.concepto || "-",
       comprobante: movement.comprobante || "",
-      base: Math.abs(Number(movement.importe || 0)),
+      base: Number(movement.baseComision || 0) || Math.abs(Number(movement.importe || 0)),
+      porcentaje: Number(movement.porcComision || 0),
+      comisionManual: Number(movement.importeComision || 0),
       selected: true
     }))
     .filter((row) => Number(row.base || 0) > 0);
@@ -896,7 +950,7 @@ async function generateCommissionistMovement() {
   const percent = percentValue("#commissionist-percent");
   const selected = state.commissionistRows.filter((row) => row.selected);
   const base = selected.reduce((sum, row) => sum + Number(row.base || 0), 0);
-  const amount = base * percent / 100;
+  const amount = selected.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
   if (!client || !selected.length || !amount) {
     $("#commissionist-message").textContent = "Falta comisionista, operaciones seleccionadas o porcentaje.";
     $("#commissionist-message").className = "form-message error";
@@ -905,6 +959,26 @@ async function generateCommissionistMovement() {
   const fromText = $("#commissionist-from").value || "inicio";
   const toText = $("#commissionist-to").value || "fin";
   const operations = selected.map((row) => row.id).join(", ");
+  const detail = {
+    tipo: "COMISIONISTA",
+    comisionista: client,
+    periodoDesde: fromText,
+    periodoHasta: toText,
+    porcentaje: percent,
+    base,
+      comision: amount,
+      items: selected.map((row) => ({
+      id: row.id,
+      fecha: row.fecha,
+      origen: row.origen,
+      vendedor: row.vendedor,
+      comprador: row.comprador,
+        comprobante: row.comprobante,
+        base: Number(row.base || 0),
+        porcentaje: Number(row.porcentaje || percent || 0),
+        comision: commissionistRowCommission(row, percent)
+      }))
+  };
   try {
     await fetchJson("/api/cuenta-corriente/movimientos-externos", {
       method: "POST",
@@ -916,7 +990,7 @@ async function generateCommissionistMovement() {
         fechaVenta: new Date().toISOString().slice(0, 10),
         vencimiento: $("#commissionist-due").value || new Date().toISOString().slice(0, 10),
         importe: amount,
-        observacion: `Base ${moneyValue(base)}. Operaciones: ${operations}`
+        observacion: `COMISIONISTA_DETALLE:${JSON.stringify(detail)}`
       })
     });
     await reloadCurrentAccount();
@@ -2625,6 +2699,8 @@ async function init() {
   $("#cc-open-external").addEventListener("click", () => openCurrentAccountPanel("#cc-external-panel"));
   $("#cc-close-external").addEventListener("click", () => { $("#cc-external-panel").hidden = true; });
   $("#cc-save-external").addEventListener("click", saveExternalCurrentAccountMovement);
+  $("#cc-external-commission-base").addEventListener("input", syncExternalCommissionAmount);
+  $("#cc-external-commission-percent").addEventListener("input", syncExternalCommissionAmount);
   $("#cc-open-payment").addEventListener("click", () => openCurrentAccountPanel("#cc-payment-panel"));
   $("#cc-close-payment").addEventListener("click", () => { $("#cc-payment-panel").hidden = true; });
   $("#cc-save-payment").addEventListener("click", () => saveCurrentAccountPayment());

@@ -260,6 +260,10 @@ function pushMovement(list, movement) {
     contraparte: movement.contraparte || "",
     consignataria: movement.consignataria || "",
     consignatariaCuenta: Boolean(movement.consignatariaCuenta),
+    comisionista: movement.comisionista || "",
+    baseComision: Number(movement.baseComision || 0),
+    porcComision: Number(movement.porcComision || 0),
+    importeComision: Number(movement.importeComision || 0),
     importe: Math.round(Number(movement.importe || 0) * 100) / 100,
     estado: movement.estado || "PENDIENTE",
     observacion: movement.observacion || ""
@@ -437,6 +441,10 @@ function buildAccountData(data) {
       origen: "EXTERNO",
       concepto: item.concepto || "Movimiento externo",
       comprobante: item.comprobante,
+      comisionista: item.comisionista,
+      baseComision: item.baseComision,
+      porcComision: item.porcComision,
+      importeComision: item.importeComision,
       importe: signedExternalMovement(item),
       estado: "PENDIENTE",
       observacion: item.observacion
@@ -1584,6 +1592,10 @@ class BackupDataSource {
       fechaVenta: formatDateForDisplay(input.fechaVenta),
       vencimiento: formatDateForDisplay(input.vencimiento),
       importe,
+      comisionista: normalizeText(input.comisionista),
+      baseComision: parseMoney(input.baseComision),
+      porcComision: parseMoney(input.porcComision),
+      importeComision: parseMoney(input.importeComision),
       observacion: normalizeText(input.observacion)
     };
     data.currentAccountManualMovements = asArray(data.currentAccountManualMovements);
