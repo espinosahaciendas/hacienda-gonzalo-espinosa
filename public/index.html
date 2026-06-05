@@ -28,6 +28,7 @@
       </div>
       <nav>
         <button class="active" data-view="tablero">Tablero</button>
+        <button data-view="consulta">Consulta movil</button>
         <button data-view="clientes">Clientes</button>
         <button data-view="operaciones">Operaciones</button>
         <button data-view="cuenta">Cuenta corriente</button>
@@ -45,6 +46,61 @@
           <button type="button" class="ghost-button" id="logout-button" hidden>Salir</button>
         </div>
       </header>
+
+      <section id="consulta" class="view mobile-summary-view">
+        <div class="mobile-summary-head">
+          <div>
+            <h2>Consulta rapida</h2>
+            <p class="subtle">Vista simplificada para celular, sin carga ni edicion.</p>
+          </div>
+          <button type="button" class="ghost-button" id="mobile-refresh">Actualizar</button>
+        </div>
+        <div class="mobile-kpis">
+          <article>
+            <span>Hoy</span>
+            <strong id="mobile-due-today-total">$ 0,00</strong>
+            <small id="mobile-due-today-count">0 vencimientos</small>
+          </article>
+          <article>
+            <span>Semana</span>
+            <strong id="mobile-due-week-total">$ 0,00</strong>
+            <small id="mobile-due-week-count">0 vencimientos</small>
+          </article>
+          <article>
+            <span>Comisiones</span>
+            <strong id="mobile-commission-total">$ 0,00</strong>
+            <small>Pendientes</small>
+          </article>
+        </div>
+        <div class="mobile-card">
+          <div class="panel-head">
+            <h2>Vencimientos de hoy</h2>
+            <span class="subtle" id="mobile-today-label">-</span>
+          </div>
+          <div id="mobile-due-today-list" class="mobile-list"></div>
+        </div>
+        <div class="mobile-card">
+          <div class="panel-head">
+            <h2>Vencimientos de la semana</h2>
+            <span class="subtle" id="mobile-week-label">-</span>
+          </div>
+          <div id="mobile-due-week-list" class="mobile-list"></div>
+        </div>
+        <div class="mobile-card">
+          <div class="panel-head">
+            <h2>Saldos pendientes</h2>
+            <span class="subtle">Principales</span>
+          </div>
+          <div id="mobile-balance-list" class="mobile-list"></div>
+        </div>
+        <div class="mobile-card">
+          <div class="panel-head">
+            <h2>Comisiones pendientes</h2>
+            <span class="subtle">Consignatarias / clientes</span>
+          </div>
+          <div id="mobile-commission-list" class="mobile-list"></div>
+        </div>
+      </section>
 
       <section id="tablero" class="view active">
         <div class="metrics">
@@ -102,6 +158,9 @@
           <p>
             Gestión de operaciones, ventas, liquidaciones, cuenta corriente y vencimientos.
           </p>
+          <div class="form-actions">
+            <button type="button" class="ghost-button" id="download-backup">Descargar backup de datos</button>
+          </div>
         </div>
       </section>
 

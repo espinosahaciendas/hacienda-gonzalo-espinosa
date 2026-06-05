@@ -30,6 +30,16 @@ function sendJson(res, statusCode, payload) {
   res.end(body);
 }
 
+function sendJsonDownload(res, filename, payload) {
+  const body = JSON.stringify(payload, null, 2);
+  res.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Content-Length": Buffer.byteLength(body)
+  });
+  res.end(body);
+}
+
 function parseCookies(req) {
   return String(req.headers.cookie || "").split(";").reduce((result, item) => {
     const index = item.indexOf("=");
@@ -158,6 +168,16 @@ async function handleApi(req, res) {
 
   if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && session.rol !== "ADMIN") {
     sendJson(res, 403, { error: "Este usuario tiene acceso de solo consulta." });
+    return;
+  }
+
+  if (parsed.pathname === "/api/backup/download" && req.method === "GET") {
+    if (session.rol !== "ADMIN") {
+      sendJson(res, 403, { error: "Solo un usuario administrador puede descargar backups." });
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    sendJsonDownload(res, `backup-hacienda-gonzalo-espinosa-${stamp}.json`, await dataSource.exportBackup());
     return;
   }
 

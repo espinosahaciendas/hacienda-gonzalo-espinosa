@@ -95,6 +95,7 @@ function setView(view) {
   $all("nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   const titles = {
     tablero: "Tablero",
+    consulta: "Consulta movil",
     clientes: "Clientes",
     operaciones: "Operaciones",
     cuenta: "Cuenta corriente"
@@ -114,7 +115,8 @@ function applyUserRole(user) {
     "#cc-open-payment",
     "#cc-open-external",
     "#tab-save",
-    "#category-admin-toggle"
+    "#category-admin-toggle",
+    "#download-backup"
   ];
   restricted.forEach((selector) => {
     const node = $(selector);
@@ -143,6 +145,35 @@ async function login(event) {
 async function logout() {
   await fetchJson("/api/auth/logout", { method: "POST" });
   window.location.reload();
+}
+
+async function reloadAppData() {
+  const [clientes, operaciones, cuenta, categorias, tabs] = await Promise.all([
+    fetchJson("/api/clientes"),
+    fetchJson("/api/operaciones"),
+    fetchJson("/api/cuenta-corriente/resumen"),
+    fetchJson("/api/categorias"),
+    fetchJson("/api/tabs")
+  ]);
+
+  state.clientes = clientes.items || [];
+  state.operaciones = operaciones.items || [];
+  state.cuenta = cuenta;
+  state.categorias = categorias.items || [];
+  state.tabRules = tabs.items || [];
+
+  renderMetrics();
+  renderClientes();
+  renderOperaciones();
+  renderCategories();
+  renderTabRules();
+  renderCuentaCorriente();
+  populateCurrentAccountClients();
+  renderMobileSummary();
+}
+
+function downloadBackup() {
+  window.location.href = "/api/backup/download";
 }
 
 function renderMetrics() {
@@ -193,6 +224,82 @@ function renderDashboardDueLists() {
   $("#dashboard-due-week-body").innerHTML = week.length
     ? week.slice(0, 10).map((movement) => dashboardDueRow(movement, "week")).join("")
     : `<tr><td colspan="3">Sin vencimientos esta semana.</td></tr>`;
+  renderMobileSummary();
+}
+
+function signedPendingAmount(movement) {
+  return Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
+}
+
+function mobileMovementCard(movement, showDate = false) {
+  const amount = signedPendingAmount(movement);
+  return `
+    <article class="mobile-list-item ${normalizeSearch(movement.concepto).includes("efectivo") ? "movement-cash" : ""}">
+      <div>
+        <strong>${escapeHtml(movement.cliente || "-")}</strong>
+        <span>${escapeHtml(movement.concepto || "-")}</span>
+        ${showDate ? `<small>Vto. ${escapeHtml(movement.vencimiento || "-")}</small>` : ""}
+      </div>
+      <b class="${amountClass(amount)}">${moneyValue(amount)}</b>
+    </article>`;
+}
+
+function renderMobileSummary() {
+  if (!state.cuenta || !$("#mobile-due-today-list")) return;
+  const pending = (state.cuenta.movimientos || [])
+    .filter((movement) => !movement.paymentId && !["IMPUTADO", "ANULADO"].includes(String(movement.estado || "").toUpperCase()));
+  const due = (state.cuenta.vencimientos || [])
+    .filter((movement) => !["IMPUTADO", "ANULADO"].includes(String(movement.estado || "").toUpperCase()))
+    .map((movement) => ({ ...movement, days: dayDiffFromToday(movement.vencimiento) }))
+    .filter((movement) => movement.days !== null)
+    .sort((a, b) => a.days - b.days || String(a.cliente || "").localeCompare(String(b.cliente || ""), "es"));
+  const today = due.filter((movement) => movement.days === 0);
+  const week = due.filter((movement) => movement.days >= 0 && movement.days <= 7);
+  const todayTotal = today.reduce((sum, movement) => sum + signedPendingAmount(movement), 0);
+  const weekTotal = week.reduce((sum, movement) => sum + signedPendingAmount(movement), 0);
+
+  const balances = new Map();
+  const commissions = new Map();
+  pending.forEach((movement) => {
+    balances.set(movement.cliente, (balances.get(movement.cliente) || 0) + signedPendingAmount(movement));
+    if (String(movement.origen || "").toUpperCase() === "COMISION") {
+      commissions.set(movement.cliente, (commissions.get(movement.cliente) || 0) + signedPendingAmount(movement));
+    }
+  });
+  const balanceRows = [...balances.entries()]
+    .map(([cliente, saldo]) => ({ cliente, saldo }))
+    .filter((item) => Math.abs(item.saldo) > 0.01)
+    .sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo))
+    .slice(0, 8);
+  const commissionRows = [...commissions.entries()]
+    .map(([cliente, saldo]) => ({ cliente, saldo }))
+    .filter((item) => Math.abs(item.saldo) > 0.01)
+    .sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo))
+    .slice(0, 8);
+  const commissionTotal = [...commissions.values()].reduce((sum, amount) => sum + Number(amount || 0), 0);
+
+  $("#mobile-due-today-total").textContent = moneyValue(todayTotal);
+  $("#mobile-due-today-total").className = amountClass(todayTotal);
+  $("#mobile-due-today-count").textContent = `${today.length} vencimiento${today.length === 1 ? "" : "s"}`;
+  $("#mobile-due-week-total").textContent = moneyValue(weekTotal);
+  $("#mobile-due-week-total").className = amountClass(weekTotal);
+  $("#mobile-due-week-count").textContent = `${week.length} vencimiento${week.length === 1 ? "" : "s"}`;
+  $("#mobile-commission-total").textContent = moneyValue(commissionTotal);
+  $("#mobile-commission-total").className = amountClass(commissionTotal);
+  $("#mobile-today-label").textContent = new Date().toLocaleDateString("es-AR");
+  $("#mobile-week-label").textContent = "Proximos 7 dias";
+  $("#mobile-due-today-list").innerHTML = today.length
+    ? today.slice(0, 8).map((movement) => mobileMovementCard(movement)).join("")
+    : `<p class="empty-mobile">Sin vencimientos para hoy.</p>`;
+  $("#mobile-due-week-list").innerHTML = week.length
+    ? week.slice(0, 10).map((movement) => mobileMovementCard(movement, true)).join("")
+    : `<p class="empty-mobile">Sin vencimientos esta semana.</p>`;
+  $("#mobile-balance-list").innerHTML = balanceRows.length
+    ? balanceRows.map((item) => `<article class="mobile-list-item"><div><strong>${escapeHtml(item.cliente)}</strong><span>Saldo pendiente</span></div><b class="${amountClass(item.saldo)}">${moneyValue(item.saldo)}</b></article>`).join("")
+    : `<p class="empty-mobile">Sin saldos pendientes.</p>`;
+  $("#mobile-commission-list").innerHTML = commissionRows.length
+    ? commissionRows.map((item) => `<article class="mobile-list-item"><div><strong>${escapeHtml(item.cliente)}</strong><span>Comision pendiente</span></div><b class="${amountClass(item.saldo)}">${moneyValue(item.saldo)}</b></article>`).join("")
+    : `<p class="empty-mobile">Sin comisiones pendientes.</p>`;
 }
 
 function movementAccountEntities(movement) {
@@ -501,7 +608,7 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
 }
 
 function currentAccountReportStyles() {
-  return `body{font-family:Arial,sans-serif;margin:12mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:9px;margin-top:9px}th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8.5px}.allocation-label{padding-left:16px!important}.status{font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 portrait;margin:8mm}button{display:none}}`;
+  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.status{font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
 }
 
 function currentAccountImputationsByMovement() {
@@ -542,7 +649,8 @@ function currentAccountReportMovementRows(rows, imputationsByMovement) {
         <td></td>
         <td></td>
       </tr>`).join("");
-    return `<tr>
+    const cashClass = normalizeSearch(movement.concepto).includes("efectivo") ? "movement-cash" : "";
+    return `<tr class="${cashClass}">
       <td>${escapeHtml(movement.fecha || "-")}</td>
       <td>${escapeHtml(movement.vencimiento || "-")}</td>
       <td>${escapeHtml(movement.cliente || "-")}</td>
@@ -2291,6 +2399,8 @@ async function init() {
   $all("nav button").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
+  $("#mobile-refresh").addEventListener("click", reloadAppData);
+  $("#download-backup").addEventListener("click", downloadBackup);
 
   $("#client-search").addEventListener("input", renderClientes);
   $("#client-show-all").addEventListener("click", () => {
@@ -2508,27 +2618,7 @@ async function init() {
   const health = await fetchJson("/api/health");
   $("#status").textContent = health.modo === "postgres" ? "PostgreSQL conectado" : "Backup local";
 
-  const [clientes, operaciones, cuenta, categorias, tabs] = await Promise.all([
-    fetchJson("/api/clientes"),
-    fetchJson("/api/operaciones"),
-    fetchJson("/api/cuenta-corriente/resumen"),
-    fetchJson("/api/categorias"),
-    fetchJson("/api/tabs")
-  ]);
-
-  state.clientes = clientes.items || [];
-  state.operaciones = operaciones.items || [];
-  state.cuenta = cuenta;
-  state.categorias = categorias.items || [];
-  state.tabRules = tabs.items || [];
-
-  renderMetrics();
-  renderClientes();
-  renderOperaciones();
-  renderCategories();
-  renderTabRules();
-  renderCuentaCorriente();
-  populateCurrentAccountClients();
+  await reloadAppData();
   setSelectOptions("#operation-renspa-origin-select", [], "Elegir RENSPA origen");
   setSelectOptions("#operation-renspa-destination-select", [], "Elegir RENSPA destino");
   $("#operation-date").value = new Date().toISOString().slice(0, 10);
