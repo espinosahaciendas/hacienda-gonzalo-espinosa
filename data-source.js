@@ -310,7 +310,7 @@ function buildOperationAccountMovements(operation) {
       cliente: operation.vendedor || draft.vendedor,
       role: "VENDEDOR-FACT",
       amount: -Math.abs(Number(liq.netoLiquidacionProd || 0)),
-      plan: draft.planFacturadoProd || "0",
+      plan: draft.planFacturadoProd || liq.planFacturadoProd || "0",
       comprobante: liq.comprobanteProd || draft.comprobanteProd,
       counterpart: operation.comprador || draft.comprador || operation.consignataria || draft.consignataria,
       conceptSuffix: "liquidacion vendedor"
@@ -321,7 +321,7 @@ function buildOperationAccountMovements(operation) {
       cliente: operation.vendedor || draft.vendedor,
       role: "VENDEDOR-EFEC",
       amount: -Math.abs(Number(liq.efectivoProd || 0)),
-      plan: draft.planEfectivoProd || "0",
+      plan: draft.planEfectivoProd || liq.planEfectivoProd || "0",
       comprobante: liq.comprobanteProd || draft.comprobanteProd,
       counterpart: operation.comprador || draft.comprador || operation.consignataria || draft.consignataria,
       conceptSuffix: "efectivo vendedor"
@@ -332,7 +332,7 @@ function buildOperationAccountMovements(operation) {
       cliente: operation.comprador || draft.comprador,
       role: "COMPRADOR-FACT",
       amount: Math.abs(Number(liq.netoLiquidacionComp || 0)),
-      plan: draft.planFacturadoComp || "0",
+      plan: draft.planFacturadoComp || liq.planFacturadoComp || "0",
       comprobante: liq.comprobanteComp || draft.comprobanteComp,
       counterpart: operation.vendedor || draft.vendedor,
       conceptSuffix: "liquidacion comprador"
@@ -343,7 +343,7 @@ function buildOperationAccountMovements(operation) {
       cliente: operation.comprador || draft.comprador,
       role: "COMPRADOR-EFEC",
       amount: Math.abs(Number(liq.efectivoComp || 0)),
-      plan: draft.planEfectivoComp || "0",
+      plan: draft.planEfectivoComp || liq.planEfectivoComp || "0",
       comprobante: liq.comprobanteComp || draft.comprobanteComp,
       counterpart: operation.vendedor || draft.vendedor,
       conceptSuffix: "efectivo comprador"

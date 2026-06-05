@@ -32,6 +32,7 @@
         <button data-view="clientes">Clientes</button>
         <button data-view="operaciones">Operaciones</button>
         <button data-view="cuenta">Cuenta corriente</button>
+        <button data-view="comisionistas">Comisionistas</button>
       </nav>
     </aside>
 
@@ -191,6 +192,7 @@
                   <option>Consignataria</option>
                   <option>Transportista</option>
                   <option>Proveedor</option>
+                  <option>Comisionista</option>
                 </select>
               </label>
             </div>
@@ -972,7 +974,7 @@
               </div>
             </div>
             <div class="cc-subpanel">
-              <div class="panel-head"><h3>Imputar a movimientos pendientes</h3><span class="subtle" id="cc-imputation-summary">Seleccione un cliente</span></div>
+              <div class="panel-head"><h3>Imputar pendientes / descontar comisiones</h3><span class="subtle" id="cc-imputation-summary">Seleccione un cliente</span></div>
               <div class="table-wrap compact-table"><table><thead><tr><th></th><th>Vto.</th><th>Concepto</th><th>Comprobante</th><th>Importe</th></tr></thead><tbody id="cc-imputation-body"></tbody></table></div>
             </div>
             <div class="form-actions">
@@ -1026,6 +1028,53 @@
                 </tr>
               </thead>
               <tbody id="cc-due-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="comisionistas" class="view">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Liquidacion de comisionistas</h2>
+              <p class="subtle">Seleccione operaciones, aplique un porcentaje y genere un movimiento a pagar en cuenta corriente.</p>
+            </div>
+          </div>
+          <div class="form-grid">
+            <label>Comisionista<input id="commissionist-client" list="commissionist-client-list" autocomplete="off"></label>
+            <label>Desde<input id="commissionist-from" type="date"></label>
+            <label>Hasta<input id="commissionist-to" type="date"></label>
+            <label>% comision<input id="commissionist-percent" inputmode="decimal" value="1"></label>
+            <label>Vencimiento / pago<input id="commissionist-due" type="date"></label>
+          </div>
+          <datalist id="commissionist-client-list"></datalist>
+          <div class="form-actions">
+            <button type="button" class="ghost-button" id="commissionist-load">Buscar operaciones</button>
+            <button type="button" class="primary-button" id="commissionist-generate">Generar cuenta corriente</button>
+          </div>
+          <p class="form-message" id="commissionist-message"></p>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Operaciones del periodo</h2>
+            <span class="subtle" id="commissionist-summary">Sin operaciones seleccionadas</span>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Fecha</th>
+                  <th>Operacion</th>
+                  <th>Vendedor</th>
+                  <th>Comprador</th>
+                  <th>Comprobante</th>
+                  <th>Base</th>
+                  <th>Comision</th>
+                </tr>
+              </thead>
+              <tbody id="commissionist-body"></tbody>
             </table>
           </div>
         </div>
