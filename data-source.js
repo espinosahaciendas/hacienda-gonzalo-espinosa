@@ -929,6 +929,15 @@ class BackupDataSource {
     writeJson(this.appDataPath, data);
   }
 
+  async exportBackup() {
+    const data = this.readData();
+    return {
+      ...data,
+      exportadoEn: new Date().toISOString(),
+      origen: this.mode()
+    };
+  }
+
   async health() {
     return {
       ok: true,
@@ -1794,6 +1803,7 @@ class PostgresJsonDataSource extends BackupDataSource {
   async saveMovimientoExterno(input) { return this.withRemoteData(() => super.saveMovimientoExterno(input), true); }
   async savePagoCobro(input) { return this.withRemoteData(() => super.savePagoCobro(input), true); }
   async anularPagoCobro(paymentId) { return this.withRemoteData(() => super.anularPagoCobro(paymentId), true); }
+  async exportBackup() { return this.withRemoteData(() => super.exportBackup()); }
 }
 
 function verifyPassword(password, storedHash) {
