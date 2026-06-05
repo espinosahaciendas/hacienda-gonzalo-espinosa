@@ -797,7 +797,7 @@ async function saveCurrentAccountPayment(printReceipt = false) {
 }
 
 function commissionistDateInRange(operation, from, to) {
-  const date = parseDisplayDate(operation.fecha);
+  const date = parseDisplayDate(operation.fecha || operation.vencimiento);
   if (!date) return false;
   if (from && date < from) return false;
   if (to && date > to) return false;
@@ -818,7 +818,7 @@ function renderCommissionistRows() {
   const selectedBase = selectedRows.reduce((sum, row) => sum + Number(row.base || 0), 0);
   const selectedCommission = selectedBase * percent / 100;
   $("#commissionist-summary").textContent = selectedRows.length
-    ? `${selectedRows.length} operacion/es - base ${moneyValue(selectedBase)} - comision ${moneyValue(selectedCommission)}`
+    ? `${selectedRows.length} item/s - base ${moneyValue(selectedBase)} - comision ${moneyValue(selectedCommission)}`
     : state.commissionistRows.length ? "Seleccione operaciones para liquidar." : "Sin operaciones seleccionadas";
   $("#commissionist-body").innerHTML = state.commissionistRows.length
     ? state.commissionistRows.map((row) => {
@@ -826,6 +826,7 @@ function renderCommissionistRows() {
         return `<tr>
           <td><input type="checkbox" data-commissionist-row="${escapeHtml(row.id)}" ${row.selected ? "checked" : ""}></td>
           <td>${escapeHtml(row.fecha || "-")}</td>
+          <td>${escapeHtml(row.origen || "-")}</td>
           <td>${escapeHtml(row.id)}</td>
           <td>${escapeHtml(row.vendedor || "-")}</td>
           <td>${escapeHtml(row.comprador || "-")}</td>
@@ -834,7 +835,7 @@ function renderCommissionistRows() {
           <td>${moneyValue(commission)}</td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="8">Busque operaciones por periodo.</td></tr>`;
+    : `<tr><td colspan="9">Busque operaciones y movimientos externos por periodo.</td></tr>`;
 }
 
 async function loadCommissionistOperations() {
@@ -859,6 +860,7 @@ async function loadCommissionistOperations() {
       return {
         id: detail.id,
         fecha: detail.fecha,
+        origen: "Operacion",
         vendedor: detail.vendedor,
         comprador: detail.comprador,
         comprobante: liq.comprobanteProd || liq.comprobanteComp || "",
@@ -866,7 +868,23 @@ async function loadCommissionistOperations() {
         selected: true
       };
     })
-    .filter((row) => Number(row.base || 0) > 0)
+    .filter((row) => Number(row.base || 0) > 0);
+  const externalRows = (state.cuenta?.movimientos || [])
+    .filter((movement) => String(movement.origen || "").toUpperCase() === "EXTERNO")
+    .filter((movement) => !normalizeSearch(movement.concepto).includes("comisionista"))
+    .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
+    .map((movement) => ({
+      id: movement.id,
+      fecha: movement.fecha || movement.vencimiento,
+      origen: "Movimiento externo",
+      vendedor: movement.cliente,
+      comprador: movement.concepto || "-",
+      comprobante: movement.comprobante || "",
+      base: Math.abs(Number(movement.importe || 0)),
+      selected: true
+    }))
+    .filter((row) => Number(row.base || 0) > 0);
+  state.commissionistRows = [...state.commissionistRows, ...externalRows]
     .sort((a, b) => (parseDisplayDate(a.fecha)?.getTime() || 0) - (parseDisplayDate(b.fecha)?.getTime() || 0));
   renderCommissionistRows();
   $("#commissionist-message").textContent = state.commissionistRows.length ? "Operaciones listas para revisar." : "No se encontraron operaciones liquidadas en el periodo.";
