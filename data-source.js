@@ -682,6 +682,38 @@ function operationBuyerTotal(operation) {
     .reduce((sum, line) => sum + Number(line.importeComp || line.importeVend || 0), 0);
 }
 
+function saleInputForOperation(operation, input) {
+  const isFaena = normalizeKey(operation.destino || operation.draftData.destino).includes("FAENA");
+  if (!isFaena) return input;
+  return {
+    ...input,
+    desbasteVend: 0,
+    kgNetoVend: "",
+    tipoPrecioVend: "KG",
+    tabVend: "",
+    compradorDiferente: Boolean(input.compradorDiferente),
+    desbasteComp: 0,
+    kgComp: "",
+    tipoPrecioComp: "KG",
+    tabComp: "",
+    usarKgRealVend: false,
+    usarKgRealComp: false,
+    kgCalculoVend: "",
+    kgCalculoComp: "",
+    promUsadoVend: "",
+    promUsadoComp: ""
+  };
+}
+
+function touchOperationSale(operation) {
+  const total = operationTotal(operation);
+  operation.total = formatMoney(total);
+  operation.estado = "BORRADOR";
+  operation.draftData.totalVentaVend = total;
+  operation.liquidacionEstado = operation.draftData && operation.draftData.liquidacionConfirmada ? "BORRADOR" : operation.liquidacionEstado;
+  return total;
+}
+
 function calculateLiquidacion(operation, input = {}) {
   const draft = operation.draftData || {};
   const source = { ...draft, ...input };
@@ -977,6 +1009,113 @@ class BackupDataSource {
     return saved;
   }
 
+  clientReferenceCount(data, clientName) {
+    const key = normalizeKey(clientName);
+    let count = 0;
+    asArray(data.operations).forEach((operation) => {
+      const draft = operation.draftData || {};
+      [operation.vendedor, operation.comprador, operation.consignataria, draft.vendedor, draft.comprador, draft.consignataria]
+        .forEach((name) => { if (normalizeKey(name) === key) count += 1; });
+    });
+    asArray(data.currentAccountManualMovements).forEach((movement) => {
+      if (normalizeKey(movement.cliente) === key) count += 1;
+    });
+    asArray(data.currentAccountPayments).forEach((payment) => {
+      if (normalizeKey(payment.cliente) === key) count += 1;
+      const counterparty = payment.contrapartida || {};
+      if (normalizeKey(counterparty.cliente) === key) count += 1;
+    });
+    return count;
+  }
+
+  replaceClientNameReferences(data, sourceName, targetClient) {
+    const sourceKey = normalizeKey(sourceName);
+    const targetName = targetClient.nombre;
+    const targetCuit = targetClient.cuit || "";
+    const replaceName = (name) => normalizeKey(name) === sourceKey ? targetName : name;
+    asArray(data.establishments).forEach((item) => {
+      item.cliente = replaceName(item.cliente);
+    });
+    asArray(data.operations).forEach((operation) => {
+      const draft = operation.draftData || {};
+      if (normalizeKey(operation.vendedor) === sourceKey) {
+        operation.vendedor = targetName;
+        operation.vendedorCuit = targetCuit;
+      }
+      if (normalizeKey(operation.comprador) === sourceKey) {
+        operation.comprador = targetName;
+        operation.compradorCuit = targetCuit;
+      }
+      if (normalizeKey(operation.consignataria) === sourceKey) operation.consignataria = targetName;
+      if (normalizeKey(draft.vendedor) === sourceKey) {
+        draft.vendedor = targetName;
+        draft.vendedorCuit = targetCuit;
+      }
+      if (normalizeKey(draft.comprador) === sourceKey) {
+        draft.comprador = targetName;
+        draft.compradorCuit = targetCuit;
+      }
+      if (normalizeKey(draft.consignataria) === sourceKey) draft.consignataria = targetName;
+    });
+    asArray(data.currentAccountManualMovements).forEach((movement) => {
+      movement.cliente = replaceName(movement.cliente);
+    });
+    asArray(data.currentAccountPayments).forEach((payment) => {
+      payment.cliente = replaceName(payment.cliente);
+      if (payment.contrapartida) payment.contrapartida.cliente = replaceName(payment.contrapartida.cliente);
+    });
+  }
+
+  async mergeCliente(sourceId, input) {
+    const data = this.readData();
+    const clients = asArray(data.clients);
+    const sourceIndex = clients.findIndex((client) => String(client.id || normalizeKey(client.nombre)) === String(sourceId));
+    const source = clients[sourceIndex];
+    if (!source) {
+      const error = new Error("No se encontro el cliente a fusionar.");
+      error.statusCode = 404;
+      throw error;
+    }
+    const targetName = normalizeText(input.targetName);
+    const target = clients.find((client) => normalizeKey(client.nombre) === normalizeKey(targetName) && String(client.id || normalizeKey(client.nombre)) !== String(sourceId));
+    if (!target) {
+      const error = new Error("No se encontro el cliente correcto de destino.");
+      error.statusCode = 404;
+      throw error;
+    }
+    this.replaceClientNameReferences(data, source.nombre, {
+      nombre: normalizeText(target.nombre),
+      cuit: target.cuit || ""
+    });
+    clients.splice(sourceIndex, 1);
+    data.clients = clients;
+    this.saveData(data);
+    return { fusionado: source.nombre, destino: target.nombre };
+  }
+
+  async deleteCliente(clientId) {
+    const data = this.readData();
+    const clients = asArray(data.clients);
+    const index = clients.findIndex((client) => String(client.id || normalizeKey(client.nombre)) === String(clientId));
+    const client = clients[index];
+    if (!client) {
+      const error = new Error("No se encontro el cliente.");
+      error.statusCode = 404;
+      throw error;
+    }
+    const references = this.clientReferenceCount(data, client.nombre);
+    if (references > 0) {
+      const error = new Error("El cliente tiene operaciones o movimientos. Primero fusionelo con el cliente correcto.");
+      error.statusCode = 409;
+      throw error;
+    }
+    data.establishments = asArray(data.establishments).filter((item) => normalizeKey(item.cliente) !== normalizeKey(client.nombre));
+    clients.splice(index, 1);
+    data.clients = clients;
+    this.saveData(data);
+    return { eliminado: client.nombre };
+  }
+
   async getEstablecimientos(clienteId) {
     const data = this.readData();
     const clientes = await this.getClientes();
@@ -1240,29 +1379,7 @@ class BackupDataSource {
     if (!operation.draftData) operation.draftData = {};
     if (!Array.isArray(operation.draftData.saleLines)) operation.draftData.saleLines = [];
 
-    const isFaena = normalizeKey(operation.destino || operation.draftData.destino).includes("FAENA");
-    const faenaBuyerDifferent = Boolean(input.compradorDiferente);
-    const saleInput = isFaena
-      ? {
-          ...input,
-          desbasteVend: 0,
-          kgNetoVend: "",
-          tipoPrecioVend: "KG",
-          tabVend: "",
-          compradorDiferente: faenaBuyerDifferent,
-          desbasteComp: 0,
-          kgComp: "",
-          tipoPrecioComp: "KG",
-          tabComp: "",
-          usarKgRealVend: false,
-          usarKgRealComp: false,
-          kgCalculoVend: "",
-          kgCalculoComp: "",
-          promUsadoVend: "",
-          promUsadoComp: ""
-        }
-      : input;
-    const line = calculateSaleLine(saleInput, data.tabRules);
+    const line = calculateSaleLine(saleInputForOperation(operation, input), data.tabRules);
     if (!line.categoria) {
       const error = new Error("Falta cargar la categoria.");
       error.statusCode = 400;
@@ -1276,13 +1393,73 @@ class BackupDataSource {
       data.categories = categories.sort((a, b) => String(a).localeCompare(String(b), "es"));
     }
 
-    const total = operationTotal(operation);
-    operation.total = formatMoney(total);
-    operation.estado = "BORRADOR";
-    operation.draftData.totalVentaVend = total;
+    touchOperationSale(operation);
     data.operations = operations;
     this.saveData(data);
     return { operation, line };
+  }
+
+  async updateVentaLinea(operationId, lineId, input) {
+    const data = this.readData();
+    const operations = asArray(data.operations);
+    const operation = operations.find((item) => String(item.id) === String(operationId));
+    if (!operation) {
+      const error = new Error("No se encontro la operacion.");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (!operation.draftData) operation.draftData = {};
+    if (!Array.isArray(operation.draftData.saleLines)) operation.draftData.saleLines = [];
+
+    const index = operation.draftData.saleLines.findIndex((line) => String(line.id) === String(lineId));
+    if (index < 0) {
+      const error = new Error("No se encontro la linea de venta.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const line = calculateSaleLine(saleInputForOperation(operation, { ...input, id: lineId }), data.tabRules);
+    if (!line.categoria) {
+      const error = new Error("Falta cargar la categoria.");
+      error.statusCode = 400;
+      throw error;
+    }
+    operation.draftData.saleLines[index] = line;
+
+    const categories = asArray(data.categories);
+    if (!categories.some((item) => normalizeKey(item) === normalizeKey(line.categoria))) {
+      categories.push(line.categoria);
+      data.categories = categories.sort((a, b) => String(a).localeCompare(String(b), "es"));
+    }
+
+    touchOperationSale(operation);
+    data.operations = operations;
+    this.saveData(data);
+    return { operation, line };
+  }
+
+  async deleteVentaLinea(operationId, lineId) {
+    const data = this.readData();
+    const operations = asArray(data.operations);
+    const operation = operations.find((item) => String(item.id) === String(operationId));
+    if (!operation) {
+      const error = new Error("No se encontro la operacion.");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (!operation.draftData) operation.draftData = {};
+    if (!Array.isArray(operation.draftData.saleLines)) operation.draftData.saleLines = [];
+    const originalLength = operation.draftData.saleLines.length;
+    operation.draftData.saleLines = operation.draftData.saleLines.filter((line) => String(line.id) !== String(lineId));
+    if (operation.draftData.saleLines.length === originalLength) {
+      const error = new Error("No se encontro la linea de venta.");
+      error.statusCode = 404;
+      throw error;
+    }
+    touchOperationSale(operation);
+    data.operations = operations;
+    this.saveData(data);
+    return { operation };
   }
 
   async saveLiquidacion(operationId, input) {
@@ -1596,6 +1773,8 @@ class PostgresJsonDataSource extends BackupDataSource {
 
   async getClientes() { return this.withRemoteData(() => super.getClientes()); }
   async saveCliente(input) { return this.withRemoteData(() => super.saveCliente(input), true); }
+  async mergeCliente(sourceId, input) { return this.withRemoteData(() => super.mergeCliente(sourceId, input), true); }
+  async deleteCliente(clientId) { return this.withRemoteData(() => super.deleteCliente(clientId), true); }
   async getEstablecimientos(clienteId) { return this.withRemoteData(() => super.getEstablecimientos(clienteId)); }
   async saveEstablecimiento(clienteId, input) { return this.withRemoteData(() => super.saveEstablecimiento(clienteId, input), true); }
   async ensureEstablecimiento(clienteId, renspa, nombre) { return this.withRemoteData(() => super.ensureEstablecimiento(clienteId, renspa, nombre), true); }
@@ -1607,6 +1786,8 @@ class PostgresJsonDataSource extends BackupDataSource {
   async saveTabRule(input) { return this.withRemoteData(() => super.saveTabRule(input), true); }
   async getOperacionDetalle(operationId) { return this.withRemoteData(() => super.getOperacionDetalle(operationId)); }
   async saveVentaLinea(operationId, input) { return this.withRemoteData(() => super.saveVentaLinea(operationId, input), true); }
+  async updateVentaLinea(operationId, lineId, input) { return this.withRemoteData(() => super.updateVentaLinea(operationId, lineId, input), true); }
+  async deleteVentaLinea(operationId, lineId) { return this.withRemoteData(() => super.deleteVentaLinea(operationId, lineId), true); }
   async saveLiquidacion(operationId, input) { return this.withRemoteData(() => super.saveLiquidacion(operationId, input), true); }
   async getOperaciones() { return this.withRemoteData(() => super.getOperaciones()); }
   async getCuentaCorrienteResumen() { return this.withRemoteData(() => super.getCuentaCorrienteResumen()); }

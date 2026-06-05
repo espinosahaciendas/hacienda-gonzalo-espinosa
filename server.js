@@ -174,9 +174,22 @@ async function handleApi(req, res) {
   }
 
   const clienteMatch = parsed.pathname.match(/^\/api\/clientes\/([^/]+)$/);
-  if (clienteMatch && req.method === "PUT") {
+  if (clienteMatch) {
+    if (req.method === "PUT") {
+      const body = await readBody(req);
+      sendJson(res, 200, { item: await dataSource.saveCliente({ ...body, id: decodeURIComponent(clienteMatch[1]) }) });
+      return;
+    }
+    if (req.method === "DELETE") {
+      sendJson(res, 200, { item: await dataSource.deleteCliente(decodeURIComponent(clienteMatch[1])) });
+      return;
+    }
+  }
+
+  const clienteMergeMatch = parsed.pathname.match(/^\/api\/clientes\/([^/]+)\/fusionar$/);
+  if (clienteMergeMatch && req.method === "POST") {
     const body = await readBody(req);
-    sendJson(res, 200, { item: await dataSource.saveCliente({ ...body, id: decodeURIComponent(clienteMatch[1]) }) });
+    sendJson(res, 200, { item: await dataSource.mergeCliente(decodeURIComponent(clienteMergeMatch[1]), body) });
     return;
   }
 
@@ -249,6 +262,28 @@ async function handleApi(req, res) {
   if (ventaLineaMatch && req.method === "POST") {
     const body = await readBody(req);
     sendJson(res, 200, { item: await dataSource.saveVentaLinea(decodeURIComponent(ventaLineaMatch[1]), body) });
+    return;
+  }
+
+  const ventaLineaItemMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/venta-lineas\/([^/]+)$/);
+  if (ventaLineaItemMatch && req.method === "PUT") {
+    const body = await readBody(req);
+    sendJson(res, 200, {
+      item: await dataSource.updateVentaLinea(
+        decodeURIComponent(ventaLineaItemMatch[1]),
+        decodeURIComponent(ventaLineaItemMatch[2]),
+        body
+      )
+    });
+    return;
+  }
+  if (ventaLineaItemMatch && req.method === "DELETE") {
+    sendJson(res, 200, {
+      item: await dataSource.deleteVentaLinea(
+        decodeURIComponent(ventaLineaItemMatch[1]),
+        decodeURIComponent(ventaLineaItemMatch[2])
+      )
+    });
     return;
   }
 

@@ -144,6 +144,30 @@
             </div>
             <p class="form-message" id="client-message"></p>
 
+            <div class="renspa-panel" id="client-maintenance-panel" hidden>
+              <div class="panel-head">
+                <h2>Depurar cliente</h2>
+              </div>
+              <p class="subtle">Use fusionar cuando un cliente fue cargado con dos nombres. Las operaciones y cuenta corriente pasan al cliente correcto.</p>
+              <div class="form-grid">
+                <label>
+                  Fusionar este cliente en
+                  <input id="client-merge-target" list="cc-client-list" placeholder="Cliente correcto">
+                </label>
+                <label>
+                  Accion
+                  <select id="client-maintenance-action">
+                    <option value="MERGE">Fusionar con cliente correcto</option>
+                    <option value="DELETE">Eliminar sólo si no tiene movimientos</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="client-merge">Aplicar depuracion</button>
+              </div>
+              <p class="form-message" id="client-maintenance-message"></p>
+            </div>
+
             <div class="renspa-panel" id="renspa-panel" hidden>
               <div class="panel-head">
                 <h2>RENSPA / establecimientos</h2>
@@ -353,6 +377,7 @@
                         <th>Kg vend.</th>
                         <th>Precio</th>
                         <th>Importe vend.</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody id="sale-lines-body"></tbody>
@@ -491,7 +516,8 @@
                   <p class="form-message" id="tab-message"></p>
                 </div>
                 <div class="form-actions">
-                  <button type="submit" class="primary-button">Agregar linea</button>
+                  <button type="submit" class="primary-button" id="sale-line-save">Agregar linea</button>
+                  <button type="button" class="ghost-button" id="sale-line-cancel-edit" hidden>Cancelar edicion</button>
                 </div>
                 <p class="form-message" id="sale-message"></p>
               </form>
@@ -501,7 +527,7 @@
                 <div class="section-head">
                   <div>
                     <h3>Administrar categorias</h3>
-                    <p class="subtle">Corrija o retire de la lista las categorias incompletas. El historial de ventas cargadas no se modifica.</p>
+                    <p class="subtle">Corrija o retire categorias de la lista mientras carga la venta. El historial de ventas ya cargadas no se modifica.</p>
                   </div>
                   <button type="button" class="ghost-button" id="category-admin-toggle">Abrir listado</button>
                 </div>

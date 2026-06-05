@@ -10,6 +10,7 @@ const state = {
   tabRules: [],
   currentOperation: null,
   operationStep: "operation",
+  editingSaleLineId: "",
   usuario: null
 };
 let currentPaymentInstruments = [];
@@ -782,6 +783,7 @@ async function saveCategory(original, value) {
       body: JSON.stringify({ nombre: value })
     });
     await reloadCategories();
+    renderCategorySuggestions();
     setCategoryAdminMessage("Categoria actualizada correctamente.", "ok");
   } catch (error) {
     setCategoryAdminMessage(error.message, "error");
@@ -790,8 +792,11 @@ async function saveCategory(original, value) {
 
 async function deleteCategory(category) {
   try {
+    const confirmed = window.confirm(`Se quitara "${category}" del listado de categorias. Las ventas ya cargadas no se modifican. ¿Continuar?`);
+    if (!confirmed) return;
     await fetchJson(`/api/categorias/${encodeURIComponent(category)}`, { method: "DELETE" });
     await reloadCategories();
+    renderCategorySuggestions();
     setCategoryAdminMessage("Categoria retirada de la lista.", "ok");
   } catch (error) {
     setCategoryAdminMessage(error.message, "error");
@@ -878,9 +883,13 @@ function renderSaleLines(lines) {
           <td>${escapeHtml(line.kgNetoVend || 0)}</td>
           <td>${currency.format(Number(line.precioVend || 0))}</td>
           <td>${currency.format(Number(line.importeVend || 0))}</td>
+          <td class="row-actions">
+            <button type="button" class="small-button" data-edit-sale-line="${escapeHtml(line.id)}">Editar</button>
+            <button type="button" class="small-button danger-button" data-delete-sale-line="${escapeHtml(line.id)}">Quitar</button>
+          </td>
         </tr>
       `).join("")
-    : `<tr><td colspan="5">Sin lineas cargadas todavia.</td></tr>`;
+    : `<tr><td colspan="6">Sin lineas cargadas todavia.</td></tr>`;
 }
 
 function moneyValue(value) {
@@ -1528,6 +1537,9 @@ async function openSale(operationId, step = "sale") {
   setOperationModeExisting(operation);
   $("#sale-operation-label").textContent = `${operation.id} - ${operation.vendedor || ""} / ${operation.comprador || operation.consignataria || ""}`;
   renderSaleLines(operation.saleLines || []);
+  $("#category-admin-panel").hidden = false;
+  $("#category-admin-toggle").textContent = "Cerrar listado";
+  renderCategoryAdmin();
   fillLiquidationForm(operation.liquidacion || {});
   renderReport();
   setOperationStep(step);
@@ -1589,6 +1601,7 @@ function resetOperationForm() {
   $("#operation-id").value = "";
   state.selectedOperationId = "";
   state.currentOperation = null;
+  state.editingSaleLineId = "";
   $("#sale-panel").hidden = true;
   $("#liquidation-panel").hidden = true;
   $("#report-panel").hidden = true;
@@ -1598,6 +1611,8 @@ function resetOperationForm() {
   $("#report-sheet").innerHTML = "";
   $("#sale-desbaste-vend").value = "0";
   $("#sale-desbaste-comp").value = "0";
+  $("#sale-line-save").textContent = "Agregar linea";
+  $("#sale-line-cancel-edit").hidden = true;
   syncSaleMode();
   setSelectOptions("#operation-renspa-origin-select", [], "Elegir RENSPA origen");
   setSelectOptions("#operation-renspa-destination-select", [], "Elegir RENSPA destino");
@@ -1734,6 +1749,79 @@ function syncBuyerDiff() {
   renderSalePreview();
 }
 
+function resetSaleLineForm() {
+  state.editingSaleLineId = "";
+  $("#sale-form").reset();
+  $("#sale-line-save").textContent = "Agregar linea";
+  $("#sale-line-cancel-edit").hidden = true;
+  $("#sale-category-suggestions").hidden = true;
+  $("#sale-category-suggestions").innerHTML = "";
+  $("#sale-desbaste-vend").value = "0";
+  $("#sale-desbaste-comp").value = "0";
+  syncSaleMode();
+  syncBuyerDiff();
+  renderSalePreview();
+}
+
+function fillSaleLineForm(line) {
+  state.editingSaleLineId = line.id;
+  $("#sale-category").value = line.categoria || "";
+  $("#sale-heads").value = line.cabezas || "";
+  $("#sale-kg-bruto").value = line.kgBruto || "";
+  $("#sale-desbaste-vend").value = line.desbasteVend || "0";
+  $("#sale-kg-neto-vend").value = line.kgNetoVend || "";
+  $("#sale-tipo-precio-vend").value = line.tipoPrecioVend || "KG";
+  $("#sale-precio-vend").value = line.precioVend || "";
+  $("#sale-tab-vend").value = line.tabVend || "";
+  $("#sale-use-real-kg-vend").checked = Boolean(line.usarKgRealVend);
+  $("#sale-kg-calc-vend").value = line.kgCalculoVend || "";
+  $("#sale-prom-used-vend").value = line.promUsadoVend || "";
+  $("#sale-final-price-manual-vend").value = line.precioFinalManualVend || "";
+  $("#sale-amount-manual-vend").value = line.importeManualVend || "";
+
+  $("#sale-buyer-different").checked = Boolean(line.compradorDiferente);
+  $("#sale-buyer-different-faena").checked = Boolean(line.compradorDiferente);
+  $("#sale-desbaste-comp").value = line.desbasteComp || "0";
+  $("#sale-kg-comp").value = line.kgComp || "";
+  $("#sale-tipo-precio-comp").value = line.tipoPrecioComp || "KG";
+  $("#sale-precio-comp").value = line.precioComp || "";
+  $("#sale-tab-comp").value = line.tabComp || "";
+  $("#sale-use-real-kg-comp").checked = Boolean(line.usarKgRealComp);
+  $("#sale-kg-calc-comp").value = line.kgCalculoComp || "";
+  $("#sale-prom-used-comp").value = line.promUsadoComp || "";
+  $("#sale-final-price-manual-comp").value = line.precioFinalManualComp || "";
+  $("#sale-amount-manual-comp").value = line.importeManualComp || "";
+
+  $("#sale-line-save").textContent = "Guardar cambios";
+  $("#sale-line-cancel-edit").hidden = false;
+  syncSaleMode();
+  syncBuyerDiff();
+  renderSalePreview();
+  $("#sale-form").scrollIntoView({ behavior: "smooth", block: "start" });
+  setSaleMessage("Editando linea cargada. Guarde cambios o cancele.", "ok");
+}
+
+async function deleteSaleLine(lineId) {
+  if (!state.selectedOperationId || !lineId) return;
+  const confirmed = window.confirm("Se quitara solo esta linea de venta. La operacion queda cargada. ¿Continuar?");
+  if (!confirmed) return;
+  setSaleMessage("Quitando linea...");
+  try {
+    await fetchJson(`/api/operaciones/${encodeURIComponent(state.selectedOperationId)}/venta-lineas/${encodeURIComponent(lineId)}`, {
+      method: "DELETE"
+    });
+    const operaciones = await fetchJson("/api/operaciones");
+    state.operaciones = operaciones.items || [];
+    renderOperaciones();
+    renderMetrics();
+    await openSale(state.selectedOperationId, "sale");
+    resetSaleLineForm();
+    setSaleMessage("Linea quitada correctamente.", "ok");
+  } catch (error) {
+    setSaleMessage(error.message, "error");
+  }
+}
+
 async function saveSaleLine(event) {
   event.preventDefault();
   if (!state.selectedOperationId) {
@@ -1772,8 +1860,12 @@ async function saveSaleLine(event) {
   };
 
   try {
-    await fetchJson(`/api/operaciones/${encodeURIComponent(state.selectedOperationId)}/venta-lineas`, {
-      method: "POST",
+    const editingLineId = state.editingSaleLineId;
+    const url = editingLineId
+      ? `/api/operaciones/${encodeURIComponent(state.selectedOperationId)}/venta-lineas/${encodeURIComponent(editingLineId)}`
+      : `/api/operaciones/${encodeURIComponent(state.selectedOperationId)}/venta-lineas`;
+    await fetchJson(url, {
+      method: editingLineId ? "PUT" : "POST",
       body: JSON.stringify(payload)
     });
     const [operaciones, categorias] = await Promise.all([
@@ -1786,14 +1878,8 @@ async function saveSaleLine(event) {
     renderMetrics();
     renderCategories();
     await openSale(state.selectedOperationId);
-    $("#sale-form").reset();
-    $("#sale-category-suggestions").hidden = true;
-    $("#sale-category-suggestions").innerHTML = "";
-    $("#sale-desbaste-vend").value = "0";
-    $("#sale-desbaste-comp").value = "0";
-    syncSaleMode();
-    syncBuyerDiff();
-    setSaleMessage("Linea agregada correctamente.", "ok");
+    resetSaleLineForm();
+    setSaleMessage(editingLineId ? "Linea actualizada correctamente." : "Linea agregada correctamente.", "ok");
   } catch (error) {
     setSaleMessage(error.message, "error");
   }
@@ -1912,9 +1998,11 @@ function renderReport() {
   const sellerLines = (operation.saleLines || []).map((line) => `
     <tr><td>${escapeHtml(line.categoria)}</td><td>${escapeHtml(line.cabezas || "")}</td><td>${escapeHtml(line.kgNetoVend || "")}</td><td>${escapeHtml(line.promVend || line.promNeto || "")}</td><td>${moneyValue(line.precioFinalVend || line.precioVend)}</td><td>${moneyValue(line.importeVend)}</td></tr>
   `).join("");
+  const sellerLinesTotal = (operation.saleLines || []).reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
   const buyerLines = (operation.saleLines || []).map((line) => `
     <tr><td>${escapeHtml(line.categoria)}</td><td>${escapeHtml(line.cabezas || "")}</td><td>${escapeHtml(line.kgComp || line.kgNetoVend || "")}</td><td>${escapeHtml(line.promComp || line.promVend || line.promNeto || "")}</td><td>${moneyValue(line.precioFinalComp || line.precioComp || line.precioFinalVend || line.precioVend)}</td><td>${moneyValue(line.importeComp || line.importeVend)}</td></tr>
   `).join("");
+  const buyerLinesTotal = (operation.saleLines || []).reduce((sum, line) => sum + Number(line.importeComp || line.importeVend || 0), 0);
   const operationData = (party, name, cuit, counterpartName, counterpartCuit) => `
     <div class="report-kv">
       <span>${party}</span><strong>${escapeHtml(name || "-")}</strong>
@@ -2002,7 +2090,7 @@ function renderReport() {
         ${reportHeader("REPORTE FINAL PARA PRODUCTOR")}
         ${operationData("Productor", operation.vendedor, sellerCuit, operation.comprador, buyerCuit)}
         ${operationNote}
-        <div class="report-section"><h3>Carga real</h3><table class="report-table"><thead><tr><th>Categoria</th><th>Cant.</th><th>Kg neto</th><th>Prom.</th><th>Precio final</th><th>Importe</th></tr></thead><tbody>${sellerLines}</tbody></table></div>
+        <div class="report-section"><h3>Carga real</h3><table class="report-table"><thead><tr><th>Categoria</th><th>Cant.</th><th>Kg neto</th><th>Prom.</th><th>Precio final</th><th>Importe</th></tr></thead><tbody>${sellerLines}<tr class="report-total"><td colspan="5">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
         ${isDirectOperation(operation) ? detailReport : ""}
         ${frigoReport}
         ${dueReport(sellerDueRows)}
@@ -2025,7 +2113,7 @@ function renderReport() {
         ${reportHeader("REPORTE FINAL PARA COMPRADOR")}
         ${operationData("Comprador", operation.comprador, buyerCuit, operation.vendedor, sellerCuit)}
         ${operationNote}
-        <div class="report-section"><h3>Carga real</h3><table class="report-table"><thead><tr><th>Categoria</th><th>Cant.</th><th>Kg comp.</th><th>Prom.</th><th>Precio final</th><th>Importe</th></tr></thead><tbody>${buyerLines}</tbody></table></div>
+        <div class="report-section"><h3>Carga real</h3><table class="report-table"><thead><tr><th>Categoria</th><th>Cant.</th><th>Kg comp.</th><th>Prom.</th><th>Precio final</th><th>Importe</th></tr></thead><tbody>${buyerLines}<tr class="report-total"><td colspan="5">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
         ${detailReport}
         ${dueReport(buyerDueRows)}
         <div class="report-section"><h3>Liquidacion / facturado</h3><table class="report-table"><tbody>
@@ -2051,6 +2139,9 @@ function resetClientForm() {
   $("#client-form-title").textContent = "Nuevo cliente";
   $("#client-cancel").hidden = true;
   $("#renspa-panel").hidden = true;
+  $("#client-maintenance-panel").hidden = true;
+  $("#client-maintenance-message").textContent = "";
+  $("#client-merge-target").value = "";
   $("#renspa-list").innerHTML = "";
   $("#client-name-suggestions").hidden = true;
   $("#client-name-suggestions").innerHTML = "";
@@ -2087,9 +2178,60 @@ async function editClient(clientId) {
   $("#client-form-title").textContent = "Editar cliente";
   $("#client-cancel").hidden = false;
   $("#renspa-panel").hidden = false;
+  $("#client-maintenance-panel").hidden = false;
+  $("#client-maintenance-message").textContent = "";
+  $("#client-merge-target").value = "";
   setClientMessage("Editando cliente existente.");
   setRenspaMessage("");
   await loadRenspas(client.id);
+}
+
+async function applyClientMaintenance() {
+  if (!state.selectedClientId) {
+    $("#client-maintenance-message").textContent = "Primero seleccione un cliente.";
+    $("#client-maintenance-message").className = "form-message error";
+    return;
+  }
+  const action = $("#client-maintenance-action").value;
+  const currentName = $("#client-name").value;
+  try {
+    if (action === "MERGE") {
+      const targetName = $("#client-merge-target").value;
+      if (!targetName || normalizeSearch(targetName) === normalizeSearch(currentName)) {
+        throw new Error("Indique el cliente correcto de destino.");
+      }
+      const confirmed = window.confirm(`Se fusionara "${currentName}" dentro de "${targetName}". Las operaciones y cuenta corriente pasaran al cliente correcto. ¿Continuar?`);
+      if (!confirmed) return;
+      await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}/fusionar`, {
+        method: "POST",
+        body: JSON.stringify({ targetName })
+      });
+      $("#client-search").value = targetName;
+    } else {
+      const confirmed = window.confirm(`Se intentara eliminar "${currentName}". Solo se permite si no tiene operaciones ni movimientos. ¿Continuar?`);
+      if (!confirmed) return;
+      await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}`, { method: "DELETE" });
+      $("#client-search").value = "";
+    }
+    const [clientes, operaciones, cuenta] = await Promise.all([
+      fetchJson("/api/clientes"),
+      fetchJson("/api/operaciones"),
+      fetchJson("/api/cuenta-corriente/resumen")
+    ]);
+    state.clientes = clientes.items || [];
+    state.operaciones = operaciones.items || [];
+    state.cuenta = cuenta;
+    resetClientForm();
+    renderClientes();
+    renderOperaciones();
+    renderMetrics();
+    populateCurrentAccountClients();
+    $("#client-maintenance-message").textContent = "";
+    setClientMessage("Depuracion aplicada correctamente.", "ok");
+  } catch (error) {
+    $("#client-maintenance-message").textContent = error.message;
+    $("#client-maintenance-message").className = "form-message error";
+  }
 }
 
 async function saveClient(event) {
@@ -2235,6 +2377,21 @@ async function init() {
     button.addEventListener("click", () => setOperationStep(button.dataset.operationStep));
   });
   $("#sale-form").addEventListener("submit", saveSaleLine);
+  $("#sale-line-cancel-edit").addEventListener("click", () => {
+    resetSaleLineForm();
+    setSaleMessage("Edicion cancelada.");
+  });
+  $("#sale-lines-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-edit-sale-line]");
+    if (editButton) {
+      const line = (state.currentOperation && state.currentOperation.saleLines || [])
+        .find((item) => String(item.id) === String(editButton.dataset.editSaleLine));
+      if (line) fillSaleLineForm(line);
+      return;
+    }
+    const deleteButton = event.target.closest("[data-delete-sale-line]");
+    if (deleteButton) deleteSaleLine(deleteButton.dataset.deleteSaleLine);
+  });
   $("#liquidation-form").addEventListener("submit", saveLiquidation);
   $("#sale-buyer-different").addEventListener("change", syncBuyerDiff);
   $("#sale-buyer-different-faena").addEventListener("change", syncBuyerDiff);
@@ -2303,6 +2460,7 @@ async function init() {
   });
   $("#client-form").addEventListener("submit", saveClient);
   $("#client-cancel").addEventListener("click", resetClientForm);
+  $("#client-merge").addEventListener("click", applyClientMaintenance);
   $("#renspa-add").addEventListener("click", addRenspa);
   $("#clientes-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-edit-client]");

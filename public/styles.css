@@ -845,8 +845,8 @@ label textarea {
 }
 
 .report-logo {
-  width: 74px;
-  height: 74px;
+  width: 96px;
+  height: 96px;
   object-fit: contain;
   background: var(--brand);
   border-radius: 6px;
@@ -957,8 +957,8 @@ label textarea {
   }
 
   .report-logo {
-    width: 56px;
-    height: 56px;
+    width: 72px;
+    height: 72px;
     padding: 4px;
   }
 
