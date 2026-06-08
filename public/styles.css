@@ -1218,6 +1218,14 @@ label textarea {
   font-style: italic;
 }
 
+.movement-cash .amount-positive,
+.movement-cash .amount-negative,
+.movement-cash .positive,
+.movement-cash .negative,
+.movement-cash .amount {
+  font-style: italic;
+}
+
 .cc-detail-row td {
   background: #f8fbf9;
   padding: 10px;

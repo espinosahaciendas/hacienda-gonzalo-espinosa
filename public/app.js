@@ -241,7 +241,7 @@ function signedPendingAmount(movement) {
 function mobileMovementCard(movement, showDate = false) {
   const amount = signedPendingAmount(movement);
   return `
-    <article class="mobile-list-item ${normalizeSearch(movement.concepto).includes("efectivo") ? "movement-cash" : ""}">
+    <article class="mobile-list-item ${isCashMovement(movement) ? "movement-cash" : ""}">
       <div>
         <strong>${escapeHtml(movement.cliente || "-")}</strong>
         <span>${escapeHtml(movement.concepto || "-")}</span>
@@ -307,6 +307,10 @@ function renderMobileSummary() {
   $("#mobile-commission-list").innerHTML = commissionRows.length
     ? commissionRows.map((item) => `<article class="mobile-list-item"><div><strong>${escapeHtml(item.cliente)}</strong><span>Comision pendiente</span></div><b class="${amountClass(item.saldo)}">${moneyValue(item.saldo)}</b></article>`).join("")
     : `<p class="empty-mobile">Sin comisiones pendientes.</p>`;
+}
+
+function isCashMovement(movement) {
+  return normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.origen || ""}`).includes("efectivo");
 }
 
 function movementAccountEntities(movement) {
@@ -416,6 +420,8 @@ function renderCuentaCorriente() {
   const statusFilter = $("#cc-status-filter").value;
   const conceptFilter = $("#cc-concept-filter").value;
   const dueFilter = $("#cc-due-filter").value;
+  const dateFrom = parseInputDate($("#cc-date-from").value);
+  const dateTo = parseInputDate($("#cc-date-to").value);
   const words = query.split(" ").filter(Boolean);
   const exactClient = viewMode === "CLIENTE" ? getExactCurrentAccountClient(query) : "";
   const exactConsignee = viewMode === "CONSIGNATARIA" ? getExactCurrentAccountConsignee(query) : "";
@@ -430,6 +436,7 @@ function renderCuentaCorriente() {
     if (!matchesEntity) return false;
     if (statusFilter !== "TODOS" && String(movement.estado || "").toUpperCase() !== statusFilter) return false;
     if (conceptFilter === "COMISION" && (String(movement.origen || "").toUpperCase() !== "COMISION" || String(movement.estado || "").toUpperCase() === "IMPUTADO")) return false;
+    if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
   const balance = movements.reduce((sum, movement) => sum + Number(movement.importe || 0), 0);
@@ -444,7 +451,7 @@ function renderCuentaCorriente() {
     ? movements.slice(0, 200).map((movement) => {
         const detail = commissionistDetailFromObservation(movement.observacion);
         return `
-        <tr class="${normalizeSearch(movement.concepto).includes("efectivo") ? "movement-cash" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
+        <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
           <td>${escapeHtml(movement.fecha || "-")}</td>
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
@@ -468,11 +475,12 @@ function renderCuentaCorriente() {
         : matchesCurrentAccountClientSearch(movement, words, exactClient);
     if (!matchesEntity) return false;
     if (conceptFilter === "COMISION" && String(movement.origen || "").toUpperCase() !== "COMISION") return false;
+    if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
   $("#cc-due-body").innerHTML = due.length
     ? due.slice(0, 80).map((movement) => `
-        <tr class="${normalizeSearch(movement.concepto).includes("efectivo") ? "movement-cash" : ""}">
+        <tr class="${isCashMovement(movement) ? "movement-cash" : ""}">
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
           <td>${escapeHtml(movement.concepto || "-")}</td>
@@ -482,6 +490,29 @@ function renderCuentaCorriente() {
         </tr>
       `).join("")
     : `<tr><td colspan="6">Sin vencimientos pendientes para esta busqueda.</td></tr>`;
+}
+
+function parseInputDate(value) {
+  const text = String(value || "");
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function matchesCurrentAccountDateRange(movement, from, to) {
+  if (!from && !to) return true;
+  const date = parseDisplayDate(movement.fecha || movement.vencimiento);
+  if (!date) return false;
+  date.setHours(0, 0, 0, 0);
+  if (from) {
+    from.setHours(0, 0, 0, 0);
+    if (date < from) return false;
+  }
+  if (to) {
+    to.setHours(0, 0, 0, 0);
+    if (date > to) return false;
+  }
+  return true;
 }
 
 function matchesCurrentAccountDueFilter(movement, filter) {
@@ -786,7 +817,11 @@ function getCurrentAccountReportFilters() {
     exactCommissionist: viewMode === "COMISIONISTA" ? getExactCurrentAccountCommissionist(query) : "",
     statusFilter: $("#cc-status-filter").value,
     dueFilter: $("#cc-due-filter").value,
-    conceptFilter: $("#cc-concept-filter").value
+    conceptFilter: $("#cc-concept-filter").value,
+    dateFrom: parseInputDate($("#cc-date-from").value),
+    dateTo: parseInputDate($("#cc-date-to").value),
+    dateFromText: $("#cc-date-from").value,
+    dateToText: $("#cc-date-to").value
   };
 }
 
@@ -799,6 +834,7 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
   return matchesEntity
     && (filters.conceptFilter !== "COMISION" || String(movement.origen || "").toUpperCase() === "COMISION")
     && (!includeStatusFilter || filters.statusFilter === "TODOS" || String(movement.estado || "").toUpperCase() === filters.statusFilter)
+    && matchesCurrentAccountDateRange(movement, filters.dateFrom, filters.dateTo)
     && (!includeDueFilter || matchesCurrentAccountDueFilter(movement, filters.dueFilter));
 }
 
@@ -861,7 +897,7 @@ function currentAccountReportMovementRows(rows, imputationsByMovement) {
         <td></td>
         <td></td>
       </tr>`).join("");
-    const cashClass = normalizeSearch(movement.concepto).includes("efectivo") ? "movement-cash" : "";
+    const cashClass = isCashMovement(movement) ? "movement-cash" : "";
     return `<tr class="${cashClass}">
       <td>${escapeHtml(movement.fecha || "-")}</td>
       <td>${escapeHtml(movement.vencimiento || "-")}</td>
@@ -923,10 +959,11 @@ function printCurrentAccountReport(forcedType = "") {
   const balancesTable = type === "SALDOS" ? `<h2>Saldo por cliente</h2><table class="compact"><thead><tr><th>Cliente</th><th>Saldo</th><th>Comision pendiente</th></tr></thead><tbody>${balanceRows.length ? balanceRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td><td class="amount ${item.comision < 0 ? "negative" : "positive"}">${Math.abs(item.comision) > 0.01 ? moneyValue(item.comision) : "-"}</td></tr>`).join("") : `<tr><td colspan="3">Sin saldos para los filtros aplicados.</td></tr>`}</tbody></table>` : "";
   const commissionsTable = commissionRows.length ? `<h2>Comisiones pendientes</h2><table class="compact"><thead><tr><th>Cliente / productor</th><th>Comision pendiente</th></tr></thead><tbody>${commissionRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td></tr>`).join("")}<tr><th>Total comisiones</th><td class="amount ${commissionTotal < 0 ? "negative" : "positive"}">${moneyValue(commissionTotal)}</td></tr></tbody></table>` : "";
 
-  const filterLabel = $("#cc-client-search").value.trim() || "Todos los clientes";
+  const filterLabel = $("#cc-client-search").value.trim() || (filters.viewMode === "COMISIONISTA" ? "Todos los comisionistas" : filters.viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos los clientes");
+  const periodLabel = `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${currentAccountReportStyles()}</style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${escapeHtml(title)}</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
-  <div class="summary"><div><span>Filtro de cliente</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Saldo de los movimientos</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>Saldo pendiente</span><strong>${moneyValue(pendingBalance)}</strong></div><div><span>Comisiones pendientes</span><strong>${moneyValue(commissionTotal)}</strong></div></div>
+  <div class="summary"><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Periodo</span><strong>${escapeHtml(periodLabel)}</strong></div><div><span>Saldo de los movimientos</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>Saldo pendiente</span><strong>${moneyValue(pendingBalance)}</strong></div><div><span>Comisiones pendientes</span><strong>${moneyValue(commissionTotal)}</strong></div></div>
   ${balancesTable}
   ${commissionsTable}
   <h2>Detalle de movimientos e imputaciones</h2>
@@ -2897,6 +2934,8 @@ async function init() {
   $("#cc-status-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-concept-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-due-filter").addEventListener("change", renderCuentaCorriente);
+  $("#cc-date-from").addEventListener("change", renderCuentaCorriente);
+  $("#cc-date-to").addEventListener("change", renderCuentaCorriente);
   $("#cc-print-report").addEventListener("click", () => printCurrentAccountReport());
   $("#cc-print-due-report").addEventListener("click", printCurrentAccountDueReport);
   $("#cc-open-external").addEventListener("click", () => openCurrentAccountPanel("#cc-external-panel"));
