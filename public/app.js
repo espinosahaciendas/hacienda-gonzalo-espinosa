@@ -497,10 +497,13 @@ function openCurrentAccountPanel(panelId) {
     $("#cc-external-date").value = today;
     $("#cc-external-due").value = today;
     setMoneyInput("#cc-external-amount", 0);
+    setMoneyInput("#cc-external-mag-net", 0);
+    setMoneyInput("#cc-external-mag-iva", 0);
     $("#cc-external-commissionist").value = "";
     setMoneyInput("#cc-external-commission-base", 0);
     $("#cc-external-commission-percent").value = "";
     setMoneyInput("#cc-external-commission-amount", 0);
+    syncExternalConceptFields();
   } else {
     $("#cc-payment-client").value = $("#cc-client-search").value;
     $("#cc-payment-date").value = today;
@@ -516,6 +519,16 @@ function openCurrentAccountPanel(panelId) {
     renderCurrentAccountImputations();
     renderCurrentAccountCounterpartyImputations();
   }
+}
+
+function isExternalMagSale() {
+  return normalizeSearch($("#cc-external-concept").value) === "venta mag";
+}
+
+function syncExternalConceptFields() {
+  const isMag = isExternalMagSale();
+  $("#cc-external-mag-panel").hidden = !isMag;
+  $("#cc-external-amount-wrap").hidden = isMag;
 }
 
 function syncExternalCommissionAmount() {
@@ -624,6 +637,7 @@ function renderCurrentAccountInstruments() {
 
 async function saveExternalCurrentAccountMovement() {
   try {
+    const isMag = isExternalMagSale();
     await fetchJson("/api/cuenta-corriente/movimientos-externos", {
       method: "POST",
       body: JSON.stringify({
@@ -633,7 +647,8 @@ async function saveExternalCurrentAccountMovement() {
         comprobante: $("#cc-external-receipt").value,
         fechaVenta: $("#cc-external-date").value,
         vencimiento: $("#cc-external-due").value,
-        importe: numberValue("#cc-external-amount"),
+        importe: isMag ? numberValue("#cc-external-mag-net") : numberValue("#cc-external-amount"),
+        ivaFiscal: isMag ? numberValue("#cc-external-mag-iva") : 0,
         comisionista: $("#cc-external-commissionist").value,
         baseComision: numberValue("#cc-external-commission-base"),
         porcComision: percentValue("#cc-external-commission-percent"),
@@ -923,6 +938,7 @@ async function loadCommissionistOperations() {
   const externalRows = (state.cuenta?.movimientos || [])
     .filter((movement) => String(movement.origen || "").toUpperCase() === "EXTERNO")
     .filter((movement) => !normalizeSearch(movement.concepto).includes("comisionista"))
+    .filter((movement) => String(movement.tipoDesglose || "").toUpperCase() !== "IVA_FISCAL")
     .filter((movement) => !movement.comisionista || normalizeSearch(movement.comisionista) === normalizeSearch(selectedCommissionist))
     .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
     .map((movement) => ({
@@ -2699,6 +2715,7 @@ async function init() {
   $("#cc-open-external").addEventListener("click", () => openCurrentAccountPanel("#cc-external-panel"));
   $("#cc-close-external").addEventListener("click", () => { $("#cc-external-panel").hidden = true; });
   $("#cc-save-external").addEventListener("click", saveExternalCurrentAccountMovement);
+  $("#cc-external-concept").addEventListener("change", syncExternalConceptFields);
   $("#cc-external-commission-base").addEventListener("input", syncExternalCommissionAmount);
   $("#cc-external-commission-percent").addEventListener("input", syncExternalCommissionAmount);
   $("#cc-open-payment").addEventListener("click", () => openCurrentAccountPanel("#cc-payment-panel"));

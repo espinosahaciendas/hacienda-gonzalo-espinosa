@@ -264,6 +264,7 @@ function pushMovement(list, movement) {
     baseComision: Number(movement.baseComision || 0),
     porcComision: Number(movement.porcComision || 0),
     importeComision: Number(movement.importeComision || 0),
+    tipoDesglose: movement.tipoDesglose || "",
     importe: Math.round(Number(movement.importe || 0) * 100) / 100,
     estado: movement.estado || "PENDIENTE",
     observacion: movement.observacion || ""
@@ -445,6 +446,7 @@ function buildAccountData(data) {
       baseComision: item.baseComision,
       porcComision: item.porcComision,
       importeComision: item.importeComision,
+      tipoDesglose: item.tipoDesglose,
       importe: signedExternalMovement(item),
       estado: "PENDIENTE",
       observacion: item.observacion
@@ -1578,30 +1580,63 @@ class BackupDataSource {
     const data = this.readData();
     const cliente = normalizeText(input.cliente);
     const importe = Math.abs(parseMoney(input.importe));
-    if (!cliente || !importe) {
+    const ivaFiscal = Math.abs(parseMoney(input.ivaFiscal));
+    const concepto = normalizeText(input.concepto || "Movimiento externo");
+    const isVentaMag = normalizeKey(concepto) === "VENTA MAG";
+    if (!cliente || (!importe && !ivaFiscal)) {
       const error = new Error("Falta seleccionar cliente o cargar un importe mayor a cero.");
       error.statusCode = 400;
       throw error;
     }
-    const saved = {
-      id: `EXT-${Date.now()}`,
+    const common = {
       cliente,
       direccion: normalizeText(input.direccion || "PAGAR"),
-      concepto: normalizeText(input.concepto || "Movimiento externo"),
       comprobante: normalizeText(input.comprobante),
       fechaVenta: formatDateForDisplay(input.fechaVenta),
       vencimiento: formatDateForDisplay(input.vencimiento),
-      importe,
       comisionista: normalizeText(input.comisionista),
       baseComision: parseMoney(input.baseComision),
       porcComision: parseMoney(input.porcComision),
       importeComision: parseMoney(input.importeComision),
       observacion: normalizeText(input.observacion)
     };
+    const baseId = `EXT-${Date.now()}`;
+    const savedItems = [];
+    if (isVentaMag) {
+      if (importe) {
+        savedItems.push({
+          id: `${baseId}-NETO`,
+          ...common,
+          concepto: "Venta MAG - Neto disponible",
+          importe,
+          tipoDesglose: "NETO"
+        });
+      }
+      if (ivaFiscal) {
+        savedItems.push({
+          id: `${baseId}-IVA`,
+          ...common,
+          concepto: "Venta MAG - IVA fiscal",
+          importe: ivaFiscal,
+          tipoDesglose: "IVA_FISCAL",
+          comisionista: "",
+          baseComision: 0,
+          porcComision: 0,
+          importeComision: 0
+        });
+      }
+    } else {
+      savedItems.push({
+        id: baseId,
+        ...common,
+        concepto,
+        importe
+      });
+    }
     data.currentAccountManualMovements = asArray(data.currentAccountManualMovements);
-    data.currentAccountManualMovements.push(saved);
+    data.currentAccountManualMovements.push(...savedItems);
     this.saveData(data);
-    return saved;
+    return savedItems.length === 1 ? savedItems[0] : { items: savedItems };
   }
 
   async savePagoCobro(input) {

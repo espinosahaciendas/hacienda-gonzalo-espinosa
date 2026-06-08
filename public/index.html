@@ -926,12 +926,32 @@
             <div class="form-grid">
               <label>Cliente<input id="cc-external-client" list="cc-client-list"></label>
               <label>Tipo<select id="cc-external-direction"><option value="PAGAR">A pagar al cliente</option><option value="COBRAR">A cobrar al cliente</option></select></label>
-              <label>Concepto<input id="cc-external-concept" value="Venta Mercado Agroganadero"></label>
+              <label>Concepto<select id="cc-external-concept">
+                <option>Venta MAG</option>
+                <option>Venta a Feria</option>
+                <option>Flete</option>
+                <option>Gastos DTe</option>
+                <option>Gastos Guías</option>
+                <option>Pesadas</option>
+                <option>Vacunación</option>
+                <option>Gastos veterinarios</option>
+                <option>Otros gastos</option>
+              </select></label>
               <label>Comprobante<input id="cc-external-receipt" placeholder="Liquidacion / factura"></label>
               <label>Fecha venta<input id="cc-external-date" type="date"></label>
               <label>Vencimiento<input id="cc-external-due" type="date"></label>
-              <label>Importe<input id="cc-external-amount" class="money-input" inputmode="decimal"></label>
+              <label id="cc-external-amount-wrap">Importe<input id="cc-external-amount" class="money-input" inputmode="decimal"></label>
               <label>Observacion<input id="cc-external-notes"></label>
+            </div>
+            <div class="cc-subpanel" id="cc-external-mag-panel" hidden>
+              <div class="panel-head">
+                <h3>Venta MAG</h3>
+                <span class="subtle">Se guarda en dos saldos imputables: neto disponible e IVA fiscal.</span>
+              </div>
+              <div class="form-grid">
+                <label>Importe neto disponible<input id="cc-external-mag-net" class="money-input" inputmode="decimal"></label>
+                <label>IVA fiscal<input id="cc-external-mag-iva" class="money-input" inputmode="decimal"></label>
+              </div>
             </div>
             <div class="cc-subpanel">
               <div class="panel-head">
