@@ -310,7 +310,9 @@ function renderMobileSummary() {
 }
 
 function isCashMovement(movement) {
-  return normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.origen || ""}`).includes("efectivo");
+  const detail = commissionistDetailFromObservation(movement?.observacion);
+  const detailHasCash = Array.isArray(detail?.items) && detail.items.some(isCashDetailRow);
+  return detailHasCash || normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.origen || ""}`).includes("efectivo");
 }
 
 function movementAccountEntities(movement) {
@@ -345,8 +347,8 @@ function movementConsigneeKey(movement) {
 
 function movementCommissionistKey(movement) {
   const detail = commissionistDetailFromObservation(movement.observacion);
-  const explicitCommissionist = normalizeSearch(movement.comisionista || detail?.comisionista || "");
-  if (explicitCommissionist) return explicitCommissionist;
+  const detailCommissionist = normalizeSearch(detail?.comisionista || "");
+  if (detailCommissionist) return detailCommissionist;
   if (normalizeSearch(movement.concepto).includes("comisionista")) return normalizeSearch(movement.cliente);
   return "";
 }
@@ -394,9 +396,13 @@ function commissionistDetailHtml(detail) {
       <span>Importe bruto ${moneyValue(detail.base)} | Comision ${moneyValue(detail.comision)}</span>
       <table>
         <thead><tr><th>Origen</th><th>Fecha</th><th>Operacion / mov.</th><th>Comprobante</th><th>Importe bruto</th><th>%</th><th>Comision</th></tr></thead>
-        <tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.origen || "-")}</td><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.id || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td>${moneyValue(row.base)}</td><td>${row.porcentaje ? escapeHtml(row.porcentaje) : "-"}</td><td>${moneyValue(row.comision)}</td></tr>`).join("")}</tbody>
+        <tbody>${rows.map((row) => `<tr class="${isCashDetailRow(row) ? "movement-cash" : ""}"><td>${escapeHtml(row.origen || "-")}</td><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.id || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td>${moneyValue(row.base)}</td><td>${row.porcentaje ? escapeHtml(row.porcentaje) : "-"}</td><td>${moneyValue(row.comision)}</td></tr>`).join("")}</tbody>
       </table>
     </div>`;
+}
+
+function isCashDetailRow(row) {
+  return normalizeSearch(`${row?.origen || ""} ${row?.comprobante || ""} ${row?.comprador || ""} ${row?.concepto || ""}`).includes("efectivo");
 }
 
 function canEditExternalMovement(movement) {
@@ -872,7 +878,7 @@ function commissionistDetailReportRow(detail) {
         <span>Importe bruto ${moneyValue(detail.base)} | Comision ${moneyValue(detail.comision)} | Periodo ${escapeHtml(detail.periodoDesde || "-")} a ${escapeHtml(detail.periodoHasta || "-")}</span>
         <table>
           <thead><tr><th>Origen</th><th>Fecha</th><th>Operacion / mov.</th><th>Vendedor / cliente</th><th>Comprador / concepto</th><th>Comprobante</th><th>Importe bruto</th><th>%</th><th>Comision</th></tr></thead>
-          <tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.origen || "-")}</td><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.id || "-")}</td><td>${escapeHtml(row.vendedor || "-")}</td><td>${escapeHtml(row.comprador || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount">${moneyValue(row.base)}</td><td>${row.porcentaje ? escapeHtml(row.porcentaje) : "-"}</td><td class="amount">${moneyValue(row.comision)}</td></tr>`).join("")}</tbody>
+          <tbody>${rows.map((row) => `<tr class="${isCashDetailRow(row) ? "movement-cash" : ""}"><td>${escapeHtml(row.origen || "-")}</td><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.id || "-")}</td><td>${escapeHtml(row.vendedor || "-")}</td><td>${escapeHtml(row.comprador || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount">${moneyValue(row.base)}</td><td>${row.porcentaje ? escapeHtml(row.porcentaje) : "-"}</td><td class="amount">${moneyValue(row.comision)}</td></tr>`).join("")}</tbody>
         </table>
       </div>
     </td>
