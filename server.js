@@ -325,6 +325,13 @@ async function handleApi(req, res) {
     return;
   }
 
+  const movimientoExternoMatch = parsed.pathname.match(/^\/api\/cuenta-corriente\/movimientos-externos\/([^/]+)$/);
+  if (movimientoExternoMatch && req.method === "PUT") {
+    const body = await readBody(req);
+    sendJson(res, 200, { item: await dataSource.updateMovimientoExterno(decodeURIComponent(movimientoExternoMatch[1]), body) });
+    return;
+  }
+
   if (parsed.pathname === "/api/cuenta-corriente/pagos-cobros" && req.method === "POST") {
     const body = await readBody(req);
     sendJson(res, 200, { item: await dataSource.savePagoCobro(body) });
