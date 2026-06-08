@@ -373,6 +373,17 @@ function commissionistDetailHtml(detail) {
     </div>`;
 }
 
+function canEditExternalMovement(movement) {
+  const origin = String(movement?.origen || "").toUpperCase();
+  return Boolean(movement?.id) && (origin === "EXTERNO" || origin === "COMISION") && !movement.paymentId && !movement.operacion;
+}
+
+function externalMovementActions(movement) {
+  return canEditExternalMovement(movement)
+    ? `<button type="button" class="small-button" data-cc-edit-external="${escapeHtml(movement.id)}">Editar</button>`
+    : "";
+}
+
 function renderCuentaCorriente() {
   if (!state.cuenta) return;
   const query = normalizeSearch($("#cc-client-search").value);
@@ -414,7 +425,7 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.operacion || "-")}</td>
           <td class="${amountClass(movement.importe)}">${moneyValue(Math.sign(movement.importe) * Number(movement.importePendiente ?? Math.abs(movement.importe)))}</td>
           <td>${escapeHtml(movement.estado || "-")}</td>
-          <td>${movement.paymentId ? `<button type="button" class="small-button" data-cc-payment-receipt="${escapeHtml(movement.paymentId)}">Ver comprobante</button>${movement.estado === "ANULADO" ? "" : ` <button type="button" class="small-button danger-button" data-cc-payment-cancel="${escapeHtml(movement.paymentId)}">Anular</button>`}` : movement.operacion ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>` : String(movement.origen || "").toUpperCase() === "EXTERNO" ? `<button type="button" class="small-button" data-cc-edit-external="${escapeHtml(movement.id)}">Editar</button>` : ""}</td>
+          <td>${movement.paymentId ? `<button type="button" class="small-button" data-cc-payment-receipt="${escapeHtml(movement.paymentId)}">Ver comprobante</button>${movement.estado === "ANULADO" ? "" : ` <button type="button" class="small-button danger-button" data-cc-payment-cancel="${escapeHtml(movement.paymentId)}">Anular</button>`}` : movement.operacion ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>` : externalMovementActions(movement)}</td>
         </tr>
         ${detail ? `<tr class="cc-detail-row"><td colspan="9">${commissionistDetailHtml(detail)}</td></tr>` : ""}
       `;
@@ -437,9 +448,10 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.concepto || "-")}</td>
           <td>${escapeHtml(movement.comprobante || "-")}</td>
           <td class="${amountClass(movement.importe)}">${moneyValue(movement.importe)}</td>
+          <td>${externalMovementActions(movement)}</td>
         </tr>
       `).join("")
-    : `<tr><td colspan="5">Sin vencimientos pendientes para esta busqueda.</td></tr>`;
+    : `<tr><td colspan="6">Sin vencimientos pendientes para esta busqueda.</td></tr>`;
 }
 
 function matchesCurrentAccountDueFilter(movement, filter) {
@@ -554,9 +566,9 @@ function syncExternalCommissionAmount() {
 
 function openExternalMovementEdit(movementId) {
   const movement = (state.cuenta?.movimientos || []).find((item) => String(item.id) === String(movementId));
-  if (!movement || String(movement.origen || "").toUpperCase() !== "EXTERNO") return;
+  if (!movement || !canEditExternalMovement(movement)) return;
   const baseId = externalMovementBaseId(movement.id);
-  const group = (state.cuenta?.movimientos || []).filter((item) => String(item.origen || "").toUpperCase() === "EXTERNO" && externalMovementBaseId(item.id) === baseId);
+  const group = (state.cuenta?.movimientos || []).filter((item) => canEditExternalMovement(item) && externalMovementBaseId(item.id) === baseId);
   const netRow = group.find((item) => item.tipoDesglose === "NETO") || movement;
   const ivaRow = group.find((item) => item.tipoDesglose === "IVA_FISCAL");
   const isMag = group.some((item) => String(item.concepto || "").toUpperCase().includes("VENTA MAG"));
@@ -2873,6 +2885,10 @@ async function init() {
       await openSale(reportButton.dataset.ccOperationReport, "report");
       return;
     }
+    const editExternalButton = event.target.closest("[data-cc-edit-external]");
+    if (editExternalButton) openExternalMovementEdit(editExternalButton.dataset.ccEditExternal);
+  });
+  $("#cc-due-body").addEventListener("click", (event) => {
     const editExternalButton = event.target.closest("[data-cc-edit-external]");
     if (editExternalButton) openExternalMovementEdit(editExternalButton.dataset.ccEditExternal);
   });

@@ -1067,6 +1067,7 @@
                   <th>Concepto</th>
                   <th>Comprobante</th>
                   <th>Importe</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody id="cc-due-body"></tbody>
