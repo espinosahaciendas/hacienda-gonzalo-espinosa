@@ -721,6 +721,10 @@
                       <input id="liq-direct-no-iva" type="checkbox">
                       Sin IVA / monotributista
                     </label>
+                    <label class="check-line">
+                      <input id="liq-comision-fact-prod-enabled" type="checkbox">
+                      Aplicar comision sobre facturado vendedor
+                    </label>
                     <label>
                       % comision propia sobre facturado
                       <input id="liq-comision-fact-prod-pct" inputmode="decimal" value="0">
@@ -754,6 +758,7 @@
                       <label class="frigo-only">Efectivo + IVA<input id="liq-cash-with-iva-prod" readonly></label>
                       <label>Concepto gasto efectivo<input id="liq-cash-exp-concept-prod" placeholder="Ej.: flete o descuento"></label>
                       <label>Gasto descontado del efectivo<input id="liq-cash-exp-prod" class="money-input" inputmode="decimal"></label>
+                      <label class="check-line"><input id="liq-comision-efect-prod-enabled" type="checkbox"> Aplicar comision sobre efectivo vendedor</label>
                       <label>% comision sobre efectivo<input id="liq-comision-efect-prod-pct" inputmode="decimal" value="0"></label>
                       <label>Comision sobre efectivo<input id="liq-comision-efect-prod" class="money-input" inputmode="decimal" value="0" readonly></label>
                     </div>
@@ -781,6 +786,10 @@
                       IVA liquidacion
                       <input id="liq-iva-comp" class="money-input" inputmode="decimal">
                     </label>
+                    <label class="check-line">
+                      <input id="liq-comision-fact-comp-enabled" type="checkbox">
+                      Aplicar comision sobre facturado comprador
+                    </label>
                     <label>
                       % comision propia sobre facturado
                       <input id="liq-comision-fact-comp-pct" inputmode="decimal" value="0">
@@ -802,6 +811,7 @@
                     <div class="advanced-subpanel cash-block">
                       <h3>Efectivo</h3>
                       <label>Importe efectivo<input id="liq-efectivo-comp" class="money-input" inputmode="decimal"></label>
+                      <label class="check-line"><input id="liq-comision-efect-comp-enabled" type="checkbox"> Aplicar comision sobre efectivo comprador</label>
                       <label>% comision sobre efectivo<input id="liq-comision-efect-comp-pct" inputmode="decimal" value="0"></label>
                       <label>Comision sobre efectivo<input id="liq-comision-efect-comp" class="money-input" inputmode="decimal" value="0" readonly></label>
                     </div>
@@ -922,7 +932,7 @@
           </div>
           <datalist id="cc-client-list"></datalist>
           <div class="cc-entry-panel" id="cc-external-panel" hidden>
-            <div class="panel-head"><h3>Movimiento externo</h3><button type="button" class="ghost-button" id="cc-close-external">Cerrar</button></div>
+            <div class="panel-head"><h3 id="cc-external-title">Movimiento externo</h3><button type="button" class="ghost-button" id="cc-close-external">Cerrar</button></div>
             <div class="form-grid">
               <label>Cliente<input id="cc-external-client" list="cc-client-list"></label>
               <label>Tipo<select id="cc-external-direction"><option value="PAGAR">A pagar al cliente</option><option value="COBRAR">A cobrar al cliente</option></select></label>
@@ -1032,7 +1042,7 @@
                   <th>Operacion</th>
                   <th>Importe</th>
                   <th>Estado</th>
-                  <th></th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody id="cc-movements-body"></tbody>
@@ -1057,6 +1067,7 @@
                   <th>Concepto</th>
                   <th>Comprobante</th>
                   <th>Importe</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody id="cc-due-body"></tbody>

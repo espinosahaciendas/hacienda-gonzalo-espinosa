@@ -11,6 +11,7 @@ const state = {
   currentOperation: null,
   operationStep: "operation",
   editingSaleLineId: "",
+  editingExternalMovementId: "",
   commissionistRows: [],
   usuario: null
 };
@@ -372,6 +373,20 @@ function commissionistDetailHtml(detail) {
     </div>`;
 }
 
+function canEditExternalMovement(movement) {
+  const origin = String(movement?.origen || "").toUpperCase();
+  const id = String(movement?.id || "");
+  const isExternalId = id.startsWith("EXT-");
+  const isExternalOrigin = origin === "EXTERNO" || origin === "COMISION";
+  return Boolean(id) && (isExternalId || isExternalOrigin) && !movement.paymentId && !movement.operacion;
+}
+
+function externalMovementActions(movement) {
+  return canEditExternalMovement(movement)
+    ? `<button type="button" class="small-button" data-cc-edit-external="${escapeHtml(movement.id)}">Editar</button>`
+    : "";
+}
+
 function renderCuentaCorriente() {
   if (!state.cuenta) return;
   const query = normalizeSearch($("#cc-client-search").value);
@@ -413,7 +428,7 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.operacion || "-")}</td>
           <td class="${amountClass(movement.importe)}">${moneyValue(Math.sign(movement.importe) * Number(movement.importePendiente ?? Math.abs(movement.importe)))}</td>
           <td>${escapeHtml(movement.estado || "-")}</td>
-          <td>${movement.paymentId ? `<button type="button" class="small-button" data-cc-payment-receipt="${escapeHtml(movement.paymentId)}">Ver comprobante</button>${movement.estado === "ANULADO" ? "" : ` <button type="button" class="small-button danger-button" data-cc-payment-cancel="${escapeHtml(movement.paymentId)}">Anular</button>`}` : movement.operacion ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>` : ""}</td>
+          <td>${movement.paymentId ? `<button type="button" class="small-button" data-cc-payment-receipt="${escapeHtml(movement.paymentId)}">Ver comprobante</button>${movement.estado === "ANULADO" ? "" : ` <button type="button" class="small-button danger-button" data-cc-payment-cancel="${escapeHtml(movement.paymentId)}">Anular</button>`}` : movement.operacion ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>` : externalMovementActions(movement)}</td>
         </tr>
         ${detail ? `<tr class="cc-detail-row"><td colspan="9">${commissionistDetailHtml(detail)}</td></tr>` : ""}
       `;
@@ -436,9 +451,10 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.concepto || "-")}</td>
           <td>${escapeHtml(movement.comprobante || "-")}</td>
           <td class="${amountClass(movement.importe)}">${moneyValue(movement.importe)}</td>
+          <td>${externalMovementActions(movement)}</td>
         </tr>
       `).join("")
-    : `<tr><td colspan="5">Sin vencimientos pendientes para esta busqueda.</td></tr>`;
+    : `<tr><td colspan="6">Sin vencimientos pendientes para esta busqueda.</td></tr>`;
 }
 
 function matchesCurrentAccountDueFilter(movement, filter) {
@@ -493,7 +509,15 @@ function openCurrentAccountPanel(panelId) {
   $("#cc-payment-panel").hidden = panelId !== "#cc-payment-panel";
   const today = new Date().toISOString().slice(0, 10);
   if (panelId === "#cc-external-panel") {
+    state.editingExternalMovementId = "";
+    $("#cc-external-title").textContent = "Movimiento externo";
+    $("#cc-save-external").textContent = "Guardar movimiento externo";
+    $("#cc-external-message").textContent = "";
+    $("#cc-external-message").className = "form-message";
     $("#cc-external-client").value = $("#cc-client-search").value;
+    $("#cc-external-direction").value = "PAGAR";
+    $("#cc-external-concept").value = "Venta MAG";
+    $("#cc-external-receipt").value = "";
     $("#cc-external-date").value = today;
     $("#cc-external-due").value = today;
     setMoneyInput("#cc-external-amount", 0);
@@ -521,6 +545,10 @@ function openCurrentAccountPanel(panelId) {
   }
 }
 
+function externalMovementBaseId(id) {
+  return String(id || "").replace(/-(NETO|IVA)$/i, "");
+}
+
 function isExternalMagSale() {
   return normalizeSearch($("#cc-external-concept").value) === "venta mag";
 }
@@ -537,6 +565,39 @@ function syncExternalCommissionAmount() {
   const amountInput = $("#cc-external-commission-amount");
   if (document.activeElement === amountInput) return;
   if (base && percent) setMoneyInput("#cc-external-commission-amount", base * percent / 100);
+}
+
+function openExternalMovementEdit(movementId) {
+  const movement = (state.cuenta?.movimientos || []).find((item) => String(item.id) === String(movementId));
+  if (!movement || !canEditExternalMovement(movement)) return;
+  const baseId = externalMovementBaseId(movement.id);
+  const group = (state.cuenta?.movimientos || []).filter((item) => canEditExternalMovement(item) && externalMovementBaseId(item.id) === baseId);
+  const netRow = group.find((item) => item.tipoDesglose === "NETO") || movement;
+  const ivaRow = group.find((item) => item.tipoDesglose === "IVA_FISCAL");
+  const isMag = group.some((item) => String(item.concepto || "").toUpperCase().includes("VENTA MAG"));
+  const signSource = netRow || ivaRow || movement;
+  state.editingExternalMovementId = movement.id;
+  $("#cc-external-panel").hidden = false;
+  $("#cc-payment-panel").hidden = true;
+  $("#cc-external-title").textContent = `Editar movimiento externo ${baseId}`;
+  $("#cc-save-external").textContent = "Guardar correccion";
+  $("#cc-external-message").textContent = "";
+  $("#cc-external-message").className = "form-message";
+  $("#cc-external-client").value = signSource.cliente || "";
+  $("#cc-external-direction").value = Number(signSource.importe || 0) >= 0 ? "COBRAR" : "PAGAR";
+  $("#cc-external-concept").value = isMag ? "Venta MAG" : (movement.concepto || "Otros gastos");
+  $("#cc-external-receipt").value = signSource.comprobante || "";
+  $("#cc-external-date").value = dateToInput(signSource.fecha || "");
+  $("#cc-external-due").value = dateToInput(signSource.vencimiento || "");
+  setMoneyInput("#cc-external-amount", Math.abs(Number(movement.importe || 0)));
+  setMoneyInput("#cc-external-mag-net", Math.abs(Number(netRow?.importe || 0)) + Math.abs(Number(ivaRow?.importe || 0)));
+  setMoneyInput("#cc-external-mag-iva", Math.abs(Number(ivaRow?.importe || 0)));
+  $("#cc-external-notes").value = signSource.observacion || "";
+  $("#cc-external-commissionist").value = netRow?.comisionista || "";
+  setMoneyInput("#cc-external-commission-base", Number(netRow?.baseComision || 0));
+  $("#cc-external-commission-percent").value = netRow?.porcComision || "";
+  setMoneyInput("#cc-external-commission-amount", Number(netRow?.importeComision || 0));
+  syncExternalConceptFields();
 }
 
 function getPaymentPendingMovements(clientSelector = "#cc-payment-client", typeSelector = "#cc-payment-type") {
@@ -638,8 +699,12 @@ function renderCurrentAccountInstruments() {
 async function saveExternalCurrentAccountMovement() {
   try {
     const isMag = isExternalMagSale();
-    await fetchJson("/api/cuenta-corriente/movimientos-externos", {
-      method: "POST",
+    const editingId = state.editingExternalMovementId;
+    const path = editingId
+      ? `/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(editingId)}`
+      : "/api/cuenta-corriente/movimientos-externos";
+    await fetchJson(path, {
+      method: editingId ? "PUT" : "POST",
       body: JSON.stringify({
         cliente: $("#cc-external-client").value,
         direccion: $("#cc-external-direction").value,
@@ -656,6 +721,7 @@ async function saveExternalCurrentAccountMovement() {
         observacion: $("#cc-external-notes").value
       })
     });
+    state.editingExternalMovementId = "";
     $("#cc-external-panel").hidden = true;
     await reloadCurrentAccount();
   } catch (error) {
@@ -1570,6 +1636,27 @@ function getBuyerExpenses() {
   return expenses;
 }
 
+function isCommissionEnabled(selector) {
+  const input = $(selector);
+  return Boolean(input && input.checked);
+}
+
+function commissionPercent(enabledSelector, percentSelector) {
+  return isCommissionEnabled(enabledSelector) ? percentValue(percentSelector) : 0;
+}
+
+function syncCommissionToggles() {
+  [
+    ["#liq-comision-fact-prod-enabled", "#liq-comision-fact-prod-pct"],
+    ["#liq-comision-fact-comp-enabled", "#liq-comision-fact-comp-pct"],
+    ["#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct"],
+    ["#liq-comision-efect-comp-enabled", "#liq-comision-efect-comp-pct"]
+  ].forEach(([enabledSelector, percentSelector]) => {
+    const percentInput = $(percentSelector);
+    if (percentInput) percentInput.disabled = !isCommissionEnabled(enabledSelector);
+  });
+}
+
 function calculateLiquidationPreview() {
   const facturado = numberValue("#liq-facturado");
   const ivaProd = numberValue("#liq-iva-prod");
@@ -1581,13 +1668,13 @@ function calculateLiquidationPreview() {
   const buyerExpenses = getBuyerExpenses();
   const consigned = isConsignedOperation();
   const frigo = isFrigorificoIvaOperation();
-  const comFactProd = facturado * percentValue("#liq-comision-fact-prod-pct") / 100;
-  const comFactComp = facturado * percentValue("#liq-comision-fact-comp-pct") / 100;
+  const comFactProd = facturado * commissionPercent("#liq-comision-fact-prod-enabled", "#liq-comision-fact-prod-pct") / 100;
+  const comFactComp = facturado * commissionPercent("#liq-comision-fact-comp-enabled", "#liq-comision-fact-comp-pct") / 100;
   const consigneeCommission = facturado * percentValue("#liq-consignee-commission-pct") / 100;
   const consigneeAdjustment = numberValue("#liq-consignee-adjustment");
   const cashWithIvaProd = efectivoProd + (frigo ? efectivoProd * 0.105 : 0);
-  const comEfProd = cashWithIvaProd * percentValue("#liq-comision-efect-prod-pct") / 100;
-  const comEfComp = efectivoComp * percentValue("#liq-comision-efect-comp-pct") / 100;
+  const comEfProd = cashWithIvaProd * commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct") / 100;
+  const comEfComp = efectivoComp * commissionPercent("#liq-comision-efect-comp-enabled", "#liq-comision-efect-comp-pct") / 100;
   const expenseBase = expenses.comision + expenses.fondoGarantia + expenses.controlEntrega + expenses.fondoCompGastos + expenses.otrosGastos;
   const netoGravadoProd = consigned ? Math.max(facturado - expenseBase, 0) : facturado;
   let netoLiquidacionProd = consigned
@@ -1639,6 +1726,7 @@ function syncLiquidationCashFromFacturado() {
 }
 
 function renderLiquidationTotals() {
+  syncCommissionToggles();
   const calc = calculateLiquidationPreview();
   setMoneyInput("#liq-comision-fact-prod", calc.comFactProd);
   setMoneyInput("#liq-comision-fact-comp", calc.comFactComp);
@@ -1685,6 +1773,31 @@ function fillLiquidationForm(liquidacion) {
   $("#liq-comision-fact-comp-pct").value = liquidacion.comisionFacturadoCompPct ?? draft.comisionComp ?? 0;
   $("#liq-comision-efect-prod-pct").value = liquidacion.comisionEfectivoProdPct ?? draft.comisionEfectivoProd ?? 0;
   $("#liq-comision-efect-comp-pct").value = liquidacion.comisionEfectivoCompPct ?? draft.comisionEfectivoComp ?? 0;
+  const resolveCommissionFlag = (flag, fallback) => flag !== undefined && flag !== null ? Boolean(flag) : Boolean(fallback);
+  $("#liq-comision-fact-prod-enabled").checked = Boolean(
+    resolveCommissionFlag(
+      liquidacion.aplicaComisionFacturadoProd ?? draft.aplicaComisionFacturadoProd,
+      Number(liquidacion.comisionFacturadoProd || 0) || Number(liquidacion.comisionFacturadoProdPct || draft.comisionProd || 0)
+    )
+  );
+  $("#liq-comision-fact-comp-enabled").checked = Boolean(
+    resolveCommissionFlag(
+      liquidacion.aplicaComisionFacturadoComp ?? draft.aplicaComisionFacturadoComp,
+      Number(liquidacion.comisionFacturadoComp || 0) || Number(liquidacion.comisionFacturadoCompPct || draft.comisionComp || 0)
+    )
+  );
+  $("#liq-comision-efect-prod-enabled").checked = Boolean(
+    resolveCommissionFlag(
+      liquidacion.aplicaComisionEfectivoProd ?? draft.aplicaComisionEfectivoProd,
+      Number(liquidacion.comisionEfectivoProd || 0) || Number(liquidacion.comisionEfectivoProdPct || draft.comisionEfectivoProd || 0)
+    )
+  );
+  $("#liq-comision-efect-comp-enabled").checked = Boolean(
+    resolveCommissionFlag(
+      liquidacion.aplicaComisionEfectivoComp ?? draft.aplicaComisionEfectivoComp,
+      Number(liquidacion.comisionEfectivoComp || 0) || Number(liquidacion.comisionEfectivoCompPct || draft.comisionEfectivoComp || 0)
+    )
+  );
   setMoneyInput("#liq-exp-comision-prod", liquidacion.comisionDetalleProd ?? draft.comisionDetalleProd);
   setMoneyInput("#liq-exp-fondo-gtia-prod", liquidacion.fondoGarantiaProd ?? draft.fondoGarantiaProd);
   setMoneyInput("#liq-exp-control-prod", liquidacion.controlEntregaProd ?? draft.controlEntregaProd);
@@ -2292,10 +2405,14 @@ async function saveLiquidation(event) {
     comisionFacturadoComp: parseMoneyInput($("#liq-comision-fact-comp").value),
     comisionEfectivoProd: parseMoneyInput($("#liq-comision-efect-prod").value),
     comisionEfectivoComp: parseMoneyInput($("#liq-comision-efect-comp").value),
-    comisionFacturadoProdPct: percentValue("#liq-comision-fact-prod-pct"),
-    comisionFacturadoCompPct: percentValue("#liq-comision-fact-comp-pct"),
-    comisionEfectivoProdPct: percentValue("#liq-comision-efect-prod-pct"),
-    comisionEfectivoCompPct: percentValue("#liq-comision-efect-comp-pct"),
+    aplicaComisionFacturadoProd: isCommissionEnabled("#liq-comision-fact-prod-enabled"),
+    aplicaComisionFacturadoComp: isCommissionEnabled("#liq-comision-fact-comp-enabled"),
+    aplicaComisionEfectivoProd: isCommissionEnabled("#liq-comision-efect-prod-enabled"),
+    aplicaComisionEfectivoComp: isCommissionEnabled("#liq-comision-efect-comp-enabled"),
+    comisionFacturadoProdPct: commissionPercent("#liq-comision-fact-prod-enabled", "#liq-comision-fact-prod-pct"),
+    comisionFacturadoCompPct: commissionPercent("#liq-comision-fact-comp-enabled", "#liq-comision-fact-comp-pct"),
+    comisionEfectivoProdPct: commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct"),
+    comisionEfectivoCompPct: commissionPercent("#liq-comision-efect-comp-enabled", "#liq-comision-efect-comp-pct"),
     liquidacionConsignatariaA: $("#liq-consignee-settled-party").value,
     efectivoModo: $("#liq-cash-mode").value,
     efectivoPorc: $("#liq-cash-percent").value,
@@ -2713,7 +2830,10 @@ async function init() {
   $("#cc-print-report").addEventListener("click", () => printCurrentAccountReport());
   $("#cc-print-due-report").addEventListener("click", printCurrentAccountDueReport);
   $("#cc-open-external").addEventListener("click", () => openCurrentAccountPanel("#cc-external-panel"));
-  $("#cc-close-external").addEventListener("click", () => { $("#cc-external-panel").hidden = true; });
+  $("#cc-close-external").addEventListener("click", () => {
+    state.editingExternalMovementId = "";
+    $("#cc-external-panel").hidden = true;
+  });
   $("#cc-save-external").addEventListener("click", saveExternalCurrentAccountMovement);
   $("#cc-external-concept").addEventListener("change", syncExternalConceptFields);
   $("#cc-external-commission-base").addEventListener("input", syncExternalCommissionAmount);
@@ -2763,9 +2883,17 @@ async function init() {
       return;
     }
     const reportButton = event.target.closest("[data-cc-operation-report]");
-    if (!reportButton) return;
-    setView("operaciones");
-    await openSale(reportButton.dataset.ccOperationReport, "report");
+    if (reportButton) {
+      setView("operaciones");
+      await openSale(reportButton.dataset.ccOperationReport, "report");
+      return;
+    }
+    const editExternalButton = event.target.closest("[data-cc-edit-external]");
+    if (editExternalButton) openExternalMovementEdit(editExternalButton.dataset.ccEditExternal);
+  });
+  $("#cc-due-body").addEventListener("click", (event) => {
+    const editExternalButton = event.target.closest("[data-cc-edit-external]");
+    if (editExternalButton) openExternalMovementEdit(editExternalButton.dataset.ccEditExternal);
   });
   $("#operation-type").addEventListener("change", syncOperationType);
   $("#operation-destination").addEventListener("change", () => {
