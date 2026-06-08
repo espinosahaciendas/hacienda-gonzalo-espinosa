@@ -328,10 +328,23 @@ function getExactCurrentAccountConsignee(query) {
   return (state.cuenta.movimientos || []).some((movement) => movementConsigneeKey(movement) === query) ? query : "";
 }
 
+function getExactCurrentAccountCommissionist(query) {
+  if (!query) return "";
+  return (state.cuenta.movimientos || []).some((movement) => movementCommissionistKey(movement) === query) ? query : "";
+}
+
 function movementConsigneeKey(movement) {
   const isConsigneeOwnMovement = String(movement.origen || "").toUpperCase() === "CONSIGNATARIA";
   if (!movement.consignatariaCuenta && !isConsigneeOwnMovement) return "";
   return normalizeSearch(movement.consignataria || movement.cliente);
+}
+
+function movementCommissionistKey(movement) {
+  const detail = commissionistDetailFromObservation(movement.observacion);
+  const explicitCommissionist = normalizeSearch(movement.comisionista || detail?.comisionista || "");
+  if (explicitCommissionist) return explicitCommissionist;
+  if (normalizeSearch(movement.concepto).includes("comisionista")) return normalizeSearch(movement.cliente);
+  return "";
 }
 
 function matchesCurrentAccountClientSearch(movement, words, exactClient = "") {
@@ -346,6 +359,15 @@ function matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee = 
   if (exactConsignee) return consignee === exactConsignee;
   if (!words.length) return true;
   const haystack = normalizeSearch(`${movement.consignataria || ""} ${movement.cliente || ""} ${movement.contraparte || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
+  return words.every((word) => haystack.includes(word));
+}
+
+function matchesCurrentAccountCommissionistSearch(movement, words, exactCommissionist = "") {
+  const commissionist = movementCommissionistKey(movement);
+  if (exactCommissionist) return commissionist === exactCommissionist;
+  if (!words.length) return Boolean(commissionist);
+  const detail = commissionistDetailFromObservation(movement.observacion);
+  const haystack = normalizeSearch(`${movement.comisionista || ""} ${detail?.comisionista || ""} ${movement.cliente || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
   return words.every((word) => haystack.includes(word));
 }
 
@@ -395,20 +417,23 @@ function renderCuentaCorriente() {
   const conceptFilter = $("#cc-concept-filter").value;
   const dueFilter = $("#cc-due-filter").value;
   const words = query.split(" ").filter(Boolean);
-  const exactClient = viewMode === "CONSIGNATARIA" ? "" : getExactCurrentAccountClient(query);
+  const exactClient = viewMode === "CLIENTE" ? getExactCurrentAccountClient(query) : "";
   const exactConsignee = viewMode === "CONSIGNATARIA" ? getExactCurrentAccountConsignee(query) : "";
+  const exactCommissionist = viewMode === "COMISIONISTA" ? getExactCurrentAccountCommissionist(query) : "";
   const allMovements = state.cuenta.movimientos || [];
   const movements = allMovements.filter((movement) => {
     const matchesEntity = viewMode === "CONSIGNATARIA"
       ? matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee)
-      : matchesCurrentAccountClientSearch(movement, words, exactClient);
+      : viewMode === "COMISIONISTA"
+        ? matchesCurrentAccountCommissionistSearch(movement, words, exactCommissionist)
+        : matchesCurrentAccountClientSearch(movement, words, exactClient);
     if (!matchesEntity) return false;
     if (statusFilter !== "TODOS" && String(movement.estado || "").toUpperCase() !== statusFilter) return false;
     if (conceptFilter === "COMISION" && (String(movement.origen || "").toUpperCase() !== "COMISION" || String(movement.estado || "").toUpperCase() === "IMPUTADO")) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
   const balance = movements.reduce((sum, movement) => sum + Number(movement.importe || 0), 0);
-  const selectedClient = words.length ? $("#cc-client-search").value.trim() : (viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos");
+  const selectedClient = words.length ? $("#cc-client-search").value.trim() : (viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : viewMode === "COMISIONISTA" ? "Todos los comisionistas" : "Todos");
 
   $("#cc-selected-client").textContent = selectedClient || "Todos";
   $("#cc-selected-balance").textContent = moneyValue(balance);
@@ -438,7 +463,9 @@ function renderCuentaCorriente() {
   const due = (state.cuenta.vencimientos || []).filter((movement) => {
     const matchesEntity = viewMode === "CONSIGNATARIA"
       ? matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee)
-      : matchesCurrentAccountClientSearch(movement, words, exactClient);
+      : viewMode === "COMISIONISTA"
+        ? matchesCurrentAccountCommissionistSearch(movement, words, exactCommissionist)
+        : matchesCurrentAccountClientSearch(movement, words, exactClient);
     if (!matchesEntity) return false;
     if (conceptFilter === "COMISION" && String(movement.origen || "").toUpperCase() !== "COMISION") return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
@@ -937,6 +964,19 @@ function commissionistOperationBase(detail) {
   return Math.abs(netProd || netComp || parseMoneyInput(detail.total));
 }
 
+function operationCommissionistKey(detail) {
+  const draft = detail.draftData || {};
+  const liq = detail.liquidacion || {};
+  return normalizeSearch(
+    draft.comisionista
+    || draft.comisionistaAsociado
+    || draft.comisionistaNombre
+    || liq.comisionista
+    || liq.comisionistaAsociado
+    || ""
+  );
+}
+
 function renderCommissionistRows() {
   const percent = percentValue("#commissionist-percent");
   const selectedRows = state.commissionistRows.filter((row) => row.selected);
@@ -987,6 +1027,7 @@ async function loadCommissionistOperations() {
   state.commissionistRows = details
     .filter(Boolean)
     .filter((detail) => detail.liquidacion)
+    .filter((detail) => operationCommissionistKey(detail) === normalizeSearch(selectedCommissionist))
     .map((detail) => {
       const liq = detail.liquidacion || {};
       return {
@@ -1005,7 +1046,7 @@ async function loadCommissionistOperations() {
     .filter((movement) => String(movement.origen || "").toUpperCase() === "EXTERNO")
     .filter((movement) => !normalizeSearch(movement.concepto).includes("comisionista"))
     .filter((movement) => String(movement.tipoDesglose || "").toUpperCase() !== "IVA_FISCAL")
-    .filter((movement) => !movement.comisionista || normalizeSearch(movement.comisionista) === normalizeSearch(selectedCommissionist))
+    .filter((movement) => normalizeSearch(movement.comisionista) === normalizeSearch(selectedCommissionist))
     .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
     .map((movement) => ({
       id: movement.id,
@@ -2821,7 +2862,10 @@ async function init() {
   $("#cc-client-search").addEventListener("input", renderCuentaCorriente);
   $("#cc-view-mode").addEventListener("change", () => {
     const label = document.querySelector("label:has(#cc-client-search)");
-    if (label) label.childNodes[0].nodeValue = $("#cc-view-mode").value === "CONSIGNATARIA" ? "Buscar consignataria" : "Buscar cliente";
+    if (label) {
+      const mode = $("#cc-view-mode").value;
+      label.childNodes[0].nodeValue = mode === "CONSIGNATARIA" ? "Buscar consignataria" : mode === "COMISIONISTA" ? "Buscar comisionista" : "Buscar cliente";
+    }
     renderCuentaCorriente();
   });
   $("#cc-status-filter").addEventListener("change", renderCuentaCorriente);
