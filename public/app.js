@@ -387,9 +387,9 @@ function commissionistDetailHtml(detail) {
   return `
     <div class="cc-commissionist-detail">
       <strong>Detalle comisionista: ${escapeHtml(detail.comisionista || "-")} - ${escapeHtml(detail.porcentaje || "0")}%</strong>
-      <span>Base ${moneyValue(detail.base)} | Comision ${moneyValue(detail.comision)}</span>
+      <span>Importe bruto ${moneyValue(detail.base)} | Comision ${moneyValue(detail.comision)}</span>
       <table>
-        <thead><tr><th>Origen</th><th>Fecha</th><th>Operacion / mov.</th><th>Comprobante</th><th>Base</th><th>%</th><th>Comision</th></tr></thead>
+        <thead><tr><th>Origen</th><th>Fecha</th><th>Operacion / mov.</th><th>Comprobante</th><th>Importe bruto</th><th>%</th><th>Comision</th></tr></thead>
         <tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.origen || "-")}</td><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.id || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td>${moneyValue(row.base)}</td><td>${row.porcentaje ? escapeHtml(row.porcentaje) : "-"}</td><td>${moneyValue(row.comision)}</td></tr>`).join("")}</tbody>
       </table>
     </div>`;
@@ -833,9 +833,9 @@ function commissionistDetailReportRow(detail) {
     <td colspan="10" class="commissionist-detail-cell">
       <div class="commissionist-detail-box">
         <strong>Detalle de ventas aplicadas - ${escapeHtml(detail.comisionista || "-")}</strong>
-        <span>Base ${moneyValue(detail.base)} | Comision ${moneyValue(detail.comision)} | Periodo ${escapeHtml(detail.periodoDesde || "-")} a ${escapeHtml(detail.periodoHasta || "-")}</span>
+        <span>Importe bruto ${moneyValue(detail.base)} | Comision ${moneyValue(detail.comision)} | Periodo ${escapeHtml(detail.periodoDesde || "-")} a ${escapeHtml(detail.periodoHasta || "-")}</span>
         <table>
-          <thead><tr><th>Origen</th><th>Fecha</th><th>Operacion / mov.</th><th>Vendedor / cliente</th><th>Comprador / concepto</th><th>Comprobante</th><th>Base</th><th>%</th><th>Comision</th></tr></thead>
+          <thead><tr><th>Origen</th><th>Fecha</th><th>Operacion / mov.</th><th>Vendedor / cliente</th><th>Comprador / concepto</th><th>Comprobante</th><th>Importe bruto</th><th>%</th><th>Comision</th></tr></thead>
           <tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.origen || "-")}</td><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.id || "-")}</td><td>${escapeHtml(row.vendedor || "-")}</td><td>${escapeHtml(row.comprador || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount">${moneyValue(row.base)}</td><td>${row.porcentaje ? escapeHtml(row.porcentaje) : "-"}</td><td class="amount">${moneyValue(row.comision)}</td></tr>`).join("")}</tbody>
         </table>
       </div>
@@ -1009,7 +1009,7 @@ function renderCommissionistRows() {
   const selectedBase = selectedRows.reduce((sum, row) => sum + Number(row.base || 0), 0);
   const selectedCommission = selectedRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
   $("#commissionist-summary").textContent = selectedRows.length
-    ? `${selectedRows.length} item/s - base ${moneyValue(selectedBase)} - comision ${moneyValue(selectedCommission)}`
+    ? `${selectedRows.length} item/s - importe bruto ${moneyValue(selectedBase)} - comision ${moneyValue(selectedCommission)}`
     : state.commissionistRows.length ? "Seleccione operaciones para liquidar." : "Sin operaciones seleccionadas";
   $("#commissionist-body").innerHTML = state.commissionistRows.length
     ? state.commissionistRows.map((row) => {
