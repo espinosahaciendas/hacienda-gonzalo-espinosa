@@ -1588,6 +1588,11 @@ class BackupDataSource {
       error.statusCode = 400;
       throw error;
     }
+    if (isVentaMag && ivaFiscal > importe) {
+      const error = new Error("En Venta MAG, el IVA no puede ser mayor al Importe Neto.");
+      error.statusCode = 400;
+      throw error;
+    }
     const common = {
       cliente,
       direccion: normalizeText(input.direccion || "PAGAR"),
@@ -1603,12 +1608,13 @@ class BackupDataSource {
     const baseId = `EXT-${Date.now()}`;
     const savedItems = [];
     if (isVentaMag) {
-      if (importe) {
+      const netoACobrar = Math.max(importe - ivaFiscal, 0);
+      if (netoACobrar) {
         savedItems.push({
           id: `${baseId}-NETO`,
           ...common,
-          concepto: "Venta MAG - Neto disponible",
-          importe,
+          concepto: "Venta MAG - Neto a cobrar",
+          importe: netoACobrar,
           tipoDesglose: "NETO"
         });
       }
