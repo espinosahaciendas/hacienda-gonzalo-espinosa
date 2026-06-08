@@ -776,10 +776,14 @@ function printCurrentAccountReceipt(payment) {
 
 function getCurrentAccountReportFilters() {
   const query = normalizeSearch($("#cc-client-search").value);
+  const viewMode = $("#cc-view-mode").value;
   return {
+    viewMode,
     query,
     words: query.split(" ").filter(Boolean),
-    exactClient: getExactCurrentAccountClient(query),
+    exactClient: viewMode === "CLIENTE" ? getExactCurrentAccountClient(query) : "",
+    exactConsignee: viewMode === "CONSIGNATARIA" ? getExactCurrentAccountConsignee(query) : "",
+    exactCommissionist: viewMode === "COMISIONISTA" ? getExactCurrentAccountCommissionist(query) : "",
     statusFilter: $("#cc-status-filter").value,
     dueFilter: $("#cc-due-filter").value,
     conceptFilter: $("#cc-concept-filter").value
@@ -787,14 +791,19 @@ function getCurrentAccountReportFilters() {
 }
 
 function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter = false, includeStatusFilter = false) {
-  return matchesCurrentAccountClientSearch(movement, filters.words, filters.exactClient)
+  const matchesEntity = filters.viewMode === "CONSIGNATARIA"
+    ? matchesCurrentAccountConsigneeSearch(movement, filters.words, filters.exactConsignee)
+    : filters.viewMode === "COMISIONISTA"
+      ? matchesCurrentAccountCommissionistSearch(movement, filters.words, filters.exactCommissionist)
+      : matchesCurrentAccountClientSearch(movement, filters.words, filters.exactClient);
+  return matchesEntity
     && (filters.conceptFilter !== "COMISION" || String(movement.origen || "").toUpperCase() === "COMISION")
     && (!includeStatusFilter || filters.statusFilter === "TODOS" || String(movement.estado || "").toUpperCase() === filters.statusFilter)
     && (!includeDueFilter || matchesCurrentAccountDueFilter(movement, filters.dueFilter));
 }
 
 function currentAccountReportStyles() {
-  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.status{font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
+  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
 }
 
 function currentAccountImputationsByMovement() {
@@ -815,6 +824,23 @@ function currentAccountImputationsByMovement() {
     });
   });
   return result;
+}
+
+function commissionistDetailReportRow(detail) {
+  const rows = Array.isArray(detail?.items) ? detail.items : [];
+  if (!rows.length) return "";
+  return `<tr>
+    <td colspan="10" class="commissionist-detail-cell">
+      <div class="commissionist-detail-box">
+        <strong>Detalle de ventas aplicadas - ${escapeHtml(detail.comisionista || "-")}</strong>
+        <span>Base ${moneyValue(detail.base)} | Comision ${moneyValue(detail.comision)} | Periodo ${escapeHtml(detail.periodoDesde || "-")} a ${escapeHtml(detail.periodoHasta || "-")}</span>
+        <table>
+          <thead><tr><th>Origen</th><th>Fecha</th><th>Operacion / mov.</th><th>Vendedor / cliente</th><th>Comprador / concepto</th><th>Comprobante</th><th>Base</th><th>%</th><th>Comision</th></tr></thead>
+          <tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.origen || "-")}</td><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.id || "-")}</td><td>${escapeHtml(row.vendedor || "-")}</td><td>${escapeHtml(row.comprador || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount">${moneyValue(row.base)}</td><td>${row.porcentaje ? escapeHtml(row.porcentaje) : "-"}</td><td class="amount">${moneyValue(row.comision)}</td></tr>`).join("")}</tbody>
+        </table>
+      </div>
+    </td>
+  </tr>`;
 }
 
 function currentAccountReportMovementRows(rows, imputationsByMovement) {
@@ -847,7 +873,7 @@ function currentAccountReportMovementRows(rows, imputationsByMovement) {
       <td class="amount">${imputed === null ? "-" : moneyValue(imputed)}</td>
       <td class="amount ${pending !== null && pending < 0 ? "negative" : "positive"}">${pending === null ? "-" : moneyValue(pending)}</td>
       <td class="status">${escapeHtml(movement.estado || "-")}</td>
-    </tr>${allocationRows}`;
+    </tr>${commissionistDetailReportRow(commissionistDetailFromObservation(movement.observacion))}${allocationRows}`;
   }).join("");
 }
 
