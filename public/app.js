@@ -405,7 +405,7 @@ function canEditExternalMovement(movement) {
 
 function externalMovementActions(movement) {
   return canEditExternalMovement(movement)
-    ? `<button type="button" class="small-button" data-cc-edit-external="${escapeHtml(movement.id)}">Editar</button>`
+    ? `<button type="button" class="small-button" data-cc-edit-external="${escapeHtml(movement.id)}">Editar</button> <button type="button" class="small-button danger-button" data-cc-delete-external="${escapeHtml(movement.id)}">Eliminar</button>`
     : "";
 }
 
@@ -2933,11 +2933,32 @@ async function init() {
       return;
     }
     const editExternalButton = event.target.closest("[data-cc-edit-external]");
-    if (editExternalButton) openExternalMovementEdit(editExternalButton.dataset.ccEditExternal);
+    if (editExternalButton) {
+      openExternalMovementEdit(editExternalButton.dataset.ccEditExternal);
+      return;
+    }
+    const deleteExternalButton = event.target.closest("[data-cc-delete-external]");
+    if (deleteExternalButton) {
+      const confirmed = window.confirm("Se eliminara este movimiento externo. Si es Venta MAG, tambien se elimina su renglon asociado. ¿Continuar?");
+      if (!confirmed) return;
+      await fetchJson(`/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(deleteExternalButton.dataset.ccDeleteExternal)}`, { method: "DELETE" });
+      await reloadCurrentAccount();
+    }
   });
   $("#cc-due-body").addEventListener("click", (event) => {
     const editExternalButton = event.target.closest("[data-cc-edit-external]");
-    if (editExternalButton) openExternalMovementEdit(editExternalButton.dataset.ccEditExternal);
+    if (editExternalButton) {
+      openExternalMovementEdit(editExternalButton.dataset.ccEditExternal);
+      return;
+    }
+    const deleteExternalButton = event.target.closest("[data-cc-delete-external]");
+    if (deleteExternalButton) {
+      const confirmed = window.confirm("Se eliminara este movimiento externo. Si es Venta MAG, tambien se elimina su renglon asociado. ¿Continuar?");
+      if (!confirmed) return;
+      fetchJson(`/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(deleteExternalButton.dataset.ccDeleteExternal)}`, { method: "DELETE" })
+        .then(reloadCurrentAccount)
+        .catch((error) => window.alert(error.message));
+    }
   });
   $("#operation-type").addEventListener("change", syncOperationType);
   $("#operation-destination").addEventListener("change", () => {

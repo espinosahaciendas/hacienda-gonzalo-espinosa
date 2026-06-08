@@ -1714,6 +1714,34 @@ class BackupDataSource {
     return savedItems.length === 1 ? savedItems[0] : { items: savedItems };
   }
 
+  async deleteMovimientoExterno(movementId) {
+    const data = this.readData();
+    const movements = asArray(data.currentAccountManualMovements);
+    const requestedId = normalizeText(movementId);
+    const baseId = externalMovementBaseId(requestedId);
+    const groupIds = movements
+      .filter((item) => externalMovementBaseId(item.id) === baseId)
+      .map((item) => String(item.id));
+    if (!groupIds.length) {
+      const error = new Error("No se encontro el movimiento externo.");
+      error.statusCode = 404;
+      throw error;
+    }
+    const hasActiveImputation = asArray(data.currentAccountPayments)
+      .filter((payment) => !payment.anulado)
+      .some((payment) => asArray(payment.imputaciones)
+        .some((item) => groupIds.includes(String(item.movementId || item.rowId || ""))));
+    if (hasActiveImputation) {
+      const error = new Error("Este movimiento ya tiene imputaciones activas. Anula primero el pago/cobro asociado y luego eliminalo.");
+      error.statusCode = 409;
+      throw error;
+    }
+    data.currentAccountManualMovements = movements
+      .filter((item) => externalMovementBaseId(item.id) !== baseId);
+    this.saveData(data);
+    return { id: baseId, eliminados: groupIds };
+  }
+
   async savePagoCobro(input) {
     const data = this.readData();
     const cliente = normalizeText(input.cliente);
@@ -1924,6 +1952,7 @@ class PostgresJsonDataSource extends BackupDataSource {
   async getCuentaCorrienteResumen() { return this.withRemoteData(() => super.getCuentaCorrienteResumen()); }
   async saveMovimientoExterno(input) { return this.withRemoteData(() => super.saveMovimientoExterno(input), true); }
   async updateMovimientoExterno(movementId, input) { return this.withRemoteData(() => super.updateMovimientoExterno(movementId, input), true); }
+  async deleteMovimientoExterno(movementId) { return this.withRemoteData(() => super.deleteMovimientoExterno(movementId), true); }
   async savePagoCobro(input) { return this.withRemoteData(() => super.savePagoCobro(input), true); }
   async anularPagoCobro(paymentId) { return this.withRemoteData(() => super.anularPagoCobro(paymentId), true); }
   async exportBackup() { return this.withRemoteData(() => super.exportBackup()); }

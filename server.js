@@ -331,6 +331,10 @@ async function handleApi(req, res) {
     sendJson(res, 200, { item: await dataSource.updateMovimientoExterno(decodeURIComponent(movimientoExternoMatch[1]), body) });
     return;
   }
+  if (movimientoExternoMatch && req.method === "DELETE") {
+    sendJson(res, 200, { item: await dataSource.deleteMovimientoExterno(decodeURIComponent(movimientoExternoMatch[1])) });
+    return;
+  }
 
   if (parsed.pathname === "/api/cuenta-corriente/pagos-cobros" && req.method === "POST") {
     const body = await readBody(req);
