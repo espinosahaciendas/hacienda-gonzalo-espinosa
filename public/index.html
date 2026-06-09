@@ -698,7 +698,7 @@
                   <h3>A cobrar a consignataria</h3>
                   <p class="subtle">Dato interno para futura cuenta corriente. No modifica los importes del reporte de vendedor ni comprador.</p>
                   <div class="form-grid">
-                    <label>% comision consignataria<input id="liq-consignee-commission-pct" inputmode="decimal"></label>
+                    <label>% comision a cobrar a consignataria<input id="liq-consignee-commission-pct" inputmode="decimal"></label>
                     <label>Comision a cobrar<input id="liq-consignee-commission" readonly></label>
                     <label>Concepto ajuste<input id="liq-consignee-adjustment-concept" placeholder="Diferencia, margen o ajuste"></label>
                     <label>Ajuste a cobrar<input id="liq-consignee-adjustment" class="money-input" inputmode="decimal"></label>
@@ -723,14 +723,14 @@
                     </label>
                     <label class="check-line">
                       <input id="liq-comision-fact-prod-enabled" type="checkbox">
-                      Aplicar comision sobre facturado vendedor
+                      Cobrar comision propia al vendedor sobre facturado
                     </label>
                     <label>
-                      % comision propia sobre facturado
+                      % comision propia al vendedor sobre facturado
                       <input id="liq-comision-fact-prod-pct" inputmode="decimal" value="0">
                     </label>
                     <label>
-                      Comision propia sobre facturado
+                      Comision propia al vendedor sobre facturado
                       <input id="liq-comision-fact-prod" class="money-input" inputmode="decimal" value="0" readonly>
                     </label>
                     <div class="advanced-subpanel consigned-only">
@@ -758,9 +758,9 @@
                       <label class="frigo-only">Efectivo + IVA<input id="liq-cash-with-iva-prod" readonly></label>
                       <label>Concepto gasto efectivo<input id="liq-cash-exp-concept-prod" placeholder="Ej.: flete o descuento"></label>
                       <label>Gasto descontado del efectivo<input id="liq-cash-exp-prod" class="money-input" inputmode="decimal"></label>
-                      <label class="check-line"><input id="liq-comision-efect-prod-enabled" type="checkbox"> Aplicar comision sobre efectivo vendedor</label>
-                      <label>% comision sobre efectivo<input id="liq-comision-efect-prod-pct" inputmode="decimal" value="0"></label>
-                      <label>Comision sobre efectivo<input id="liq-comision-efect-prod" class="money-input" inputmode="decimal" value="0" readonly></label>
+                      <label class="check-line"><input id="liq-comision-efect-prod-enabled" type="checkbox"> Cobrar comision propia al vendedor sobre efectivo</label>
+                      <label>% comision propia al vendedor sobre efectivo<input id="liq-comision-efect-prod-pct" inputmode="decimal" value="0"></label>
+                      <label>Comision propia al vendedor sobre efectivo<input id="liq-comision-efect-prod" class="money-input" inputmode="decimal" value="0" readonly></label>
                     </div>
                     <div class="result-box total">
                       <span>Neto total operacion</span>
@@ -788,13 +788,13 @@
                     </label>
                     <label class="check-line">
                       <input id="liq-comision-fact-comp-enabled" type="checkbox">
-                      Aplicar comision sobre facturado comprador
+                      Cobrar comision propia al comprador sobre facturado
                     </label>
                     <label>
-                      % comision propia sobre facturado
+                      % comision propia al comprador sobre facturado
                       <input id="liq-comision-fact-comp-pct" inputmode="decimal" value="0">
                     </label>
-                    <label>Comision propia sobre facturado<input id="liq-comision-fact-comp" class="money-input" inputmode="decimal" value="0" readonly></label>
+                    <label>Comision propia al comprador sobre facturado<input id="liq-comision-fact-comp" class="money-input" inputmode="decimal" value="0" readonly></label>
                     <div class="advanced-subpanel" id="liq-buyer-expenses" hidden>
                       <h3>Gastos de liquidacion consignada comprador</h3>
                       <div class="form-grid">
@@ -811,9 +811,9 @@
                     <div class="advanced-subpanel cash-block">
                       <h3>Efectivo</h3>
                       <label>Importe efectivo<input id="liq-efectivo-comp" class="money-input" inputmode="decimal"></label>
-                      <label class="check-line"><input id="liq-comision-efect-comp-enabled" type="checkbox"> Aplicar comision sobre efectivo comprador</label>
-                      <label>% comision sobre efectivo<input id="liq-comision-efect-comp-pct" inputmode="decimal" value="0"></label>
-                      <label>Comision sobre efectivo<input id="liq-comision-efect-comp" class="money-input" inputmode="decimal" value="0" readonly></label>
+                      <label class="check-line"><input id="liq-comision-efect-comp-enabled" type="checkbox"> Cobrar comision propia al comprador sobre efectivo</label>
+                      <label>% comision propia al comprador sobre efectivo<input id="liq-comision-efect-comp-pct" inputmode="decimal" value="0"></label>
+                      <label>Comision propia al comprador sobre efectivo<input id="liq-comision-efect-comp" class="money-input" inputmode="decimal" value="0" readonly></label>
                     </div>
                     <div class="result-box total">
                       <span>Neto total operacion</span>
@@ -1055,8 +1055,8 @@
         <div class="panel">
           <div class="panel-head">
             <div>
-              <h2>Vencimientos pendientes</h2>
-              <p class="subtle">Ordenados por fecha de vencimiento.</p>
+              <h2 id="cc-due-title">Vencimientos pendientes</h2>
+              <p class="subtle" id="cc-due-subtitle">Ordenados por fecha de vencimiento.</p>
             </div>
             <button type="button" class="ghost-button" id="cc-print-due-report">Reporte vencimientos</button>
           </div>

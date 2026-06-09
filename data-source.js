@@ -351,6 +351,7 @@ function buildOperationAccountMovements(operation) {
     if (String(role || "").startsWith("COMPRADOR")) return settledByConsignee === "COMPRADOR";
     return false;
   };
+  const counterpartForRole = (role, fallback) => consigneeAppliesToRole(role) ? operationConsignee : fallback;
 
   const addPlan = ({ cliente, role, amount, plan, comprobante, counterpart, conceptSuffix }) => {
     parsePlanItems(plan, amount, dueBaseDate).forEach((item, index) => {
@@ -380,7 +381,7 @@ function buildOperationAccountMovements(operation) {
       amount: -Math.abs(Number(liq.netoLiquidacionProd || 0)),
       plan: draft.planFacturadoProd || liq.planFacturadoProd || "0",
       comprobante: liq.comprobanteProd || draft.comprobanteProd,
-      counterpart: operation.comprador || draft.comprador || operation.consignataria || draft.consignataria,
+      counterpart: counterpartForRole("VENDEDOR-FACT", operation.comprador || draft.comprador || operationConsignee),
       conceptSuffix: "liquidacion vendedor"
     });
   }
@@ -391,7 +392,7 @@ function buildOperationAccountMovements(operation) {
       amount: -Math.abs(Number(liq.efectivoProd || 0)),
       plan: draft.planEfectivoProd || liq.planEfectivoProd || "0",
       comprobante: liq.comprobanteProd || draft.comprobanteProd,
-      counterpart: operation.comprador || draft.comprador || operation.consignataria || draft.consignataria,
+      counterpart: counterpartForRole("VENDEDOR-EFEC", operation.comprador || draft.comprador || operationConsignee),
       conceptSuffix: "efectivo vendedor"
     });
   }
@@ -402,7 +403,7 @@ function buildOperationAccountMovements(operation) {
       amount: Math.abs(Number(liq.netoLiquidacionComp || 0)),
       plan: draft.planFacturadoComp || liq.planFacturadoComp || "0",
       comprobante: liq.comprobanteComp || draft.comprobanteComp,
-      counterpart: operation.vendedor || draft.vendedor,
+      counterpart: counterpartForRole("COMPRADOR-FACT", operation.vendedor || draft.vendedor || operationConsignee),
       conceptSuffix: "liquidacion comprador"
     });
   }
@@ -413,7 +414,7 @@ function buildOperationAccountMovements(operation) {
       amount: Math.abs(Number(liq.efectivoComp || 0)),
       plan: draft.planEfectivoComp || liq.planEfectivoComp || "0",
       comprobante: liq.comprobanteComp || draft.comprobanteComp,
-      counterpart: operation.vendedor || draft.vendedor,
+      counterpart: counterpartForRole("COMPRADOR-EFEC", operation.vendedor || draft.vendedor || operationConsignee),
       conceptSuffix: "efectivo comprador"
     });
   }
@@ -446,7 +447,7 @@ function buildOperationAccountMovements(operation) {
     role: "VENDEDOR-COM-FACT",
     amount: liq.comisionFacturadoProd,
     comprobante: liq.comprobanteProd || draft.comprobanteProd,
-    counterpart: operation.comprador || draft.comprador || draft.consignataria,
+    counterpart: counterpartForRole("VENDEDOR-COM-FACT", operation.comprador || draft.comprador || operationConsignee),
     conceptSuffix: "comision sobre facturado vendedor"
   });
   addCommission({
@@ -454,7 +455,7 @@ function buildOperationAccountMovements(operation) {
     role: "VENDEDOR-COM-EFEC",
     amount: liq.comisionEfectivoProd,
     comprobante: liq.comprobanteProd || draft.comprobanteProd,
-    counterpart: operation.comprador || draft.comprador || draft.consignataria,
+    counterpart: counterpartForRole("VENDEDOR-COM-EFEC", operation.comprador || draft.comprador || operationConsignee),
     conceptSuffix: "comision sobre efectivo vendedor"
   });
   addCommission({
@@ -462,7 +463,7 @@ function buildOperationAccountMovements(operation) {
     role: "COMPRADOR-COM-FACT",
     amount: liq.comisionFacturadoComp,
     comprobante: liq.comprobanteComp || draft.comprobanteComp,
-    counterpart: operation.vendedor || draft.vendedor,
+    counterpart: counterpartForRole("COMPRADOR-COM-FACT", operation.vendedor || draft.vendedor || operationConsignee),
     conceptSuffix: "comision sobre facturado comprador"
   });
   addCommission({
@@ -470,23 +471,26 @@ function buildOperationAccountMovements(operation) {
     role: "COMPRADOR-COM-EFEC",
     amount: liq.comisionEfectivoComp,
     comprobante: liq.comprobanteComp || draft.comprobanteComp,
-    counterpart: operation.vendedor || draft.vendedor,
+    counterpart: counterpartForRole("COMPRADOR-COM-EFEC", operation.vendedor || draft.vendedor || operationConsignee),
     conceptSuffix: "comision sobre efectivo comprador"
   });
 
   const totalCobrarConsignataria = Number(liq.totalCobrarConsignataria || draft.totalCobrarConsignataria || draft.ajusteConsignataria || 0);
-  if (draft.consignataria && totalCobrarConsignataria) {
+  if (operationConsignee && totalCobrarConsignataria) {
+    const consigneeCounterpart = settledByConsignee === "COMPRADOR"
+      ? operation.comprador || draft.comprador || operation.vendedor || draft.vendedor
+      : operation.vendedor || draft.vendedor || operation.comprador || draft.comprador;
     pushMovement(movements, {
       id: `${operation.id}-CONSIGNATARIA`,
-      cliente: draft.consignataria,
+      cliente: operationConsignee,
       fecha: operationDate,
       vencimiento: dueBaseDate,
       origen: "CONSIGNATARIA",
-      concepto: conceptWithCounterpart("comision/diferencia consignataria", operation.vendedor || draft.vendedor || operation.comprador || draft.comprador),
+      concepto: conceptWithCounterpart("comision/diferencia consignataria", consigneeCounterpart),
       comprobante: liq.comprobanteProd || draft.comprobanteProd || liq.comprobanteComp || draft.comprobanteComp,
       operacion: operation.id,
-      contraparte: operation.vendedor || draft.vendedor || operation.comprador || draft.comprador,
-      consignataria: draft.consignataria,
+      contraparte: consigneeCounterpart,
+      consignataria: operationConsignee,
       consignatariaCuenta: true,
       importe: Math.abs(totalCobrarConsignataria),
       estado: "PENDIENTE"
