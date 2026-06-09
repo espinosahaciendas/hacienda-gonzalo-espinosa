@@ -1808,7 +1808,7 @@ function calculateLiquidationPreview() {
   const facturado = numberValue("#liq-facturado");
   const ivaProd = numberValue("#liq-iva-prod");
   const ivaComp = numberValue("#liq-iva-comp");
-  const efectivoProd = numberValue("#liq-efectivo-prod");
+  const efectivoProd = normalizeFrigorificoCashInput(numberValue("#liq-efectivo-prod"));
   const efectivoComp = numberValue("#liq-efectivo-comp");
   const cashExpenseProd = numberValue("#liq-cash-exp-prod");
   const expenses = getSellerExpenses();
@@ -1872,15 +1872,28 @@ function syncLiquidationCashFromFacturado() {
   setMoneyInput("#liq-efectivo-comp", Math.max(brutoComp - facturado, 0));
 }
 
+function normalizeFrigorificoCashInput(value, operation = state.currentOperation) {
+  const parsed = Number(value || 0);
+  if (!isFrigorificoIvaOperation(operation) || !parsed) return parsed;
+  const calc = getFrigorificoCalc(operation);
+  const expectedWithoutIva = Math.max(Number(calc.brutoSinIva || 0) - Number(calc.facturado || 0), 0);
+  const expectedWithIva = expectedWithoutIva * 1.105;
+  const tolerance = Math.max(2, expectedWithIva * 0.002);
+  return Math.abs(parsed - expectedWithIva) <= tolerance ? expectedWithoutIva : parsed;
+}
+
 function renderLiquidationTotals() {
   syncCommissionToggles();
   const calc = calculateLiquidationPreview();
+  if (isFrigorificoIvaOperation() && document.activeElement !== $("#liq-efectivo-prod")) {
+    setMoneyInput("#liq-efectivo-prod", calc.efectivoProd);
+  }
   setMoneyInput("#liq-comision-fact-prod", calc.comFactProd);
   setMoneyInput("#liq-comision-fact-comp", calc.comFactComp);
   setMoneyInput("#liq-comision-efect-prod", calc.comEfProd);
   setMoneyInput("#liq-comision-efect-comp", calc.comEfComp);
-  $("#liq-cash-iva-prod").value = moneyValue(calc.cashWithIvaProd - calc.efectivoProd);
-  $("#liq-cash-with-iva-prod").value = moneyValue(calc.cashWithIvaProd);
+  if ($("#liq-cash-iva-prod")) $("#liq-cash-iva-prod").value = moneyValue(calc.cashWithIvaProd - calc.efectivoProd);
+  if ($("#liq-cash-with-iva-prod")) $("#liq-cash-with-iva-prod").value = moneyValue(calc.cashWithIvaProd);
   $("#liq-consignee-commission").value = moneyValue(calc.consigneeCommission);
   $("#liq-consignee-total").value = moneyValue(calc.consigneeTotal);
   $("#liq-neto-liq-prod").textContent = moneyValue(calc.netoLiquidacionProd);
@@ -1902,7 +1915,8 @@ function fillLiquidationForm(liquidacion) {
   $("#liq-comprobante-comp").value = liquidacion.comprobanteComp || "";
   setMoneyInput("#liq-iva-prod", liquidacion.ivaProd);
   setMoneyInput("#liq-iva-comp", liquidacion.ivaComp);
-  setMoneyInput("#liq-efectivo-prod", liquidacion.efectivoProd);
+  setMoneyInput("#frigo-neto-final", liquidacion.netoFinalFrigorificoComp || draft.netoFinalFrigorificoComp || liquidacion.brutoVend);
+  setMoneyInput("#liq-efectivo-prod", normalizeFrigorificoCashInput(liquidacion.efectivoProd));
   setMoneyInput("#liq-efectivo-comp", liquidacion.efectivoComp);
   setMoneyInput("#liq-comision-fact-prod", liquidacion.comisionFacturadoProd);
   setMoneyInput("#liq-comision-fact-comp", liquidacion.comisionFacturadoComp);
@@ -1965,7 +1979,6 @@ function fillLiquidationForm(liquidacion) {
   setMoneyInput("#liq-consignee-adjustment", liquidacion.ajusteConsignataria ?? draft.ajusteConsignataria);
   $("#liq-direct-notes").value = liquidacion.detalleLiquidacionDirectaProd || draft.detalleLiquidacionDirectaProd || "";
   $("#liq-different-buyer-receipt").checked = Boolean(liquidacion.comprobanteCompDiferente || draft.comprobanteCompDiferente);
-  setMoneyInput("#frigo-neto-final", liquidacion.netoFinalFrigorificoComp || draft.netoFinalFrigorificoComp || liquidacion.brutoVend);
   $("#liq-observaciones").value = liquidacion.observaciones || "";
   renderLiquidationDetail(liquidacion.detalleLiquidar || []);
   renderLiquidationTotals();
@@ -2546,7 +2559,7 @@ async function saveLiquidation(event) {
     comprobanteComp: $("#liq-comprobante-comp").value,
     ivaProd: parseMoneyInput($("#liq-iva-prod").value),
     ivaComp: parseMoneyInput($("#liq-iva-comp").value),
-    efectivoProd: parseMoneyInput($("#liq-efectivo-prod").value),
+    efectivoProd: normalizeFrigorificoCashInput(parseMoneyInput($("#liq-efectivo-prod").value)),
     efectivoComp: parseMoneyInput($("#liq-efectivo-comp").value),
     comisionFacturadoProd: parseMoneyInput($("#liq-comision-fact-prod").value),
     comisionFacturadoComp: parseMoneyInput($("#liq-comision-fact-comp").value),
@@ -2754,8 +2767,7 @@ function renderReport() {
         ${calc.comFactProd ? `<div class="report-line"><span>Comision sobre facturado</span><strong>${moneyValue(calc.comFactProd)}</strong></div>` : ""}
         <div class="report-net seller-net"><span>NETO LIQUIDACION</span><strong>${moneyValue(calc.netoLiquidacionProd)}</strong></div>
         ${calc.efectivoProd || calc.cashExpenseProd || calc.comEfProd ? `<div class="report-section"><h3>Efectivo</h3><table class="report-table"><tbody>
-          <tr><th>Efectivo</th><td>${moneyValue(calc.efectivoProd)}</td>${frigoCalc ? `<th>IVA sobre efectivo</th><td>${moneyValue(calc.cashWithIvaProd - calc.efectivoProd)}</td>` : "<th></th><td></td>"}</tr>
-          ${frigoCalc ? `<tr><th>Efectivo + IVA</th><td>${moneyValue(calc.cashWithIvaProd)}</td><th></th><td></td></tr>` : ""}
+          <tr><th>${frigoCalc ? "Efectivo + IVA" : "Efectivo"}</th><td>${moneyValue(frigoCalc ? calc.cashWithIvaProd : calc.efectivoProd)}</td><th></th><td></td></tr>
           ${calc.cashExpenseProd ? `<tr><th>Gasto descontado efectivo</th><td>${moneyValue(calc.cashExpenseProd)}</td><th>Concepto</th><td>${escapeHtml($("#liq-cash-exp-concept-prod").value || "-")}</td></tr>` : ""}
           ${calc.comEfProd ? `<tr><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfProd)}</td><th></th><td></td></tr>` : ""}
         </tbody></table></div>` : ""}

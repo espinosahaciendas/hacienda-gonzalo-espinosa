@@ -140,6 +140,15 @@ function parseDecimal(value) {
   return parseMoney(value);
 }
 
+function normalizeFrigorificoEfectivoSinIva(value, expectedWithoutIva, frigo) {
+  const parsed = parseMoney(value);
+  if (!frigo || !parsed) return parsed;
+  const expected = Math.max(Number(expectedWithoutIva || 0), 0);
+  const expectedWithIva = expected * 1.105;
+  const tolerance = Math.max(2, expectedWithIva * 0.002);
+  return Math.abs(parsed - expectedWithIva) <= tolerance ? expected : parsed;
+}
+
 function formatDateFromDb(value) {
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(value);
@@ -342,6 +351,14 @@ function buildOperationAccountMovements(operation) {
   const typeText = `${operation.tipo || draft.tipo || "Operacion"} ${operation.destino || draft.destino || ""}`.trim();
   const operationConsignee = operation.consignataria || draft.consignataria || "";
   const settledByConsignee = normalizeKey(liq.liquidacionConsignatariaA || draft.liquidacionConsignatariaA || "VENDEDOR");
+  const frigo = normalizeKey(draft.calculoFrigorificoComp || liq.calculoFrigorificoComp) === "SI";
+  const frigoNetoFinal = parseMoney(liq.netoFinalFrigorificoComp || draft.netoFinalFrigorificoComp || liq.brutoVend || operationTotal(operation));
+  const frigoFacturado = parseMoney(liq.importeFacturado);
+  const frigoEfectivoBase = frigo && frigoNetoFinal
+    ? Math.max((frigoNetoFinal / 1.105) - frigoFacturado, 0)
+    : 0;
+  const efectivoProdSinIva = normalizeFrigorificoEfectivoSinIva(liq.efectivoProd, frigoEfectivoBase, frigo);
+  const efectivoProdCuenta = frigo ? efectivoProdSinIva * 1.105 : efectivoProdSinIva;
   const movements = [];
   const conceptWithCounterpart = (suffix, counterpart) => `${typeText} - ${suffix}${counterpart ? ` - por ${counterpart}` : ""}`;
   const consigneeAppliesToRole = (role) => {
@@ -385,11 +402,11 @@ function buildOperationAccountMovements(operation) {
       conceptSuffix: "liquidacion vendedor"
     });
   }
-  if (liq.efectivoProd) {
+  if (efectivoProdCuenta) {
     addPlan({
       cliente: operation.vendedor || draft.vendedor,
       role: "VENDEDOR-EFEC",
-      amount: -Math.abs(Number(liq.efectivoProd || 0)),
+      amount: -Math.abs(Number(efectivoProdCuenta || 0)),
       plan: draft.planEfectivoProd || liq.planEfectivoProd || "0",
       comprobante: liq.comprobanteProd || draft.comprobanteProd,
       counterpart: counterpartForRole("VENDEDOR-EFEC", operation.comprador || draft.comprador || operationConsignee),
@@ -837,9 +854,10 @@ function calculateLiquidacion(operation, input = {}) {
   const ivaCompAuto = ivaDirectaSinIva ? 0 : facturado * 0.105;
   const ivaProd = source.ivaProd !== undefined && source.ivaProd !== "" ? parseMoney(source.ivaProd) : ivaProdAuto;
   const ivaComp = source.ivaComp !== undefined && source.ivaComp !== "" ? parseMoney(source.ivaComp) : ivaCompAuto;
+  const efectivoProdBase = Math.max(brutoBaseProd - facturado, 0);
   const efectivoProd = source.efectivoProd !== undefined && source.efectivoProd !== ""
-    ? parseMoney(source.efectivoProd)
-    : Math.max(brutoBaseProd - facturado, 0);
+    ? normalizeFrigorificoEfectivoSinIva(source.efectivoProd, efectivoProdBase, frigo)
+    : efectivoProdBase;
   const efectivoComp = source.efectivoComp !== undefined && source.efectivoComp !== ""
     ? parseMoney(source.efectivoComp)
     : Math.max(brutoComp - facturado, 0);
@@ -904,6 +922,7 @@ function calculateLiquidacion(operation, input = {}) {
     ivaProd,
     ivaComp,
     efectivoProd,
+    efectivoConIvaProd,
     efectivoComp,
     comisionFacturadoProd,
     comisionFacturadoComp,
