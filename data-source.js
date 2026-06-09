@@ -343,6 +343,54 @@ function pushMovement(list, movement) {
   });
 }
 
+function pairedAccountMovementId(movementId, targetClient, movements) {
+  const id = normalizeText(movementId);
+  if (!id) return "";
+  const replacements = [
+    ["-VENDEDOR-FACT-", "-COMPRADOR-FACT-"],
+    ["-COMPRADOR-FACT-", "-VENDEDOR-FACT-"],
+    ["-VENDEDOR-EFEC-", "-COMPRADOR-EFEC-"],
+    ["-COMPRADOR-EFEC-", "-VENDEDOR-EFEC-"]
+  ];
+  for (const [from, to] of replacements) {
+    if (!id.includes(from)) continue;
+    const candidateId = id.replace(from, to);
+    const candidate = movements.find((movement) => String(movement.id) === candidateId);
+    if (candidate && (!targetClient || normalizeKey(candidate.cliente) === normalizeKey(targetClient))) {
+      return candidateId;
+    }
+  }
+  return "";
+}
+
+function mirrorPaymentPairImputations(primary, counterparty, movements) {
+  if (!primary || !counterparty) return;
+  const primaryItems = asArray(primary.imputaciones);
+  const counterpartyItems = asArray(counterparty.imputaciones);
+  const copyFrom = (sourceItems, targetPayment) => sourceItems
+    .map((item) => {
+      const movementId = pairedAccountMovementId(item.movementId || item.rowId, targetPayment.cliente, movements);
+      return movementId ? { movementId, importe: Math.abs(parseMoney(item.importe)) } : null;
+    })
+    .filter(Boolean);
+  if (!primaryItems.length && counterpartyItems.length) primary.imputaciones = copyFrom(counterpartyItems, primary);
+  if (!counterpartyItems.length && primaryItems.length) counterparty.imputaciones = copyFrom(primaryItems, counterparty);
+}
+
+function repairPaymentPairImputations(payments, movements) {
+  const cloned = asArray(payments).map((payment) => ({
+    ...payment,
+    instrumentos: asArray(payment.instrumentos).map((item) => ({ ...item })),
+    imputaciones: asArray(payment.imputaciones).map((item) => ({ ...item }))
+  }));
+  const byId = new Map(cloned.map((payment) => [payment.id, payment]));
+  cloned.forEach((payment) => {
+    if (String(payment.id || "").endsWith("-CP")) return;
+    mirrorPaymentPairImputations(payment, byId.get(`${payment.id}-CP`), movements);
+  });
+  return cloned;
+}
+
 function buildOperationAccountMovements(operation) {
   const draft = operation.draftData || {};
   const liq = draft.liquidacion || {};
@@ -541,7 +589,7 @@ function buildAccountData(data) {
       observacion: item.observacion
     });
   });
-  const payments = asArray(data.currentAccountPayments);
+  const payments = repairPaymentPairImputations(data.currentAccountPayments, movements);
   const activePayments = payments.filter((payment) => !payment.anulado);
   const allocations = new Map();
   const paymentAllocations = new Map();
@@ -1801,6 +1849,7 @@ class BackupDataSource {
         .map((item) => ({ movementId: normalizeText(item.movementId || item.rowId), importe: Math.abs(parseMoney(item.importe)) }))
         .filter((item) => item.movementId)
     };
+    const accountMovementsForPairing = asArray(data.operations).flatMap((operation) => buildOperationAccountMovements(operation));
     payments.push(saved);
     const counterpartyInput = input.contrapartida || null;
     let counterparty = null;
@@ -1816,6 +1865,7 @@ class BackupDataSource {
           .map((item) => ({ movementId: normalizeText(item.movementId || item.rowId), importe: Math.abs(parseMoney(item.importe)) }))
           .filter((item) => item.movementId)
       };
+      mirrorPaymentPairImputations(saved, counterparty, accountMovementsForPairing);
       payments.push(counterparty);
     }
     data.currentAccountPayments = payments;
