@@ -2784,6 +2784,59 @@ function saleControlRows(lines, side) {
   }).join("");
 }
 
+function fileSafeName(value) {
+  return normalizeSearch(value)
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+}
+
+function reportPdfName(party) {
+  const operation = state.currentOperation || {};
+  const isSeller = party === "seller";
+  const kind = isSeller ? "Venta" : "Compra";
+  const name = isSeller ? operation.vendedor : operation.comprador;
+  return `${fileSafeName(operation.id || "Operacion")}_${kind}_${fileSafeName(name || "Cliente")}`;
+}
+
+function reportExportButton(party) {
+  return `
+    <div class="report-export-actions">
+      <button type="button" class="ghost-button" data-report-party-pdf="${party}">Exportar PDF ${party === "seller" ? "vendedor" : "comprador"}</button>
+    </div>
+  `;
+}
+
+function printReportParty(party) {
+  const selector = party === "seller" ? ".seller-report" : ".buyer-report";
+  const block = document.querySelector(`#report-sheet ${selector}`);
+  if (!block) return;
+  const filename = reportPdfName(party);
+  const clone = block.cloneNode(true);
+  clone.querySelectorAll(".report-export-actions").forEach((node) => node.remove());
+  const popup = window.open("", "_blank");
+  if (!popup) return;
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(filename)}</title><style>
+    body{font-family:Arial,sans-serif;margin:8mm;color:#173632;background:white}
+    .report-page-block{border:0;padding:0;font-size:8.5pt;line-height:1.12}
+    .report-header{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #173632;padding-bottom:5px;margin-bottom:5px}
+    .report-header h2{font-size:14px;margin:0}.subtle{color:#52706b;margin:2px 0}
+    .report-logo{width:72px;height:72px;object-fit:contain;background:#173632;border-radius:6px;padding:4px}
+    .report-title,.report-kv,.report-note,.report-line,.report-net,.report-section{margin-top:5px}
+    .report-title,.report-line,.report-net{border:1px solid #cbd7d4;padding:5px 6px}
+    .report-title strong,.report-title span,.report-note span,.report-note strong{display:block}
+    .report-kv{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid #cbd7d4}
+    .report-kv span,.report-kv strong{padding:3px 4px;border-bottom:1px solid #cbd7d4}.report-kv span{color:#52706b}
+    .report-section h3{margin:0 0 3px;font-size:8pt;text-transform:uppercase}
+    .report-table{width:100%;border-collapse:collapse;font-size:7.5pt}.control-table{font-size:6.6pt}
+    .report-table th,.report-table td{border:1px solid #cbd7d4;padding:3px 4px;text-align:left;vertical-align:top}
+    .report-total{background:#edf3f1;font-weight:bold}.seller-net{background:#eaf2ff}.buyer-net{background:#fff0e6}
+    button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:6mm}body{margin:0}button{display:none}}
+  </style></head><body>${clone.outerHTML}<button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
+  popup.document.close();
+  popup.focus();
+}
+
 function renderReport() {
   const operation = state.currentOperation;
   if (!operation) return;
@@ -2950,6 +3003,7 @@ function renderReport() {
         ${partyNote("Observaciones productor", sellerObservation)}
         <div class="report-section"><h3>Detalle de carga vendedor</h3><table class="report-table control-table">${loadTableHead}<tbody>${sellerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
         ${partialReport}
+        ${reportExportButton("seller")}
       </section>
       <section class="report-page-block buyer-report">
         ${reportHeader("REPORTE DE CARGA Y CONTROL - COMPRADOR")}
@@ -2957,6 +3011,7 @@ function renderReport() {
         ${operationNote}
         ${partyNote("Observaciones comprador", buyerObservation)}
         <div class="report-section"><h3>Detalle de carga comprador</h3><table class="report-table control-table">${loadTableHead}<tbody>${buyerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
+        ${reportExportButton("buyer")}
       </section>
     </div>
   `;
@@ -2985,9 +3040,10 @@ function renderReport() {
         ${calc.efectivoProd || calc.cashExpenseProd || calc.comEfProd ? `<div class="report-section"><h3>Efectivo</h3><table class="report-table"><tbody>
           <tr><th>${frigoCalc ? "Efectivo + IVA" : "Efectivo"}</th><td>${moneyValue(frigoCalc ? calc.cashWithIvaProd : calc.efectivoProd)}</td><th></th><td></td></tr>
           ${calc.cashExpenseProd ? `<tr><th>Gasto descontado efectivo</th><td>${moneyValue(calc.cashExpenseProd)}</td><th>Concepto</th><td>${escapeHtml($("#liq-cash-exp-concept-prod").value || "-")}</td></tr>` : ""}
-          ${calc.comEfProd ? `<tr><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfProd)}</td><th></th><td></td></tr>` : ""}
+        ${calc.comEfProd ? `<tr><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfProd)}</td><th></th><td></td></tr>` : ""}
         </tbody></table></div>` : ""}
         <div class="report-net seller-net total"><span>NETO TOTAL OPERACION</span><strong>${moneyValue(calc.netoTotalProd)}</strong></div>
+        ${reportExportButton("seller")}
       </section>
       <section class="report-page-block buyer-report">
         ${reportHeader("REPORTE FINAL PARA COMPRADOR")}
@@ -3008,6 +3064,7 @@ function renderReport() {
           <tr><th>Efectivo</th><td>${moneyValue(calc.efectivoComp)}</td><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfComp)}</td></tr>
         </tbody></table></div>` : ""}
         <div class="report-net buyer-net total"><span>NETO TOTAL OPERACION</span><strong>${moneyValue(calc.netoTotalComp)}</strong></div>
+        ${reportExportButton("buyer")}
       </section>
     </div>
   `;
@@ -3448,6 +3505,10 @@ async function init() {
     recalculateLiquidationDetailRow(event.target);
   });
   $("#print-report").addEventListener("click", () => window.print());
+  $("#report-sheet").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-report-party-pdf]");
+    if (button) printReportParty(button.dataset.reportPartyPdf);
+  });
 
   const health = await fetchJson("/api/health");
   $("#status").textContent = health.modo === "postgres" ? "PostgreSQL conectado" : "Backup local";

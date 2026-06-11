@@ -973,6 +973,12 @@ label textarea {
   font-weight: bold;
 }
 
+.report-export-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 @media print {
   @page {
     size: A4 portrait;
@@ -994,6 +1000,10 @@ label textarea {
   .operation-list-block > .table-wrap,
   .panel-head button,
   .report-panel > .panel-head {
+    display: none !important;
+  }
+
+  .report-export-actions {
     display: none !important;
   }
 
