@@ -307,6 +307,24 @@ async function handleApi(req, res) {
     return;
   }
 
+  const facturacionParcialMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/facturacion-parcial$/);
+  if (facturacionParcialMatch && req.method === "POST") {
+    const body = await readBody(req);
+    sendJson(res, 200, { item: await dataSource.saveFacturacionParcial(decodeURIComponent(facturacionParcialMatch[1]), body) });
+    return;
+  }
+
+  const facturacionParcialItemMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/facturacion-parcial\/([^/]+)$/);
+  if (facturacionParcialItemMatch && req.method === "DELETE") {
+    sendJson(res, 200, {
+      item: await dataSource.deleteFacturacionParcial(
+        decodeURIComponent(facturacionParcialItemMatch[1]),
+        decodeURIComponent(facturacionParcialItemMatch[2])
+      )
+    });
+    return;
+  }
+
   const liquidacionMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/liquidacion$/);
   if (liquidacionMatch && req.method === "POST") {
     const body = await readBody(req);

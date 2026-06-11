@@ -213,7 +213,8 @@
               <div class="form-grid">
                 <label>
                   Fusionar este cliente en
-                  <input id="client-merge-target" list="cc-client-list" placeholder="Cliente correcto">
+                  <input id="client-merge-target" list="client-merge-list" placeholder="Cliente correcto">
+                  <datalist id="client-merge-list"></datalist>
                 </label>
                 <label>
                   Accion
@@ -583,6 +584,38 @@
                 <p class="form-message" id="sale-message"></p>
               </form>
               <datalist id="sale-tab-rules-list"></datalist>
+              </section>
+              <section class="sale-section partial-billing-section">
+                <div class="section-head">
+                  <div>
+                    <h3>Control de facturacion parcial</h3>
+                    <p class="subtle">Control interno. No genera movimientos en cuenta corriente.</p>
+                  </div>
+                </div>
+                <div class="cc-grid partial-billing-summary">
+                  <div><span>Cabezas venta</span><strong id="partial-total-heads">0</strong></div>
+                  <div><span>Neto venta</span><strong id="partial-total-net">$ 0,00</strong></div>
+                  <div><span>Facturado parcial</span><strong id="partial-billed-net">$ 0,00</strong></div>
+                  <div><span>Pendiente</span><strong id="partial-pending-net">$ 0,00</strong></div>
+                </div>
+                <div class="form-grid">
+                  <label>Fecha<input id="partial-date" type="date"></label>
+                  <label>Comprobante / referencia<input id="partial-receipt"></label>
+                  <label>Cantidad<input id="partial-heads" inputmode="decimal"></label>
+                  <label>Importe neto<input id="partial-net" class="money-input" inputmode="decimal"></label>
+                  <label>IVA<input id="partial-iva" class="money-input" inputmode="decimal"></label>
+                  <label>Observaciones<input id="partial-notes"></label>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" id="partial-save">Agregar parcial</button>
+                </div>
+                <div class="table-wrap compact-table">
+                  <table>
+                    <thead><tr><th>Fecha</th><th>Comprobante</th><th>Cant.</th><th>Neto</th><th>IVA</th><th>Total</th><th>Observaciones</th><th></th></tr></thead>
+                    <tbody id="partial-body"></tbody>
+                  </table>
+                </div>
+                <p class="form-message" id="partial-message"></p>
               </section>
               <section class="sale-section category-admin">
                 <div class="section-head">

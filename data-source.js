@@ -100,7 +100,10 @@ function mirrorSinglePartyConsignedLiquidacion(operation) {
 }
 
 function normalizeKey(value) {
-  return normalizeText(value).toUpperCase();
+  return normalizeText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
 }
 
 function normalizeCuit(value) {
@@ -1264,10 +1267,18 @@ class BackupDataSource {
       throw error;
     }
     const targetName = normalizeText(input.targetName);
-    const target = clients.find((client) => normalizeKey(client.nombre) === normalizeKey(targetName) && String(client.id || normalizeKey(client.nombre)) !== String(sourceId));
+    const targetId = normalizeText(input.targetId);
+    const target = targetId
+      ? clients.find((client) => String(client.id || normalizeKey(client.nombre)) === String(targetId))
+      : clients.find((client) => normalizeKey(client.nombre) === normalizeKey(targetName) && String(client.id || normalizeKey(client.nombre)) !== String(source.id || normalizeKey(source.nombre)));
     if (!target) {
       const error = new Error("No se encontro el cliente correcto de destino.");
       error.statusCode = 404;
+      throw error;
+    }
+    if (String(target.id || normalizeKey(target.nombre)) === String(source.id || normalizeKey(source.nombre))) {
+      const error = new Error("El cliente destino no puede ser el mismo registro.");
+      error.statusCode = 400;
       throw error;
     }
     this.replaceClientNameReferences(data, source.nombre, {
@@ -1547,6 +1558,7 @@ class BackupDataSource {
       renspaOrigen: operation.renspaOrigen || (operation.draftData && operation.draftData.renspaOrigen) || "",
       renspaDestino: operation.renspaDestino || (operation.draftData && operation.draftData.renspaDestino) || "",
       saleLines: asArray(operation.draftData && operation.draftData.saleLines),
+      facturacionParcial: asArray(operation.draftData && operation.draftData.facturacionParcial),
       liquidacion: operation.draftData && operation.draftData.liquidacion ? operation.draftData.liquidacion : calculateLiquidacion(operation),
       liquidacionConfirmada: Boolean(operation.draftData && operation.draftData.liquidacionConfirmada),
       condiciones: operation.draftData && operation.draftData.condicionesOperacion ? operation.draftData.condicionesOperacion : "",
@@ -1645,6 +1657,60 @@ class BackupDataSource {
       throw error;
     }
     touchOperationSale(operation);
+    data.operations = operations;
+    this.saveData(data);
+    return { operation };
+  }
+
+  async saveFacturacionParcial(operationId, input) {
+    const data = this.readData();
+    const operations = asArray(data.operations);
+    const operation = operations.find((item) => String(item.id) === String(operationId));
+    if (!operation) {
+      const error = new Error("No se encontro la operacion.");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (!operation.draftData) operation.draftData = {};
+    if (!Array.isArray(operation.draftData.facturacionParcial)) operation.draftData.facturacionParcial = [];
+    const line = {
+      id: `FP-${Date.now()}`,
+      fecha: formatDateForDisplay(input.fecha),
+      comprobante: normalizeText(input.comprobante),
+      cantidad: parseMoney(input.cantidad),
+      importeNeto: parseMoney(input.importeNeto),
+      iva: parseMoney(input.iva),
+      observaciones: normalizeText(input.observaciones)
+    };
+    if (!line.fecha || (!line.cantidad && !line.importeNeto && !line.iva)) {
+      const error = new Error("Falta cargar fecha y al menos cantidad o importe.");
+      error.statusCode = 400;
+      throw error;
+    }
+    operation.draftData.facturacionParcial.push(line);
+    data.operations = operations;
+    this.saveData(data);
+    return { operation, line };
+  }
+
+  async deleteFacturacionParcial(operationId, lineId) {
+    const data = this.readData();
+    const operations = asArray(data.operations);
+    const operation = operations.find((item) => String(item.id) === String(operationId));
+    if (!operation) {
+      const error = new Error("No se encontro la operacion.");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (!operation.draftData) operation.draftData = {};
+    const originalLength = asArray(operation.draftData.facturacionParcial).length;
+    operation.draftData.facturacionParcial = asArray(operation.draftData.facturacionParcial)
+      .filter((line) => String(line.id) !== String(lineId));
+    if (operation.draftData.facturacionParcial.length === originalLength) {
+      const error = new Error("No se encontro el parcial.");
+      error.statusCode = 404;
+      throw error;
+    }
     data.operations = operations;
     this.saveData(data);
     return { operation };
@@ -2026,6 +2092,8 @@ class PostgresJsonDataSource extends BackupDataSource {
   async saveVentaLinea(operationId, input) { return this.withRemoteData(() => super.saveVentaLinea(operationId, input), true); }
   async updateVentaLinea(operationId, lineId, input) { return this.withRemoteData(() => super.updateVentaLinea(operationId, lineId, input), true); }
   async deleteVentaLinea(operationId, lineId) { return this.withRemoteData(() => super.deleteVentaLinea(operationId, lineId), true); }
+  async saveFacturacionParcial(operationId, input) { return this.withRemoteData(() => super.saveFacturacionParcial(operationId, input), true); }
+  async deleteFacturacionParcial(operationId, lineId) { return this.withRemoteData(() => super.deleteFacturacionParcial(operationId, lineId), true); }
   async saveLiquidacion(operationId, input) { return this.withRemoteData(() => super.saveLiquidacion(operationId, input), true); }
   async getOperaciones() { return this.withRemoteData(() => super.getOperaciones()); }
   async getCuentaCorrienteResumen() { return this.withRemoteData(() => super.getCuentaCorrienteResumen()); }

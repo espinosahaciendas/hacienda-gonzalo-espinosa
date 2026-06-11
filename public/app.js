@@ -1277,6 +1277,14 @@ function renderClientes() {
     .join("");
 }
 
+function populateClientMergeTargets() {
+  if (!$("#client-merge-list")) return;
+  $("#client-merge-list").innerHTML = state.clientes
+    .filter((client) => String(client.id) !== String(state.selectedClientId))
+    .map((client) => `<option value="${escapeHtml(client.nombre)}" data-client-id="${escapeHtml(client.id)}">${escapeHtml(client.cuit || client.tipo || "")}</option>`)
+    .join("");
+}
+
 function closeSuggestions(except = null) {
   $all(".suggestions").forEach((node) => {
     if (node === except) return;
@@ -1480,6 +1488,51 @@ function renderSaleLines(lines) {
         </tr>
       `).join("")
     : `<tr><td colspan="6">Sin lineas cargadas todavia.</td></tr>`;
+  renderPartialBilling();
+}
+
+function partialBillingTotals(operation = state.currentOperation) {
+  const lines = operation?.saleLines || [];
+  const partials = operation?.facturacionParcial || [];
+  const totalHeads = lines.reduce((sum, line) => sum + Number(line.cabezas || 0), 0);
+  const totalNet = lines.reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
+  const billedHeads = partials.reduce((sum, line) => sum + Number(line.cantidad || 0), 0);
+  const billedNet = partials.reduce((sum, line) => sum + Number(line.importeNeto || 0), 0);
+  const billedIva = partials.reduce((sum, line) => sum + Number(line.iva || 0), 0);
+  return {
+    totalHeads,
+    totalNet,
+    billedHeads,
+    billedNet,
+    billedIva,
+    pendingHeads: Math.max(totalHeads - billedHeads, 0),
+    pendingNet: Math.max(totalNet - billedNet, 0)
+  };
+}
+
+function renderPartialBilling() {
+  if (!$("#partial-total-heads")) return;
+  const operation = state.currentOperation || {};
+  const partials = operation.facturacionParcial || [];
+  const totals = partialBillingTotals(operation);
+  $("#partial-total-heads").textContent = `${plainNumberValue(totals.totalHeads)} cab.`;
+  $("#partial-total-net").textContent = moneyValue(totals.totalNet);
+  $("#partial-billed-net").textContent = `${moneyValue(totals.billedNet)} + IVA ${moneyValue(totals.billedIva)}`;
+  $("#partial-pending-net").textContent = `${moneyValue(totals.pendingNet)} / ${plainNumberValue(totals.pendingHeads)} cab.`;
+  $("#partial-body").innerHTML = partials.length
+    ? partials.map((line) => `
+      <tr>
+        <td>${escapeHtml(line.fecha || "-")}</td>
+        <td>${escapeHtml(line.comprobante || "-")}</td>
+        <td>${plainNumberValue(line.cantidad)}</td>
+        <td>${moneyValue(line.importeNeto)}</td>
+        <td>${moneyValue(line.iva)}</td>
+        <td>${moneyValue(Number(line.importeNeto || 0) + Number(line.iva || 0))}</td>
+        <td>${escapeHtml(line.observaciones || "-")}</td>
+        <td><button type="button" class="small-button danger-button" data-partial-delete="${escapeHtml(line.id)}">Eliminar</button></td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="8">Sin facturacion parcial cargada.</td></tr>`;
 }
 
 function moneyValue(value) {
@@ -2200,6 +2253,7 @@ async function openSale(operationId, step = "sale") {
   setOperationModeExisting(operation);
   $("#sale-operation-label").textContent = `${operation.id} - ${operation.vendedor || ""} / ${operation.comprador || operation.consignataria || ""}`;
   renderSaleLines(operation.saleLines || []);
+  if ($("#partial-date") && !$("#partial-date").value) $("#partial-date").value = new Date().toISOString().slice(0, 10);
   $("#category-admin-panel").hidden = false;
   $("#category-admin-toggle").textContent = "Cerrar listado";
   renderCategoryAdmin();
@@ -2485,6 +2539,53 @@ async function deleteSaleLine(lineId) {
   }
 }
 
+async function savePartialBilling() {
+  if (!state.selectedOperationId) return;
+  $("#partial-message").textContent = "Guardando parcial...";
+  $("#partial-message").className = "form-message";
+  try {
+    await fetchJson(`/api/operaciones/${encodeURIComponent(state.selectedOperationId)}/facturacion-parcial`, {
+      method: "POST",
+      body: JSON.stringify({
+        fecha: $("#partial-date").value,
+        comprobante: $("#partial-receipt").value,
+        cantidad: parseMoneyInput($("#partial-heads").value),
+        importeNeto: parseMoneyInput($("#partial-net").value),
+        iva: parseMoneyInput($("#partial-iva").value),
+        observaciones: $("#partial-notes").value
+      })
+    });
+    await openSale(state.selectedOperationId, "sale");
+    $("#partial-receipt").value = "";
+    $("#partial-heads").value = "";
+    $("#partial-net").value = "";
+    $("#partial-iva").value = "";
+    $("#partial-notes").value = "";
+    $("#partial-message").textContent = "Parcial agregado. No impacta en cuenta corriente.";
+    $("#partial-message").className = "form-message ok";
+  } catch (error) {
+    $("#partial-message").textContent = error.message;
+    $("#partial-message").className = "form-message error";
+  }
+}
+
+async function deletePartialBilling(lineId) {
+  if (!state.selectedOperationId || !lineId) return;
+  const confirmed = window.confirm("Se quitara solo este parcial de control. No afecta cuenta corriente. ¿Continuar?");
+  if (!confirmed) return;
+  try {
+    await fetchJson(`/api/operaciones/${encodeURIComponent(state.selectedOperationId)}/facturacion-parcial/${encodeURIComponent(lineId)}`, {
+      method: "DELETE"
+    });
+    await openSale(state.selectedOperationId, "sale");
+    $("#partial-message").textContent = "Parcial eliminado.";
+    $("#partial-message").className = "form-message ok";
+  } catch (error) {
+    $("#partial-message").textContent = error.message;
+    $("#partial-message").className = "form-message error";
+  }
+}
+
 async function saveSaleLine(event) {
   event.preventDefault();
   if (!state.selectedOperationId) {
@@ -2702,6 +2803,18 @@ function renderReport() {
   const controlOnly = !operation.liquidacionConfirmada;
   const sellerObservation = $("#liq-observaciones-prod").value || (operation.liquidacion && operation.liquidacion.observacionesProd) || draft.observacionesProd || "";
   const buyerObservation = $("#liq-observaciones-comp").value || (operation.liquidacion && operation.liquidacion.observacionesComp) || draft.observacionesComp || "";
+  const partialTotals = partialBillingTotals(operation);
+  const partialRows = (operation.facturacionParcial || []).map((line) => `
+    <tr>
+      <td>${escapeHtml(line.fecha || "-")}</td>
+      <td>${escapeHtml(line.comprobante || "-")}</td>
+      <td>${plainNumberValue(line.cantidad)}</td>
+      <td>${moneyValue(line.importeNeto)}</td>
+      <td>${moneyValue(line.iva)}</td>
+      <td>${moneyValue(Number(line.importeNeto || 0) + Number(line.iva || 0))}</td>
+      <td>${escapeHtml(line.observaciones || "-")}</td>
+    </tr>
+  `).join("");
 
   const detailRows = detail.map((item) => `
     <tr>
@@ -2816,6 +2929,18 @@ function renderReport() {
       </table>
     </div>
   `;
+  const partialReport = (operation.facturacionParcial || []).length ? `
+    <div class="report-section">
+      <h3>Control de facturacion parcial</h3>
+      <table class="report-table">
+        <thead><tr><th>Fecha</th><th>Comprobante</th><th>Cant.</th><th>Neto</th><th>IVA</th><th>Total</th><th>Observaciones</th></tr></thead>
+        <tbody>${partialRows}
+          <tr class="report-total"><td colspan="2">Facturado parcial</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td><td>${moneyValue(partialTotals.billedNet + partialTotals.billedIva)}</td><td></td></tr>
+          <tr class="report-total"><td colspan="2">Pendiente operativo</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingNet)}</td><td>-</td><td>-</td><td>No impacta en cuenta corriente</td></tr>
+        </tbody>
+      </table>
+    </div>
+  ` : "";
   const controlReport = `
     <div class="report-pages">
       <section class="report-page-block seller-report">
@@ -2824,6 +2949,7 @@ function renderReport() {
         ${operationNote}
         ${partyNote("Observaciones productor", sellerObservation)}
         <div class="report-section"><h3>Detalle de carga vendedor</h3><table class="report-table control-table">${loadTableHead}<tbody>${sellerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
+        ${partialReport}
       </section>
       <section class="report-page-block buyer-report">
         ${reportHeader("REPORTE DE CARGA Y CONTROL - COMPRADOR")}
@@ -2936,6 +3062,7 @@ async function editClient(clientId) {
   $("#client-maintenance-panel").hidden = false;
   $("#client-maintenance-message").textContent = "";
   $("#client-merge-target").value = "";
+  populateClientMergeTargets();
   setClientMessage("Editando cliente existente.");
   setRenspaMessage("");
   await loadRenspas(client.id);
@@ -2952,16 +3079,18 @@ async function applyClientMaintenance() {
   try {
     if (action === "MERGE") {
       const targetName = $("#client-merge-target").value;
-      if (!targetName || normalizeSearch(targetName) === normalizeSearch(currentName)) {
+      const matches = state.clientes.filter((client) => normalizeSearch(client.nombre) === normalizeSearch(targetName) && String(client.id) !== String(state.selectedClientId));
+      const target = matches[0] || state.clientes.find((client) => normalizeSearch(client.nombre).includes(normalizeSearch(targetName)) && String(client.id) !== String(state.selectedClientId));
+      if (!targetName || !target) {
         throw new Error("Indique el cliente correcto de destino.");
       }
-      const confirmed = window.confirm(`Se fusionara "${currentName}" dentro de "${targetName}". Las operaciones y cuenta corriente pasaran al cliente correcto. ¿Continuar?`);
+      const confirmed = window.confirm(`Se fusionara "${currentName}" dentro de "${target.nombre}". Las operaciones y cuenta corriente pasaran al cliente correcto. ¿Continuar?`);
       if (!confirmed) return;
       await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}/fusionar`, {
         method: "POST",
-        body: JSON.stringify({ targetName })
+        body: JSON.stringify({ targetName: target.nombre, targetId: target.id })
       });
-      $("#client-search").value = targetName;
+      $("#client-search").value = target.nombre;
     } else {
       const confirmed = window.confirm(`Se intentara eliminar "${currentName}". Solo se permite si no tiene operaciones ni movimientos. ¿Continuar?`);
       if (!confirmed) return;
@@ -3198,6 +3327,14 @@ async function init() {
     }
     const deleteButton = event.target.closest("[data-delete-sale-line]");
     if (deleteButton) deleteSaleLine(deleteButton.dataset.deleteSaleLine);
+  });
+  $("#partial-save").addEventListener("click", savePartialBilling);
+  $("#partial-net").addEventListener("input", () => {
+    if (!$("#partial-iva").value.trim()) setMoneyInput("#partial-iva", parseMoneyInput($("#partial-net").value) * 0.105);
+  });
+  $("#partial-body").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-partial-delete]");
+    if (button) deletePartialBilling(button.dataset.partialDelete);
   });
   $("#liquidation-form").addEventListener("submit", saveLiquidation);
   $("#sale-buyer-different").addEventListener("change", syncBuyerDiff);
