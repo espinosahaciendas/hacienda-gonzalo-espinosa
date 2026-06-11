@@ -959,6 +959,15 @@ label textarea {
   padding: 6px 7px;
 }
 
+.control-table {
+  font-size: 11px;
+}
+
+.control-table th,
+.control-table td {
+  padding: 5px 6px;
+}
+
 .report-total {
   background: var(--accent-soft);
   font-weight: bold;
@@ -1064,6 +1073,10 @@ label textarea {
 
   .report-table {
     font-size: 7.5pt;
+  }
+
+  .control-table {
+    font-size: 6.6pt;
   }
 
   .report-table th,

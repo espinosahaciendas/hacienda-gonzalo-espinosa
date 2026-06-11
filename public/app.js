@@ -1980,6 +1980,8 @@ function fillLiquidationForm(liquidacion) {
   $("#liq-direct-notes").value = liquidacion.detalleLiquidacionDirectaProd || draft.detalleLiquidacionDirectaProd || "";
   $("#liq-different-buyer-receipt").checked = Boolean(liquidacion.comprobanteCompDiferente || draft.comprobanteCompDiferente);
   $("#liq-observaciones").value = liquidacion.observaciones || "";
+  $("#liq-observaciones-prod").value = liquidacion.observacionesProd || draft.observacionesProd || "";
+  $("#liq-observaciones-comp").value = liquidacion.observacionesComp || draft.observacionesComp || "";
   renderLiquidationDetail(liquidacion.detalleLiquidar || []);
   renderLiquidationTotals();
   renderReport();
@@ -2603,6 +2605,8 @@ async function saveLiquidation(event) {
     comprobanteCompDiferente: $("#liq-different-buyer-receipt").checked,
     netoFinalFrigorificoComp: parseMoneyInput($("#frigo-neto-final").value),
     observaciones: $("#liq-observaciones").value,
+    observacionesProd: $("#liq-observaciones-prod").value,
+    observacionesComp: $("#liq-observaciones-comp").value,
     detalleLiquidar: collectLiquidationDetail()
   };
   try {
@@ -2611,10 +2615,72 @@ async function saveLiquidation(event) {
       body: JSON.stringify(payload)
     });
     fillLiquidationForm(saved.item);
+    if (state.currentOperation) {
+      state.currentOperation.liquidacion = saved.item;
+      state.currentOperation.liquidacionConfirmada = true;
+    }
     setLiquidationMessage("Liquidacion guardada correctamente.", "ok");
   } catch (error) {
     setLiquidationMessage(error.message, "error");
   }
+}
+
+function kgValue(value) {
+  const number = Number(value || 0);
+  return number ? `${number.toLocaleString("es-AR", { maximumFractionDigits: 2 })} kgs` : "-";
+}
+
+function plainNumberValue(value) {
+  const number = Number(value || 0);
+  return number ? number.toLocaleString("es-AR", { maximumFractionDigits: 2 }) : "-";
+}
+
+function saleLineCalcValue(line, side) {
+  const seller = side === "vend";
+  const heads = Number(line.cabezas || 0);
+  const kgBruto = Number(line.kgBruto || 0);
+  const desbaste = Number(seller ? line.desbasteVend : line.desbasteComp || line.desbasteVend || 0);
+  const kgNeto = Number(seller ? line.kgNetoVend : line.kgComp || line.kgNetoVend || 0);
+  const kgCalculoManual = seller ? line.kgCalculoVend : line.kgCalculoComp;
+  const useReal = seller ? line.usarKgRealVend : line.usarKgRealComp;
+  const kgCalculo = String(kgCalculoManual || "").trim()
+    ? parseMoneyInput(kgCalculoManual)
+    : useReal ? kgBruto * (1 - desbaste / 100) : kgNeto;
+  const promManual = seller ? line.promUsadoVend : line.promUsadoComp;
+  const promedio = String(promManual || "").trim() ? parseMoneyInput(promManual) : heads ? kgCalculo / heads : 0;
+  const tab = seller ? line.tabVend : line.tabComp || line.tabVend;
+  const tipoPrecio = seller ? line.tipoPrecioVend : line.tipoPrecioComp || line.tipoPrecioVend;
+  const precioBase = Number(seller ? line.precioVend : line.precioComp || line.precioVend || 0);
+  const precioFinal = Number(seller ? line.precioFinalVend : line.precioFinalComp || line.precioFinalVend || 0);
+  const ajusteTab = tipoPrecio === "CAB" ? 0 : tabDelta(tab, promedio);
+  return { kgCalculo, promedio, tab, tipoPrecio, precioBase, precioFinal, ajusteTab };
+}
+
+function tabText(calc) {
+  if (!calc.tab) return "-";
+  const adjustment = Number(calc.ajusteTab || 0);
+  return `${calc.tab}${adjustment ? ` (${adjustment > 0 ? "+" : ""}${adjustment})` : ""}`;
+}
+
+function saleControlRows(lines, side) {
+  return (lines || []).map((line) => {
+    const calc = saleLineCalcValue(line, side);
+    const seller = side === "vend";
+    return `
+      <tr>
+        <td>${escapeHtml(line.categoria || "-")}</td>
+        <td>${escapeHtml(line.cabezas || "-")}</td>
+        <td>${kgValue(line.kgBruto)}</td>
+        <td>${plainNumberValue(seller ? line.desbasteVend : line.desbasteComp || line.desbasteVend)}%</td>
+        <td>${kgValue(seller ? line.kgNetoVend : line.kgComp || line.kgNetoVend)}</td>
+        <td>${kgValue(calc.kgCalculo)}</td>
+        <td>${plainNumberValue(calc.promedio)}</td>
+        <td>${escapeHtml(tabText(calc))}</td>
+        <td>${moneyValue(calc.precioFinal || calc.precioBase)}</td>
+        <td>${moneyValue(seller ? line.importeVend : line.importeComp || line.importeVend)}</td>
+      </tr>
+    `;
+  }).join("");
 }
 
 function renderReport() {
@@ -2633,6 +2699,9 @@ function renderReport() {
   const buyerCuit = operation.compradorCuit || draft.compradorCuit || "";
   const consignee = operation.consignataria || draft.consignataria || "";
   const sellerExpensesTotal = Object.values(expenses).reduce((sum, value) => sum + Number(value || 0), 0);
+  const controlOnly = !operation.liquidacionConfirmada;
+  const sellerObservation = $("#liq-observaciones-prod").value || (operation.liquidacion && operation.liquidacion.observacionesProd) || draft.observacionesProd || "";
+  const buyerObservation = $("#liq-observaciones-comp").value || (operation.liquidacion && operation.liquidacion.observacionesComp) || draft.observacionesComp || "";
 
   const detailRows = detail.map((item) => `
     <tr>
@@ -2660,14 +2729,11 @@ function renderReport() {
     { title: "Liquidacion / facturado", plan: $("#liq-plan-fact-comp").value, base: calc.netoLiquidacionComp },
     { title: "Efectivo", plan: $("#liq-plan-cash-comp").value, base: calc.efectivoComp }
   ]);
-  const sellerLines = (operation.saleLines || []).map((line) => `
-    <tr><td>${escapeHtml(line.categoria)}</td><td>${escapeHtml(line.cabezas || "")}</td><td>${escapeHtml(line.kgNetoVend || "")}</td><td>${escapeHtml(line.promVend || line.promNeto || "")}</td><td>${moneyValue(line.precioFinalVend || line.precioVend)}</td><td>${moneyValue(line.importeVend)}</td></tr>
-  `).join("");
+  const sellerLines = saleControlRows(operation.saleLines || [], "vend");
   const sellerLinesTotal = (operation.saleLines || []).reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
-  const buyerLines = (operation.saleLines || []).map((line) => `
-    <tr><td>${escapeHtml(line.categoria)}</td><td>${escapeHtml(line.cabezas || "")}</td><td>${escapeHtml(line.kgComp || line.kgNetoVend || "")}</td><td>${escapeHtml(line.promComp || line.promVend || line.promNeto || "")}</td><td>${moneyValue(line.precioFinalComp || line.precioComp || line.precioFinalVend || line.precioVend)}</td><td>${moneyValue(line.importeComp || line.importeVend)}</td></tr>
-  `).join("");
+  const buyerLines = saleControlRows(operation.saleLines || [], "comp");
   const buyerLinesTotal = (operation.saleLines || []).reduce((sum, line) => sum + Number(line.importeComp || line.importeVend || 0), 0);
+  const loadTableHead = `<thead><tr><th>Categoria</th><th>Cant.</th><th>Kg bruto</th><th>Desb.</th><th>Kg neto</th><th>Kg calculo</th><th>Prom.</th><th>TAB</th><th>Precio final</th><th>Importe</th></tr></thead>`;
   const operationData = (party, name, cuit, counterpartName, counterpartCuit) => `
     <div class="report-kv">
       <span>${party}</span><strong>${escapeHtml(name || "-")}</strong>
@@ -2693,6 +2759,7 @@ function renderReport() {
     <div class="report-title"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(operationTypeLabel(operation))} - ${escapeHtml(operation.destino || "")}</span></div>
   `;
   const operationNote = conditions ? `<div class="report-note"><span>Minuta / condiciones de la operacion</span><strong>${escapeHtml(conditions)}</strong></div>` : "";
+  const partyNote = (title, text) => text ? `<div class="report-note"><span>${escapeHtml(title)}</span><strong>${escapeHtml(text)}</strong></div>` : "";
   const detailReport = `
     <div class="report-section">
       <h3>Detalle para liquidar</h3>
@@ -2749,13 +2816,36 @@ function renderReport() {
       </table>
     </div>
   `;
+  const controlReport = `
+    <div class="report-pages">
+      <section class="report-page-block seller-report">
+        ${reportHeader("REPORTE DE CARGA Y CONTROL - PRODUCTOR")}
+        ${operationData("Productor", operation.vendedor, sellerCuit, operation.comprador, buyerCuit)}
+        ${operationNote}
+        ${partyNote("Observaciones productor", sellerObservation)}
+        <div class="report-section"><h3>Detalle de carga vendedor</h3><table class="report-table control-table">${loadTableHead}<tbody>${sellerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
+      </section>
+      <section class="report-page-block buyer-report">
+        ${reportHeader("REPORTE DE CARGA Y CONTROL - COMPRADOR")}
+        ${operationData("Comprador", operation.comprador, buyerCuit, operation.vendedor, sellerCuit)}
+        ${operationNote}
+        ${partyNote("Observaciones comprador", buyerObservation)}
+        <div class="report-section"><h3>Detalle de carga comprador</h3><table class="report-table control-table">${loadTableHead}<tbody>${buyerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
+      </section>
+    </div>
+  `;
+  if (controlOnly) {
+    $("#report-sheet").innerHTML = controlReport;
+    return;
+  }
   $("#report-sheet").innerHTML = `
     <div class="report-pages">
       <section class="report-page-block seller-report">
         ${reportHeader("REPORTE FINAL PARA PRODUCTOR")}
         ${operationData("Productor", operation.vendedor, sellerCuit, operation.comprador, buyerCuit)}
         ${operationNote}
-        <div class="report-section"><h3>Carga real</h3><table class="report-table"><thead><tr><th>Categoria</th><th>Cant.</th><th>Kg neto</th><th>Prom.</th><th>Precio final</th><th>Importe</th></tr></thead><tbody>${sellerLines}<tr class="report-total"><td colspan="5">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
+        ${partyNote("Observaciones productor", sellerObservation)}
+        <div class="report-section"><h3>Carga real vendedor</h3><table class="report-table control-table">${loadTableHead}<tbody>${sellerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
         ${isDirectOperation(operation) ? detailReport : ""}
         ${frigoReport}
         ${dueReport(sellerDueRows)}
@@ -2777,7 +2867,8 @@ function renderReport() {
         ${reportHeader("REPORTE FINAL PARA COMPRADOR")}
         ${operationData("Comprador", operation.comprador, buyerCuit, operation.vendedor, sellerCuit)}
         ${operationNote}
-        <div class="report-section"><h3>Carga real</h3><table class="report-table"><thead><tr><th>Categoria</th><th>Cant.</th><th>Kg comp.</th><th>Prom.</th><th>Precio final</th><th>Importe</th></tr></thead><tbody>${buyerLines}<tr class="report-total"><td colspan="5">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
+        ${partyNote("Observaciones comprador", buyerObservation)}
+        <div class="report-section"><h3>Carga real comprador</h3><table class="report-table control-table">${loadTableHead}<tbody>${buyerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
         ${detailReport}
         ${dueReport(buyerDueRows)}
         <div class="report-section"><h3>Liquidacion / facturado</h3><table class="report-table"><tbody>

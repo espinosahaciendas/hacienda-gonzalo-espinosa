@@ -856,8 +856,9 @@ function touchOperationSale(operation) {
   const total = operationTotal(operation);
   operation.total = formatMoney(total);
   operation.estado = "BORRADOR";
+  if (operation.draftData) operation.draftData.liquidacionConfirmada = false;
   operation.draftData.totalVentaVend = total;
-  operation.liquidacionEstado = operation.draftData && operation.draftData.liquidacionConfirmada ? "BORRADOR" : operation.liquidacionEstado;
+  operation.liquidacionEstado = "BORRADOR";
   return total;
 }
 
@@ -1023,6 +1024,8 @@ function calculateLiquidacion(operation, input = {}) {
     netoTotalComp,
     detalleLiquidar,
     observaciones: normalizeText(source.observaciones),
+    observacionesProd: normalizeText(source.observacionesProd),
+    observacionesComp: normalizeText(source.observacionesComp),
     confirmadoEn: new Date().toISOString()
   };
 }
@@ -1545,6 +1548,7 @@ class BackupDataSource {
       renspaDestino: operation.renspaDestino || (operation.draftData && operation.draftData.renspaDestino) || "",
       saleLines: asArray(operation.draftData && operation.draftData.saleLines),
       liquidacion: operation.draftData && operation.draftData.liquidacion ? operation.draftData.liquidacion : calculateLiquidacion(operation),
+      liquidacionConfirmada: Boolean(operation.draftData && operation.draftData.liquidacionConfirmada),
       condiciones: operation.draftData && operation.draftData.condicionesOperacion ? operation.draftData.condicionesOperacion : "",
       establecimientoOrigen: operation.draftData && operation.draftData.establecimientoOrigen ? operation.draftData.establecimientoOrigen : "",
       establecimientoDestino: operation.draftData && operation.draftData.establecimientoDestino ? operation.draftData.establecimientoDestino : ""
@@ -1695,7 +1699,9 @@ class BackupDataSource {
       porcComisionConsignataria: liquidacion.porcComisionConsignataria,
       conceptoAjusteConsignataria: liquidacion.conceptoAjusteConsignataria,
       ajusteConsignataria: liquidacion.ajusteConsignataria,
-      detalleLiquidacionDirectaProd: liquidacion.detalleLiquidacionDirectaProd
+      detalleLiquidacionDirectaProd: liquidacion.detalleLiquidacionDirectaProd,
+      observacionesProd: liquidacion.observacionesProd,
+      observacionesComp: liquidacion.observacionesComp
     });
     operation.draftData.liquidacionConfirmada = true;
     operation.liquidacionEstado = "CONFIRMADA";
