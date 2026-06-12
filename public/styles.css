@@ -978,6 +978,86 @@ label textarea {
   font-size: 11px;
 }
 
+.partial-report-section {
+  overflow-x: auto;
+}
+
+.partial-report-table {
+  font-size: 10.5px;
+  table-layout: fixed;
+}
+
+.partial-report-table th,
+.partial-report-table td {
+  padding: 4px 5px;
+  overflow-wrap: anywhere;
+}
+
+.partial-report-table th:nth-child(1),
+.partial-report-table td:nth-child(1) {
+  width: 12%;
+}
+
+.partial-report-table th:nth-child(2),
+.partial-report-table td:nth-child(2) {
+  width: 14%;
+}
+
+.partial-report-table th:nth-child(3),
+.partial-report-table td:nth-child(3) {
+  width: 17%;
+}
+
+.partial-report-table th:nth-child(4),
+.partial-report-table td:nth-child(4) {
+  width: 8%;
+}
+
+.partial-report-table th:nth-child(5),
+.partial-report-table td:nth-child(5),
+.partial-report-table th:nth-child(6),
+.partial-report-table td:nth-child(6),
+.partial-report-table th:nth-child(7),
+.partial-report-table td:nth-child(7) {
+  width: 16%;
+}
+
+.partial-due-table {
+  font-size: 10.8px;
+  table-layout: fixed;
+}
+
+.partial-due-table th,
+.partial-due-table td {
+  padding: 4px 5px;
+  overflow-wrap: anywhere;
+}
+
+.partial-due-table th:nth-child(1),
+.partial-due-table td:nth-child(1) {
+  width: 16%;
+}
+
+.partial-due-table th:nth-child(2),
+.partial-due-table td:nth-child(2) {
+  width: 24%;
+}
+
+.partial-due-table th:nth-child(3),
+.partial-due-table td:nth-child(3) {
+  width: 10%;
+}
+
+.partial-due-table th:nth-child(4),
+.partial-due-table td:nth-child(4) {
+  width: 16%;
+}
+
+.partial-due-table th:nth-child(5),
+.partial-due-table td:nth-child(5) {
+  width: 34%;
+}
+
 .control-table th,
 .control-table td {
   padding: 5px 6px;
@@ -1101,6 +1181,14 @@ label textarea {
   }
 
   .control-table {
+    font-size: 6.6pt;
+  }
+
+  .partial-report-table {
+    font-size: 6.4pt;
+  }
+
+  .partial-due-table {
     font-size: 6.6pt;
   }
 

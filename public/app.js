@@ -3045,13 +3045,49 @@ function renderReport() {
       <td>${escapeHtml(line.fecha || "-")}</td>
       <td>${escapeHtml(line.planVencimientos || line.vencimiento || "-")}</td>
       <td>${escapeHtml(line.comprobante || "-")}</td>
-      <td>${escapeHtml(partialPartyLabel(line.parteCuenta))}</td>
       <td>${plainNumberValue(line.cantidad)}</td>
       <td>${moneyValue(line.importeBruto || line.importeNeto)}</td>
       <td>${moneyValue(line.importeNeto)}</td>
       <td>${moneyValue(line.iva)}</td>
-      <td>${escapeHtml(line.observaciones || "-")}</td>
     </tr>
+  `).join("");
+  const partialDueItems = (operation.facturacionParcial || []).flatMap((line) => {
+    const amount = Number(line.importeNeto || 0);
+    if (!amount) return [];
+    if (String(line.planVencimientos || "").trim()) {
+      return parseDuePlan(line.planVencimientos, amount).map((item) => ({
+        fecha: addDisplayDays(line.fecha, item.days),
+        comprobante: line.comprobante || "-",
+        cantidad: Number(line.cantidad || 0),
+        detalle: item.manual ? "Importe manual" : `${String(Number(item.pct.toFixed(2))).replace(".", ",")}%`,
+        importe: Number(item.amount || 0)
+      }));
+    }
+    return [{
+      fecha: line.vencimiento || line.fecha || "-",
+      comprobante: line.comprobante || "-",
+      cantidad: Number(line.cantidad || 0),
+      detalle: "100%",
+      importe: amount
+    }];
+  });
+  const partialDueRows = partialDueItems.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.fecha || "-")}</td>
+      <td>${escapeHtml(item.comprobante || "-")}</td>
+      <td>${plainNumberValue(item.cantidad)}</td>
+      <td>${escapeHtml(item.detalle || "-")}</td>
+      <td>${moneyValue(item.importe)}</td>
+    </tr>
+  `).join("");
+  const partialDueTotals = Array.from(partialDueItems.reduce((map, item) => {
+    const key = item.fecha || "-";
+    map.set(key, (map.get(key) || 0) + Number(item.importe || 0));
+    return map;
+  }, new Map()).entries())
+    .sort((a, b) => (parseDisplayDate(a[0])?.getTime() || 0) - (parseDisplayDate(b[0])?.getTime() || 0));
+  const partialDueTotalRows = partialDueTotals.map(([fecha, importe]) => `
+    <tr class="report-total"><td colspan="4">Total a cobrar ${escapeHtml(fecha)}</td><td>${moneyValue(importe)}</td></tr>
   `).join("");
 
   const detailRows = detail.map((item) => `
@@ -3168,26 +3204,33 @@ function renderReport() {
     </div>
   `;
   const partialReport = (operation.facturacionParcial || []).length ? `
-    <div class="report-section">
+    <div class="report-section partial-report-section">
       <h3>Control de facturacion parcial</h3>
-      <table class="report-table">
-        <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Bruto</th><th>Neto a cobrar</th><th>IVA dato</th><th>Observaciones</th></tr></thead>
+      <table class="report-table partial-report-table">
+        <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Cant.</th><th>Bruto</th><th>Neto a cobrar</th><th>IVA dato</th></tr></thead>
         <tbody>${partialRows}
-          <tr class="report-total"><td colspan="4">Liquidado parcial</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedGross)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td><td></td></tr>
-          <tr class="report-total"><td colspan="4">Pendiente operativo bruto</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingGross)}</td><td>-</td><td>-</td><td>Control contra operacion total</td></tr>
+          <tr class="report-total"><td colspan="3">Liquidado parcial</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedGross)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td></tr>
+          <tr class="report-total"><td colspan="3">Pendiente operativo bruto</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingGross)}</td><td>-</td><td>-</td></tr>
         </tbody>
       </table>
     </div>
   ` : "";
   const partialFinalReport = hasPartialBilling ? `
-    <div class="report-section">
+    <div class="report-section partial-report-section">
       <h3>Liquidaciones parciales consolidadas</h3>
-      <table class="report-table">
-        <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Bruto liquidado</th><th>Neto a cobrar</th><th>IVA dato</th><th>Observaciones</th></tr></thead>
+      <table class="report-table partial-report-table">
+        <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Cant.</th><th>Bruto liquidado</th><th>Neto a cobrar</th><th>IVA dato</th></tr></thead>
         <tbody>${partialRows}
-          <tr class="report-total"><td colspan="4">Total liquidado real</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedGross)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td><td></td></tr>
-          <tr class="report-total"><td colspan="4">Pendiente contra operacion total</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingGross)}</td><td>-</td><td>-</td><td></td></tr>
+          <tr class="report-total"><td colspan="3">Total liquidado real</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedGross)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td></tr>
+          <tr class="report-total"><td colspan="3">Pendiente contra operacion total</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingGross)}</td><td>-</td><td>-</td></tr>
         </tbody>
+      </table>
+    </div>
+    <div class="report-section partial-due-section">
+      <h3>Cobros por fecha</h3>
+      <table class="report-table partial-due-table">
+        <thead><tr><th>Fecha de cobro</th><th>Comprobante</th><th>Cant.</th><th>Detalle</th><th>Neto a cobrar</th></tr></thead>
+        <tbody>${partialDueRows || `<tr><td colspan="5">Sin vencimientos parciales informados.</td></tr>`}${partialDueTotalRows}</tbody>
       </table>
     </div>
   ` : "";
@@ -3255,7 +3298,7 @@ function renderReport() {
         <div class="report-section"><h3>Carga real vendedor</h3><table class="report-table control-table">${loadTableHead}<tbody>${sellerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
         ${isDirectOperation(operation) ? detailReport : ""}
         ${frigoReport}
-        ${dueReport(sellerDueRows)}
+        ${hasPartialBilling ? "" : dueReport(sellerDueRows)}
         ${sellerLiquidationSummary}
         ${calc.efectivoProd || calc.cashExpenseProd || calc.comEfProd ? `<div class="report-section"><h3>Efectivo</h3><table class="report-table"><tbody>
           <tr><th>${frigoCalc ? "Efectivo + IVA" : "Efectivo"}</th><td>${moneyValue(frigoCalc ? calc.cashWithIvaProd : calc.efectivoProd)}</td><th></th><td></td></tr>
@@ -3272,7 +3315,7 @@ function renderReport() {
         ${partyNote("Observaciones comprador", buyerObservation)}
         <div class="report-section"><h3>Carga real comprador</h3><table class="report-table control-table">${loadTableHead}<tbody>${buyerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
         ${detailReport}
-        ${dueReport(buyerDueRows)}
+        ${hasPartialBilling ? "" : dueReport(buyerDueRows)}
         ${buyerLiquidationSummary}
         ${calc.efectivoComp || calc.comEfComp ? `<div class="report-section"><h3>Efectivo</h3><table class="report-table"><tbody>
           <tr><th>Efectivo</th><td>${moneyValue(calc.efectivoComp)}</td><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfComp)}</td></tr>
