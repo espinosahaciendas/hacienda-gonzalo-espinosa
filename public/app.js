@@ -10,6 +10,7 @@ const state = {
   tabRules: [],
   currentOperation: null,
   operationStep: "operation",
+  reportMode: "auto",
   editingSaleLineId: "",
   editingExternalMovementId: "",
   commissionistRows: [],
@@ -2406,6 +2407,7 @@ function setOperationStep(step) {
   $("#sale-panel").hidden = !selected || nextStep !== "sale";
   $("#liquidation-panel").hidden = !selected || nextStep !== "liquidation";
   $("#report-panel").hidden = !selected || nextStep !== "report";
+  if (nextStep !== "report") state.reportMode = "auto";
   $all("[data-operation-step]").forEach((button) => {
     button.classList.toggle("active", button.dataset.operationStep === nextStep);
   });
@@ -3025,7 +3027,7 @@ function renderReport() {
   const buyerCuit = operation.compradorCuit || draft.compradorCuit || "";
   const consignee = operation.consignataria || draft.consignataria || "";
   const sellerExpensesTotal = Object.values(expenses).reduce((sum, value) => sum + Number(value || 0), 0);
-  const controlOnly = !operation.liquidacionConfirmada;
+  const controlOnly = state.reportMode === "control" || !operation.liquidacionConfirmada;
   const sellerObservation = $("#liq-observaciones-prod").value || (operation.liquidacion && operation.liquidacion.observacionesProd) || draft.observacionesProd || "";
   const buyerObservation = $("#liq-observaciones-comp").value || (operation.liquidacion && operation.liquidacion.observacionesComp) || draft.observacionesComp || "";
   const partialTotals = partialBillingTotals(operation);
@@ -3189,6 +3191,9 @@ function renderReport() {
       </section>
     </div>
   `;
+  $("#report-control-mode").classList.toggle("active", controlOnly);
+  $("#report-final-mode").classList.toggle("active", !controlOnly);
+
   if (controlOnly) {
     $("#report-sheet").innerHTML = controlReport;
     return;
@@ -3684,6 +3689,14 @@ async function init() {
     recalculateLiquidationDetailRow(event.target);
   });
   $("#print-report").addEventListener("click", () => window.print());
+  $("#report-control-mode").addEventListener("click", () => {
+    state.reportMode = "control";
+    renderReport();
+  });
+  $("#report-final-mode").addEventListener("click", () => {
+    state.reportMode = "final";
+    renderReport();
+  });
   $("#report-sheet").addEventListener("click", (event) => {
     const button = event.target.closest("[data-report-party-pdf]");
     if (button) printReportParty(button.dataset.reportPartyPdf);

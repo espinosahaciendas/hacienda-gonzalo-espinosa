@@ -476,6 +476,13 @@ label textarea {
   color: var(--ink);
 }
 
+.ghost-button.active {
+  border-color: var(--brand);
+  background: var(--accent-soft);
+  color: var(--brand);
+  font-weight: 700;
+}
+
 .small-button {
   padding: 6px 9px;
   font-size: 13px;
