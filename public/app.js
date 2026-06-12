@@ -106,6 +106,10 @@ function setView(view) {
   $("#view-title").textContent = titles[view] || "Sistema";
 }
 
+function preferredInitialView() {
+  return window.matchMedia && window.matchMedia("(max-width: 720px)").matches ? "consulta" : "tablero";
+}
+
 function applyUserRole(user) {
   state.usuario = user;
   const readonly = user && user.rol === "CONSULTA";
@@ -209,9 +213,9 @@ function dayDiffFromToday(value) {
 function dashboardDueRow(movement, mode) {
   const amount = Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
   if (mode === "today") {
-    return `<tr><td>${escapeHtml(movement.cliente || "-")}</td><td>${escapeHtml(movement.concepto || "-")}</td><td class="${amountClass(amount)}">${moneyValue(amount)}</td></tr>`;
+    return `<tr><td>${escapeHtml(movement.cliente || "-")}</td><td>${escapeHtml(currentAccountDueDetailText(movement))}</td><td class="${amountClass(amount)}">${moneyValue(amount)}</td></tr>`;
   }
-  return `<tr><td>${escapeHtml(movement.vencimiento || "-")}</td><td>${escapeHtml(movement.cliente || "-")}</td><td class="${amountClass(amount)}">${moneyValue(amount)}</td></tr>`;
+  return `<tr><td>${escapeHtml(movement.vencimiento || "-")}</td><td>${escapeHtml(`${movement.cliente || "-"} - ${currentAccountDueDetailText(movement)}`)}</td><td class="${amountClass(amount)}">${moneyValue(amount)}</td></tr>`;
 }
 
 function renderDashboardDueLists() {
@@ -244,7 +248,7 @@ function mobileMovementCard(movement, showDate = false) {
     <article class="mobile-list-item ${isCashMovement(movement) ? "movement-cash" : ""}">
       <div>
         <strong>${escapeHtml(movement.cliente || "-")}</strong>
-        <span>${escapeHtml(movement.concepto || "-")}</span>
+        <span>${escapeHtml(currentAccountDueDetailText(movement))}</span>
         ${showDate ? `<small>Vto. ${escapeHtml(movement.vencimiento || "-")}</small>` : ""}
       </div>
       <b class="${amountClass(amount)}">${moneyValue(amount)}</b>
@@ -313,6 +317,33 @@ function isCashMovement(movement) {
   const detail = commissionistDetailFromObservation(movement?.observacion);
   const detailHasCash = Array.isArray(detail?.items) && detail.items.some(isCashDetailRow);
   return detailHasCash || normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.origen || ""}`).includes("efectivo");
+}
+
+function movementDueKind(movement) {
+  if (isCashMovement(movement)) return "Efectivo";
+  if (String(movement?.origen || "").toUpperCase() === "FACTURACION_PARCIAL") return "Facturacion parcial";
+  if (String(movement?.origen || "").toUpperCase() === "COMISION") return "Comision";
+  if (normalizeSearch(movement?.concepto || "").includes("mercado agroganadero")) return "Mercado";
+  if (String(movement?.origen || "").toUpperCase() === "EXTERNO") return "Externo";
+  return "Factura / liquidacion";
+}
+
+function operationBusinessText(movement) {
+  const pieces = [];
+  const type = [movement?.tipoOperacion, movement?.destinoOperacion].filter(Boolean).join(" ");
+  if (type) pieces.push(type);
+  if (movement?.vendedor) pieces.push(`V: ${movement.vendedor}`);
+  if (movement?.comprador) pieces.push(`C: ${movement.comprador}`);
+  if (movement?.consignataria) pieces.push(`Consig.: ${movement.consignataria}`);
+  if (!pieces.length && movement?.contraparte) pieces.push(`Por ${movement.contraparte}`);
+  return pieces.join(" | ");
+}
+
+function currentAccountDueDetailText(movement) {
+  const kind = movementDueKind(movement);
+  const business = operationBusinessText(movement);
+  const receipt = movement?.comprobante ? ` - ${movement.comprobante}` : "";
+  return `${kind}${business ? ` - ${business}` : movement?.concepto ? ` - ${movement.concepto}` : ""}${receipt}`;
 }
 
 function movementAccountEntities(movement) {
@@ -496,7 +527,7 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.fecha || "-")}</td>
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
-          <td>${escapeHtml(currentAccountConceptText(movement, viewMode))}</td>
+          <td>${escapeHtml(currentAccountDueDetailText(movement))}</td>
           <td>${escapeHtml(movement.comprobante || "-")}</td>
           <td>${escapeHtml(movement.operacion || "-")}</td>
           <td class="${amountClass(movement.importe)}">${moneyValue(Math.sign(movement.importe) * Number(movement.importePendiente ?? Math.abs(movement.importe)))}</td>
@@ -1015,8 +1046,67 @@ function printCurrentAccountReport(forcedType = "") {
 }
 
 function printCurrentAccountDueReport() {
-  $("#cc-report-type").value = "VENCIMIENTOS";
-  printCurrentAccountReport("VENCIMIENTOS");
+  const filters = getCurrentAccountReportFilters();
+  const effectiveFilters = { ...filters, dueFilter: filters.dueFilter === "TODOS" && !filters.dateFrom && !filters.dateTo ? "7" : filters.dueFilter };
+  const rows = (state.cuenta.movimientos || [])
+    .filter((movement) => movement.estado !== "ANULADO")
+    .filter((movement) => !movement.paymentId && movement.estado !== "IMPUTADO")
+    .filter((movement) => matchesCurrentAccountReportFilters(movement, effectiveFilters, true, filters.statusFilter !== "TODOS"))
+    .sort((a, b) => {
+      const dateA = parseDisplayDate(a.vencimiento)?.getTime() || 0;
+      const dateB = parseDisplayDate(b.vencimiento)?.getTime() || 0;
+      return dateA - dateB || String(a.cliente || "").localeCompare(String(b.cliente || ""), "es");
+    });
+  const groups = new Map();
+  rows.forEach((movement) => {
+    const key = [
+      movement.vencimiento || "",
+      movement.operacion || movement.id || "",
+      movement.cliente || "",
+      movement.comprobante || "",
+      movement.concepto || ""
+    ].join("|");
+    if (!groups.has(key)) {
+      groups.set(key, {
+        vencimiento: movement.vencimiento || "",
+        cliente: movement.cliente || "",
+        vendedor: movement.vendedor || "",
+        comprador: movement.comprador || "",
+        consignataria: movement.consignataria || "",
+        concepto: currentAccountDueDetailText(movement),
+        comprobante: movement.comprobante || "",
+        operacion: movement.operacion || "",
+        factura: 0,
+        efectivo: 0,
+        comision: 0
+      });
+    }
+    const item = groups.get(key);
+    const amount = signedPendingAmount(movement);
+    if (isCashMovement(movement)) item.efectivo += amount;
+    else if (String(movement.origen || "").toUpperCase() === "COMISION") item.comision += amount;
+    else item.factura += amount;
+  });
+  const dueRows = Array.from(groups.values());
+  const totals = dueRows.reduce((acc, row) => {
+    acc.factura += Number(row.factura || 0);
+    acc.efectivo += Number(row.efectivo || 0);
+    acc.comision += Number(row.comision || 0);
+    return acc;
+  }, { factura: 0, efectivo: 0, comision: 0 });
+  const filterLabel = $("#cc-client-search").value.trim() || "Todos";
+  const periodLabel = filters.dateFrom || filters.dateTo
+    ? `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`
+    : effectiveFilters.dueFilter === "7" ? "Proximos 7 dias" : $("#cc-due-filter option:checked").textContent;
+  const popup = window.open("", "_blank", "width=1100,height=850");
+  if (!popup) return;
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Vencimientos_${escapeHtml(periodLabel)}</title><style>${currentAccountReportStyles()}</style></head><body>
+  <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>Reporte de vencimientos</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
+  <div class="summary"><div><span>Periodo</span><strong>${escapeHtml(periodLabel)}</strong></div><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Total factura</span><strong>${moneyValue(totals.factura)}</strong></div><div><span>Total efectivo</span><strong>${moneyValue(totals.efectivo)}</strong></div><div><span>Total comisiones</span><strong>${moneyValue(totals.comision)}</strong></div></div>
+  <h2>Detalle semanal</h2>
+  <table><thead><tr><th>Vencimiento</th><th>Cliente</th><th>Vendedor</th><th>Comprador</th><th>Consignataria</th><th>Negocio / concepto</th><th>Comprobante</th><th>Factura</th><th>Efectivo</th><th>Comision</th></tr></thead><tbody>${dueRows.length ? dueRows.map((row) => `<tr class="${row.efectivo ? "movement-cash" : ""}"><td>${escapeHtml(row.vencimiento || "-")}</td><td>${escapeHtml(row.cliente || "-")}</td><td>${escapeHtml(row.vendedor || "-")}</td><td>${escapeHtml(row.comprador || "-")}</td><td>${escapeHtml(row.consignataria || "-")}</td><td>${escapeHtml(row.concepto || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount ${row.factura < 0 ? "negative" : "positive"}">${row.factura ? moneyValue(row.factura) : "-"}</td><td class="amount ${row.efectivo < 0 ? "negative" : "positive"}">${row.efectivo ? moneyValue(row.efectivo) : "-"}</td><td class="amount ${row.comision < 0 ? "negative" : "positive"}">${row.comision ? moneyValue(row.comision) : "-"}</td></tr>`).join("") : `<tr><td colspan="10">Sin vencimientos para el periodo.</td></tr>`}</tbody></table>
+  <button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
+  popup.document.close();
 }
 
 async function saveCurrentAccountPayment(printReceipt = false) {
@@ -1523,7 +1613,9 @@ function renderPartialBilling() {
     ? partials.map((line) => `
       <tr>
         <td>${escapeHtml(line.fecha || "-")}</td>
+        <td>${escapeHtml(line.vencimiento || "-")}</td>
         <td>${escapeHtml(line.comprobante || "-")}</td>
+        <td>${escapeHtml(partialPartyLabel(line.parteCuenta))}</td>
         <td>${plainNumberValue(line.cantidad)}</td>
         <td>${moneyValue(line.importeNeto)}</td>
         <td>${moneyValue(line.iva)}</td>
@@ -1532,7 +1624,15 @@ function renderPartialBilling() {
         <td><button type="button" class="small-button danger-button" data-partial-delete="${escapeHtml(line.id)}">Eliminar</button></td>
       </tr>
     `).join("")
-    : `<tr><td colspan="8">Sin facturacion parcial cargada.</td></tr>`;
+    : `<tr><td colspan="10">Sin facturacion parcial cargada.</td></tr>`;
+}
+
+function partialPartyLabel(value) {
+  const key = normalizeSearch(value || "NINGUNA");
+  if (key === "ambas") return "Vendedor y comprador";
+  if (key === "vendedor") return "Solo vendedor";
+  if (key === "comprador") return "Solo comprador";
+  return "No impacta";
 }
 
 function moneyValue(value) {
@@ -2254,6 +2354,7 @@ async function openSale(operationId, step = "sale") {
   $("#sale-operation-label").textContent = `${operation.id} - ${operation.vendedor || ""} / ${operation.comprador || operation.consignataria || ""}`;
   renderSaleLines(operation.saleLines || []);
   if ($("#partial-date") && !$("#partial-date").value) $("#partial-date").value = new Date().toISOString().slice(0, 10);
+  if ($("#partial-due") && !$("#partial-due").value) $("#partial-due").value = $("#partial-date")?.value || new Date().toISOString().slice(0, 10);
   $("#category-admin-panel").hidden = false;
   $("#category-admin-toggle").textContent = "Cerrar listado";
   renderCategoryAdmin();
@@ -2548,7 +2649,9 @@ async function savePartialBilling() {
       method: "POST",
       body: JSON.stringify({
         fecha: $("#partial-date").value,
+        vencimiento: $("#partial-due").value,
         comprobante: $("#partial-receipt").value,
+        parteCuenta: $("#partial-party").value,
         cantidad: parseMoneyInput($("#partial-heads").value),
         importeNeto: parseMoneyInput($("#partial-net").value),
         iva: parseMoneyInput($("#partial-iva").value),
@@ -2561,7 +2664,7 @@ async function savePartialBilling() {
     $("#partial-net").value = "";
     $("#partial-iva").value = "";
     $("#partial-notes").value = "";
-    $("#partial-message").textContent = "Parcial agregado. No impacta en cuenta corriente.";
+    $("#partial-message").textContent = "Parcial agregado. Si tiene impacto seleccionado, ya queda disponible en cuenta corriente.";
     $("#partial-message").className = "form-message ok";
   } catch (error) {
     $("#partial-message").textContent = error.message;
@@ -2571,7 +2674,7 @@ async function savePartialBilling() {
 
 async function deletePartialBilling(lineId) {
   if (!state.selectedOperationId || !lineId) return;
-  const confirmed = window.confirm("Se quitara solo este parcial de control. No afecta cuenta corriente. ¿Continuar?");
+  const confirmed = window.confirm("Se quitara este parcial y su movimiento de cuenta corriente si tenia impacto. ¿Continuar?");
   if (!confirmed) return;
   try {
     await fetchJson(`/api/operaciones/${encodeURIComponent(state.selectedOperationId)}/facturacion-parcial/${encodeURIComponent(lineId)}`, {
@@ -2860,7 +2963,9 @@ function renderReport() {
   const partialRows = (operation.facturacionParcial || []).map((line) => `
     <tr>
       <td>${escapeHtml(line.fecha || "-")}</td>
+      <td>${escapeHtml(line.vencimiento || "-")}</td>
       <td>${escapeHtml(line.comprobante || "-")}</td>
+      <td>${escapeHtml(partialPartyLabel(line.parteCuenta))}</td>
       <td>${plainNumberValue(line.cantidad)}</td>
       <td>${moneyValue(line.importeNeto)}</td>
       <td>${moneyValue(line.iva)}</td>
@@ -2986,10 +3091,10 @@ function renderReport() {
     <div class="report-section">
       <h3>Control de facturacion parcial</h3>
       <table class="report-table">
-        <thead><tr><th>Fecha</th><th>Comprobante</th><th>Cant.</th><th>Neto</th><th>IVA</th><th>Total</th><th>Observaciones</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Vto.</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Neto</th><th>IVA</th><th>Total</th><th>Observaciones</th></tr></thead>
         <tbody>${partialRows}
-          <tr class="report-total"><td colspan="2">Facturado parcial</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td><td>${moneyValue(partialTotals.billedNet + partialTotals.billedIva)}</td><td></td></tr>
-          <tr class="report-total"><td colspan="2">Pendiente operativo</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingNet)}</td><td>-</td><td>-</td><td>No impacta en cuenta corriente</td></tr>
+          <tr class="report-total"><td colspan="4">Facturado parcial</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td><td>${moneyValue(partialTotals.billedNet + partialTotals.billedIva)}</td><td></td></tr>
+          <tr class="report-total"><td colspan="4">Pendiente operativo</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingNet)}</td><td>-</td><td>-</td><td>Control contra operacion total</td></tr>
         </tbody>
       </table>
     </div>
@@ -3386,6 +3491,9 @@ async function init() {
     if (deleteButton) deleteSaleLine(deleteButton.dataset.deleteSaleLine);
   });
   $("#partial-save").addEventListener("click", savePartialBilling);
+  $("#partial-date").addEventListener("change", () => {
+    if (!$("#partial-due").value) $("#partial-due").value = $("#partial-date").value;
+  });
   $("#partial-net").addEventListener("input", () => {
     if (!$("#partial-iva").value.trim()) setMoneyInput("#partial-iva", parseMoneyInput($("#partial-net").value) * 0.105);
   });
@@ -3526,6 +3634,7 @@ async function init() {
   setOperationModeNew();
   showOperationWorkspace();
   setOperationStep("operation");
+  setView(preferredInitialView());
   syncBuyerDiff();
 }
 

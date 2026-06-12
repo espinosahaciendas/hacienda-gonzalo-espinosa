@@ -1,0 +1,16 @@
+{
+  "name": "Gonzalo Espinosa Hacienda y Liquidaciones",
+  "short_name": "Gonzalo Espinosa",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fbfcfb",
+  "theme_color": "#0d2a28",
+  "icons": [
+    {
+      "src": "/logo-espinosa-blanco.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

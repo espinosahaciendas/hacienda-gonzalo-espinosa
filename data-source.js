@@ -333,7 +333,11 @@ function pushMovement(list, movement) {
     operacion: movement.operacion || "",
     paymentId: movement.paymentId || "",
     contraparte: movement.contraparte || "",
+    vendedor: movement.vendedor || "",
+    comprador: movement.comprador || "",
     consignataria: movement.consignataria || "",
+    tipoOperacion: movement.tipoOperacion || "",
+    destinoOperacion: movement.destinoOperacion || "",
     consignatariaCuenta: Boolean(movement.consignatariaCuenta),
     comisionista: movement.comisionista || "",
     baseComision: Number(movement.baseComision || 0),
@@ -434,7 +438,11 @@ function buildOperationAccountMovements(operation) {
         comprobante,
         operacion: operation.id,
         contraparte: counterpart,
+        vendedor: operation.vendedor || draft.vendedor || "",
+        comprador: operation.comprador || draft.comprador || "",
         consignataria: operationConsignee,
+        tipoOperacion: operation.tipo || draft.tipo || "",
+        destinoOperacion: operation.destino || draft.destino || "",
         consignatariaCuenta: consigneeAppliesToRole(role),
         importe: signedAmount,
         estado: "PENDIENTE"
@@ -504,7 +512,11 @@ function buildOperationAccountMovements(operation) {
       comprobante,
       operacion: operation.id,
       contraparte: counterpart,
+      vendedor: operation.vendedor || draft.vendedor || "",
+      comprador: operation.comprador || draft.comprador || "",
       consignataria: operationConsignee,
+      tipoOperacion: operation.tipo || draft.tipo || "",
+      destinoOperacion: operation.destino || draft.destino || "",
       consignatariaCuenta: consigneeAppliesToRole(role),
       importe: Math.abs(Number(amount || 0)),
       estado: "PENDIENTE"
@@ -541,6 +553,55 @@ function buildOperationAccountMovements(operation) {
     comprobante: liq.comprobanteComp || draft.comprobanteComp,
     counterpart: counterpartForRole("COMPRADOR-COM-EFEC", operation.vendedor || draft.vendedor || operationConsignee),
     conceptSuffix: "comision sobre efectivo comprador"
+  });
+
+  asArray(draft.facturacionParcial).forEach((line) => {
+    const parteCuenta = normalizeKey(line.parteCuenta || "NINGUNA");
+    if (!["VENDEDOR", "COMPRADOR", "AMBAS"].includes(parteCuenta)) return;
+    const amount = Math.abs(parseMoney(line.importeNeto) + parseMoney(line.iva));
+    if (!amount) return;
+    const fecha = line.fecha || operationDate;
+    const vencimiento = line.vencimiento || line.fecha || dueBaseDate;
+    const comprobante = line.comprobante || `Parcial ${line.id || ""}`.trim();
+    const baseConcept = `facturacion parcial${line.cantidad ? ` ${line.cantidad} cab.` : ""} sobre operacion total`;
+    const pushPartial = ({ role, cliente, counterpart, importe }) => {
+      if (!cliente) return;
+      pushMovement(movements, {
+        id: `${operation.id}-${line.id}-${role}`,
+        cliente,
+        fecha,
+        vencimiento,
+        origen: "FACTURACION_PARCIAL",
+        concepto: conceptWithCounterpart(baseConcept, counterpart),
+        comprobante,
+        operacion: operation.id,
+        contraparte: counterpart,
+        vendedor: operation.vendedor || draft.vendedor || "",
+        comprador: operation.comprador || draft.comprador || "",
+        consignataria: operationConsignee,
+        tipoOperacion: operation.tipo || draft.tipo || "",
+        destinoOperacion: operation.destino || draft.destino || "",
+        consignatariaCuenta: false,
+        importe,
+        estado: "PENDIENTE"
+      });
+    };
+    if (parteCuenta === "VENDEDOR" || parteCuenta === "AMBAS") {
+      pushPartial({
+        role: "FP-VENDEDOR",
+        cliente: operation.vendedor || draft.vendedor,
+        counterpart: operation.comprador || draft.comprador || operationConsignee,
+        importe: -amount
+      });
+    }
+    if (parteCuenta === "COMPRADOR" || parteCuenta === "AMBAS") {
+      pushPartial({
+        role: "FP-COMPRADOR",
+        cliente: operation.comprador || draft.comprador,
+        counterpart: operation.vendedor || draft.vendedor || operationConsignee,
+        importe: amount
+      });
+    }
   });
 
   const totalCobrarConsignataria = Number(liq.totalCobrarConsignataria || draft.totalCobrarConsignataria || draft.ajusteConsignataria || 0);
@@ -1676,7 +1737,9 @@ class BackupDataSource {
     const line = {
       id: `FP-${Date.now()}`,
       fecha: formatDateForDisplay(input.fecha),
+      vencimiento: formatDateForDisplay(input.vencimiento || input.fecha),
       comprobante: normalizeText(input.comprobante),
+      parteCuenta: normalizeKey(input.parteCuenta || "NINGUNA"),
       cantidad: parseMoney(input.cantidad),
       importeNeto: parseMoney(input.importeNeto),
       iva: parseMoney(input.iva),

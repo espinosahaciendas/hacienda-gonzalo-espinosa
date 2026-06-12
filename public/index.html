@@ -3,6 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0d2a28">
+    <meta name="application-name" content="Gonzalo Espinosa">
+    <meta name="apple-mobile-web-app-title" content="Gonzalo Espinosa">
+    <link rel="icon" type="image/png" href="/logo-espinosa-blanco.png">
+    <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
+    <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
@@ -589,7 +595,7 @@
                 <div class="section-head">
                   <div>
                     <h3>Control de facturacion parcial</h3>
-                    <p class="subtle">Control interno. No genera movimientos en cuenta corriente.</p>
+                    <p class="subtle">La operacion total queda como control. Cada parcial puede impactar en cuenta corriente con vencimiento propio.</p>
                   </div>
                 </div>
                 <div class="cc-grid partial-billing-summary">
@@ -600,7 +606,16 @@
                 </div>
                 <div class="form-grid">
                   <label>Fecha<input id="partial-date" type="date"></label>
+                  <label>Vencimiento<input id="partial-due" type="date"></label>
                   <label>Comprobante / referencia<input id="partial-receipt"></label>
+                  <label>Impacta en cuenta corriente
+                    <select id="partial-party">
+                      <option value="AMBAS">Vendedor y comprador</option>
+                      <option value="VENDEDOR">Solo vendedor / productor</option>
+                      <option value="COMPRADOR">Solo comprador</option>
+                      <option value="NINGUNA">No impacta</option>
+                    </select>
+                  </label>
                   <label>Cantidad<input id="partial-heads" inputmode="decimal"></label>
                   <label>Importe neto<input id="partial-net" class="money-input" inputmode="decimal"></label>
                   <label>IVA<input id="partial-iva" class="money-input" inputmode="decimal"></label>
@@ -611,7 +626,7 @@
                 </div>
                 <div class="table-wrap compact-table">
                   <table>
-                    <thead><tr><th>Fecha</th><th>Comprobante</th><th>Cant.</th><th>Neto</th><th>IVA</th><th>Total</th><th>Observaciones</th><th></th></tr></thead>
+                    <thead><tr><th>Fecha</th><th>Vto.</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Neto</th><th>IVA</th><th>Total</th><th>Observaciones</th><th></th></tr></thead>
                     <tbody id="partial-body"></tbody>
                   </table>
                 </div>

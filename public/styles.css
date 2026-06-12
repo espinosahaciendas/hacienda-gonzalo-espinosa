@@ -1292,15 +1292,20 @@ label textarea {
 @media (max-width: 900px) {
   body {
     grid-template-columns: 1fr;
+    background: #f4f8f6;
   }
 
   main {
-    padding: 18px 16px;
+    padding: 14px 12px 22px;
   }
 
   .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
     min-height: auto;
-    padding: 14px;
+    padding: 10px 12px;
+    box-shadow: 0 8px 18px rgba(13, 42, 40, 0.16);
   }
 
   .brand {
@@ -1313,8 +1318,16 @@ label textarea {
   }
 
   .brand img {
-    height: 64px;
-    width: 64px;
+    height: 48px;
+    width: 48px;
+  }
+
+  .brand strong {
+    font-size: 16px;
+  }
+
+  .brand span {
+    font-size: 12px;
   }
 
   nav {
@@ -1326,6 +1339,7 @@ label textarea {
 
   nav button {
     flex: 0 0 auto;
+    padding: 9px 11px;
     text-align: center;
     white-space: nowrap;
     width: auto;
@@ -1334,23 +1348,77 @@ label textarea {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .topbar h1 {
+    font-size: 22px;
+  }
+
+  .topbar-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .status {
+    flex: 1;
+    padding: 7px 9px;
+  }
+
+  .mobile-summary-view {
+    max-width: none;
   }
 
   .mobile-summary-head {
     align-items: stretch;
     flex-direction: column;
+    gap: 8px;
   }
 
   .mobile-kpis {
     grid-template-columns: 1fr;
+    gap: 9px;
+    margin-bottom: 10px;
+  }
+
+  .mobile-kpis article,
+  .mobile-card {
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(24, 53, 51, 0.05);
+  }
+
+  .mobile-kpis article {
+    padding: 12px;
+  }
+
+  .mobile-kpis strong {
+    font-size: 20px;
+  }
+
+  .mobile-card {
+    margin-bottom: 10px;
+    padding: 12px;
   }
 
   .mobile-list-item {
     gap: 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 10px;
   }
 
   .mobile-list-item b {
-    max-width: 42%;
+    align-self: center;
+    font-size: 13px;
+    max-width: 44vw;
+    overflow-wrap: anywhere;
+  }
+
+  .panel,
+  .table-wrap,
+  .metrics article {
+    border-radius: 8px;
   }
 
   .operation-screen-toolbar {
@@ -1405,5 +1473,65 @@ label textarea {
   .liquidation-columns,
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .panel {
+    padding: 14px;
+  }
+
+  table {
+    font-size: 12px;
+  }
+
+  th,
+  td {
+    padding: 9px 10px;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 560px) {
+  .brand div {
+    min-width: 0;
+  }
+
+  .brand strong,
+  .brand span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  nav button {
+    font-size: 13px;
+  }
+
+  .mobile-list-item {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-list-item b {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .panel-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .form-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .form-actions button {
+    width: 100%;
   }
 }
