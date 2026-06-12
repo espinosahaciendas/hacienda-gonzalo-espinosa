@@ -222,6 +222,14 @@ h2 {
   min-width: 0;
 }
 
+.dashboard-report-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
 .mobile-summary-view {
   max-width: 980px;
 }
@@ -1467,6 +1475,7 @@ label textarea {
 
   .metrics,
   .dashboard-due-grid,
+  .dashboard-report-panel,
   .cc-grid,
   .client-layout,
   .operation-layout,
@@ -1481,6 +1490,11 @@ label textarea {
 
   table {
     font-size: 12px;
+  }
+
+  .dashboard-report-panel {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   th,

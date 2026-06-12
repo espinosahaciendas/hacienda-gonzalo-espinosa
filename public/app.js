@@ -1045,13 +1045,69 @@ function printCurrentAccountReport(forcedType = "") {
   popup.document.close();
 }
 
-function printCurrentAccountDueReport() {
-  const filters = getCurrentAccountReportFilters();
-  const effectiveFilters = { ...filters, dueFilter: filters.dueFilter === "TODOS" && !filters.dateFrom && !filters.dateTo ? "7" : filters.dueFilter };
+function dueDateInRange(movement, from, to) {
+  if (!from && !to) return true;
+  const date = parseDisplayDate(movement.vencimiento);
+  if (!date) return false;
+  const due = dateOnly(date);
+  if (from && due < dateOnly(from)) return false;
+  if (to && due > dateOnly(to)) return false;
+  return true;
+}
+
+function dueReportQuickRange(mode) {
+  const today = dateOnly(new Date());
+  if (mode === "NEXT_7") {
+    const to = addDateDays(today, 7);
+    return {
+      dateFrom: today,
+      dateTo: to,
+      label: `Proximos 7 dias (${formatDisplayDate(today)} a ${formatDisplayDate(to)})`
+    };
+  }
+  if (mode === "NEXT_WEEK") {
+    const day = today.getDay();
+    const daysToNextMonday = day === 0 ? 1 : 8 - day;
+    const from = addDateDays(today, daysToNextMonday);
+    const to = addDateDays(from, 6);
+    return {
+      dateFrom: from,
+      dateTo: to,
+      label: `Semana proxima (${formatDisplayDate(from)} a ${formatDisplayDate(to)})`
+    };
+  }
+  return {};
+}
+
+function printCurrentAccountDueReport(options = {}) {
+  const currentFilters = getCurrentAccountReportFilters();
+  const filters = options.all
+    ? {
+        ...currentFilters,
+        viewMode: "CLIENTE",
+        query: "",
+        words: [],
+        exactClient: "",
+        exactConsignee: "",
+        exactCommissionist: "",
+        statusFilter: "TODOS",
+        conceptFilter: "TODOS"
+      }
+    : currentFilters;
+  const quickRange = dueReportQuickRange(options.range);
+  const hasForcedRange = Boolean(quickRange.dateFrom || quickRange.dateTo);
+  const effectiveFilters = {
+    ...filters,
+    dateFrom: quickRange.dateFrom || filters.dateFrom,
+    dateTo: quickRange.dateTo || filters.dateTo,
+    dueFilter: hasForcedRange ? "TODOS" : filters.dueFilter === "TODOS" && !filters.dateFrom && !filters.dateTo ? "7" : filters.dueFilter
+  };
+  const baseFilters = { ...effectiveFilters, dateFrom: null, dateTo: null };
   const rows = (state.cuenta.movimientos || [])
     .filter((movement) => movement.estado !== "ANULADO")
     .filter((movement) => !movement.paymentId && movement.estado !== "IMPUTADO")
-    .filter((movement) => matchesCurrentAccountReportFilters(movement, effectiveFilters, true, filters.statusFilter !== "TODOS"))
+    .filter((movement) => matchesCurrentAccountReportFilters(movement, baseFilters, true, filters.statusFilter !== "TODOS"))
+    .filter((movement) => dueDateInRange(movement, effectiveFilters.dateFrom, effectiveFilters.dateTo))
     .sort((a, b) => {
       const dateA = parseDisplayDate(a.vencimiento)?.getTime() || 0;
       const dateB = parseDisplayDate(b.vencimiento)?.getTime() || 0;
@@ -1094,15 +1150,16 @@ function printCurrentAccountDueReport() {
     acc.comision += Number(row.comision || 0);
     return acc;
   }, { factura: 0, efectivo: 0, comision: 0 });
-  const filterLabel = $("#cc-client-search").value.trim() || "Todos";
+  const filterLabel = options.all ? "Todos" : $("#cc-client-search").value.trim() || "Todos";
   const periodLabel = filters.dateFrom || filters.dateTo
     ? `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`
     : effectiveFilters.dueFilter === "7" ? "Proximos 7 dias" : $("#cc-due-filter option:checked").textContent;
+  const finalPeriodLabel = quickRange.label || periodLabel;
   const popup = window.open("", "_blank", "width=1100,height=850");
   if (!popup) return;
-  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Vencimientos_${escapeHtml(periodLabel)}</title><style>${currentAccountReportStyles()}</style></head><body>
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Vencimientos_${escapeHtml(finalPeriodLabel)}</title><style>${currentAccountReportStyles()}</style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>Reporte de vencimientos</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
-  <div class="summary"><div><span>Periodo</span><strong>${escapeHtml(periodLabel)}</strong></div><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Total factura</span><strong>${moneyValue(totals.factura)}</strong></div><div><span>Total efectivo</span><strong>${moneyValue(totals.efectivo)}</strong></div><div><span>Total comisiones</span><strong>${moneyValue(totals.comision)}</strong></div></div>
+  <div class="summary"><div><span>Periodo</span><strong>${escapeHtml(finalPeriodLabel)}</strong></div><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Total factura</span><strong>${moneyValue(totals.factura)}</strong></div><div><span>Total efectivo</span><strong>${moneyValue(totals.efectivo)}</strong></div><div><span>Total comisiones</span><strong>${moneyValue(totals.comision)}</strong></div></div>
   <h2>Detalle semanal</h2>
   <table><thead><tr><th>Vencimiento</th><th>Cliente</th><th>Vendedor</th><th>Comprador</th><th>Consignataria</th><th>Negocio / concepto</th><th>Comprobante</th><th>Factura</th><th>Efectivo</th><th>Comision</th></tr></thead><tbody>${dueRows.length ? dueRows.map((row) => `<tr class="${row.efectivo ? "movement-cash" : ""}"><td>${escapeHtml(row.vencimiento || "-")}</td><td>${escapeHtml(row.cliente || "-")}</td><td>${escapeHtml(row.vendedor || "-")}</td><td>${escapeHtml(row.comprador || "-")}</td><td>${escapeHtml(row.consignataria || "-")}</td><td>${escapeHtml(row.concepto || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount ${row.factura < 0 ? "negative" : "positive"}">${row.factura ? moneyValue(row.factura) : "-"}</td><td class="amount ${row.efectivo < 0 ? "negative" : "positive"}">${row.efectivo ? moneyValue(row.efectivo) : "-"}</td><td class="amount ${row.comision < 0 ? "negative" : "positive"}">${row.comision ? moneyValue(row.comision) : "-"}</td></tr>`).join("") : `<tr><td colspan="10">Sin vencimientos para el periodo.</td></tr>`}</tbody></table>
   <button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
@@ -1813,6 +1870,18 @@ function parseDisplayDate(value) {
   const match = String(value || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!match) return null;
   return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+}
+
+function dateOnly(date = new Date()) {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function addDateDays(date, days) {
+  const result = dateOnly(date);
+  result.setDate(result.getDate() + Number(days || 0));
+  return result;
 }
 
 function formatDisplayDate(date) {
@@ -3375,6 +3444,8 @@ async function init() {
   $("#cc-date-to").addEventListener("change", renderCuentaCorriente);
   $("#cc-print-report").addEventListener("click", () => printCurrentAccountReport());
   $("#cc-print-due-report").addEventListener("click", printCurrentAccountDueReport);
+  $("#dashboard-print-next7").addEventListener("click", () => printCurrentAccountDueReport({ range: "NEXT_7", all: true }));
+  $("#dashboard-print-next-week").addEventListener("click", () => printCurrentAccountDueReport({ range: "NEXT_WEEK", all: true }));
   $("#cc-open-external").addEventListener("click", () => openCurrentAccountPanel("#cc-external-panel"));
   $("#cc-close-external").addEventListener("click", () => {
     state.editingExternalMovementId = "";

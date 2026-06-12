@@ -7,6 +7,12 @@
   "theme_color": "#0d2a28",
   "icons": [
     {
+      "src": "/favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon",
+      "purpose": "any"
+    },
+    {
       "src": "/logo-espinosa-blanco.png",
       "sizes": "512x512",
       "type": "image/png",
