@@ -415,6 +415,12 @@ function buildOperationAccountMovements(operation) {
   const efectivoProdSinIva = normalizeFrigorificoEfectivoSinIva(liq.efectivoProd, frigoEfectivoBase, frigo);
   const efectivoProdCuenta = frigo ? efectivoProdSinIva * 1.105 : efectivoProdSinIva;
   const movements = [];
+  const partialAccountLines = asArray(draft.facturacionParcial).filter((line) => {
+    const parteCuenta = normalizeKey(line.parteCuenta || "NINGUNA");
+    const amount = Math.abs(parseMoney(line.importeNeto) || (parseMoney(line.importeBruto) + parseMoney(line.iva)));
+    return ["VENDEDOR", "COMPRADOR", "AMBAS"].includes(parteCuenta) && amount;
+  });
+  const accountByPartialBilling = partialAccountLines.length > 0;
   const conceptWithCounterpart = (suffix, counterpart) => `${typeText} - ${suffix}${counterpart ? ` - por ${counterpart}` : ""}`;
   const consigneeAppliesToRole = (role) => {
     if (!operationConsignee) return false;
@@ -450,7 +456,7 @@ function buildOperationAccountMovements(operation) {
     });
   };
 
-  if (liq.netoLiquidacionProd) {
+  if (!accountByPartialBilling && liq.netoLiquidacionProd) {
     addPlan({
       cliente: operation.vendedor || draft.vendedor,
       role: "VENDEDOR-FACT",
@@ -472,7 +478,7 @@ function buildOperationAccountMovements(operation) {
       conceptSuffix: "efectivo vendedor"
     });
   }
-  if (liq.netoLiquidacionComp) {
+  if (!accountByPartialBilling && liq.netoLiquidacionComp) {
     addPlan({
       cliente: operation.comprador || draft.comprador,
       role: "COMPRADOR-FACT",
@@ -555,7 +561,7 @@ function buildOperationAccountMovements(operation) {
     conceptSuffix: "comision sobre efectivo comprador"
   });
 
-  asArray(draft.facturacionParcial).forEach((line) => {
+  partialAccountLines.forEach((line) => {
     const parteCuenta = normalizeKey(line.parteCuenta || "NINGUNA");
     if (!["VENDEDOR", "COMPRADOR", "AMBAS"].includes(parteCuenta)) return;
     const amount = Math.abs(parseMoney(line.importeNeto) || (parseMoney(line.importeBruto) + parseMoney(line.iva)));
