@@ -613,9 +613,9 @@
                 </div>
                 <div class="cc-grid partial-billing-summary">
                   <div><span>Cabezas venta</span><strong id="partial-total-heads">0</strong></div>
-                  <div><span>Neto venta</span><strong id="partial-total-net">$ 0,00</strong></div>
-                  <div><span>Facturado parcial</span><strong id="partial-billed-net">$ 0,00</strong></div>
-                  <div><span>Pendiente</span><strong id="partial-pending-net">$ 0,00</strong></div>
+                  <div><span>Bruto operacion</span><strong id="partial-total-net">$ 0,00</strong></div>
+                  <div><span>Bruto liquidado</span><strong id="partial-billed-net">$ 0,00</strong></div>
+                  <div><span>Bruto pendiente</span><strong id="partial-pending-net">$ 0,00</strong></div>
                 </div>
                 <div class="form-grid">
                   <label>Fecha<input id="partial-date" type="date"></label>
@@ -631,8 +631,9 @@
                     </select>
                   </label>
                   <label>Cantidad<input id="partial-heads" inputmode="decimal"></label>
-                  <label>Importe neto<input id="partial-net" class="money-input" inputmode="decimal"></label>
-                  <label>IVA<input id="partial-iva" class="money-input" inputmode="decimal"></label>
+                  <label>Importe bruto liquidado<input id="partial-gross" class="money-input" inputmode="decimal"></label>
+                  <label>Importe neto a cobrar<input id="partial-net" class="money-input" inputmode="decimal"></label>
+                  <label>IVA / dato fiscal opcional<input id="partial-iva" class="money-input" inputmode="decimal"></label>
                   <label>Observaciones<input id="partial-notes"></label>
                 </div>
                 <div class="form-actions">
@@ -640,7 +641,7 @@
                 </div>
                 <div class="table-wrap compact-table">
                   <table>
-                    <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Neto</th><th>IVA</th><th>Total</th><th>Observaciones</th><th></th></tr></thead>
+                    <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Bruto</th><th>Neto a cobrar</th><th>IVA dato</th><th>Observaciones</th><th></th></tr></thead>
                     <tbody id="partial-body"></tbody>
                   </table>
                 </div>

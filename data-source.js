@@ -558,7 +558,7 @@ function buildOperationAccountMovements(operation) {
   asArray(draft.facturacionParcial).forEach((line) => {
     const parteCuenta = normalizeKey(line.parteCuenta || "NINGUNA");
     if (!["VENDEDOR", "COMPRADOR", "AMBAS"].includes(parteCuenta)) return;
-    const amount = Math.abs(parseMoney(line.importeNeto) + parseMoney(line.iva));
+    const amount = Math.abs(parseMoney(line.importeNeto) || (parseMoney(line.importeBruto) + parseMoney(line.iva)));
     if (!amount) return;
     const fecha = line.fecha || operationDate;
     const planVencimientos = normalizeText(line.planVencimientos);
@@ -1746,11 +1746,12 @@ class BackupDataSource {
       comprobante: normalizeText(input.comprobante),
       parteCuenta: normalizeKey(input.parteCuenta || "NINGUNA"),
       cantidad: parseMoney(input.cantidad),
+      importeBruto: parseMoney(input.importeBruto),
       importeNeto: parseMoney(input.importeNeto),
       iva: parseMoney(input.iva),
       observaciones: normalizeText(input.observaciones)
     };
-    if (!line.fecha || (!line.cantidad && !line.importeNeto && !line.iva)) {
+    if (!line.fecha || (!line.cantidad && !line.importeBruto && !line.importeNeto && !line.iva)) {
       const error = new Error("Falta cargar fecha y al menos cantidad o importe.");
       error.statusCode = 400;
       throw error;

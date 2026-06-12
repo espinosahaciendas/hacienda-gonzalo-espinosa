@@ -1643,18 +1643,22 @@ function partialBillingTotals(operation = state.currentOperation) {
   const lines = operation?.saleLines || [];
   const partials = operation?.facturacionParcial || [];
   const totalHeads = lines.reduce((sum, line) => sum + Number(line.cabezas || 0), 0);
-  const totalNet = lines.reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
+  const totalGross = lines.reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
   const billedHeads = partials.reduce((sum, line) => sum + Number(line.cantidad || 0), 0);
+  const billedGross = partials.reduce((sum, line) => sum + Number(line.importeBruto || line.importeNeto || 0), 0);
   const billedNet = partials.reduce((sum, line) => sum + Number(line.importeNeto || 0), 0);
   const billedIva = partials.reduce((sum, line) => sum + Number(line.iva || 0), 0);
   return {
     totalHeads,
-    totalNet,
+    totalNet: totalGross,
+    totalGross,
     billedHeads,
+    billedGross,
     billedNet,
     billedIva,
     pendingHeads: Math.max(totalHeads - billedHeads, 0),
-    pendingNet: Math.max(totalNet - billedNet, 0)
+    pendingNet: Math.max(totalGross - billedGross, 0),
+    pendingGross: Math.max(totalGross - billedGross, 0)
   };
 }
 
@@ -1664,8 +1668,8 @@ function renderPartialBilling() {
   const partials = operation.facturacionParcial || [];
   const totals = partialBillingTotals(operation);
   $("#partial-total-heads").textContent = `${plainNumberValue(totals.totalHeads)} cab.`;
-  $("#partial-total-net").textContent = moneyValue(totals.totalNet);
-  $("#partial-billed-net").textContent = `${moneyValue(totals.billedNet)} + IVA ${moneyValue(totals.billedIva)}`;
+  $("#partial-total-net").textContent = moneyValue(totals.totalGross);
+  $("#partial-billed-net").textContent = `${moneyValue(totals.billedGross)} / neto ${moneyValue(totals.billedNet)}`;
   $("#partial-pending-net").textContent = `${moneyValue(totals.pendingNet)} / ${plainNumberValue(totals.pendingHeads)} cab.`;
   $("#partial-body").innerHTML = partials.length
     ? partials.map((line) => `
@@ -1675,9 +1679,9 @@ function renderPartialBilling() {
         <td>${escapeHtml(line.comprobante || "-")}</td>
         <td>${escapeHtml(partialPartyLabel(line.parteCuenta))}</td>
         <td>${plainNumberValue(line.cantidad)}</td>
+        <td>${moneyValue(line.importeBruto || line.importeNeto)}</td>
         <td>${moneyValue(line.importeNeto)}</td>
         <td>${moneyValue(line.iva)}</td>
-        <td>${moneyValue(Number(line.importeNeto || 0) + Number(line.iva || 0))}</td>
         <td>${escapeHtml(line.observaciones || "-")}</td>
         <td><button type="button" class="small-button danger-button" data-partial-delete="${escapeHtml(line.id)}">Eliminar</button></td>
       </tr>
@@ -2725,6 +2729,7 @@ async function savePartialBilling() {
         comprobante: $("#partial-receipt").value,
         parteCuenta: $("#partial-party").value,
         cantidad: parseMoneyInput($("#partial-heads").value),
+        importeBruto: parseMoneyInput($("#partial-gross").value),
         importeNeto: parseMoneyInput($("#partial-net").value),
         iva: parseMoneyInput($("#partial-iva").value),
         observaciones: $("#partial-notes").value
@@ -2734,6 +2739,7 @@ async function savePartialBilling() {
     $("#partial-receipt").value = "";
     $("#partial-due-plan").value = "";
     $("#partial-heads").value = "";
+    $("#partial-gross").value = "";
     $("#partial-net").value = "";
     $("#partial-iva").value = "";
     $("#partial-notes").value = "";
@@ -3040,9 +3046,9 @@ function renderReport() {
       <td>${escapeHtml(line.comprobante || "-")}</td>
       <td>${escapeHtml(partialPartyLabel(line.parteCuenta))}</td>
       <td>${plainNumberValue(line.cantidad)}</td>
+      <td>${moneyValue(line.importeBruto || line.importeNeto)}</td>
       <td>${moneyValue(line.importeNeto)}</td>
       <td>${moneyValue(line.iva)}</td>
-      <td>${moneyValue(Number(line.importeNeto || 0) + Number(line.iva || 0))}</td>
       <td>${escapeHtml(line.observaciones || "-")}</td>
     </tr>
   `).join("");
@@ -3164,10 +3170,10 @@ function renderReport() {
     <div class="report-section">
       <h3>Control de facturacion parcial</h3>
       <table class="report-table">
-        <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Neto</th><th>IVA</th><th>Total</th><th>Observaciones</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Bruto</th><th>Neto a cobrar</th><th>IVA dato</th><th>Observaciones</th></tr></thead>
         <tbody>${partialRows}
-          <tr class="report-total"><td colspan="4">Facturado parcial</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td><td>${moneyValue(partialTotals.billedNet + partialTotals.billedIva)}</td><td></td></tr>
-          <tr class="report-total"><td colspan="4">Pendiente operativo</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingNet)}</td><td>-</td><td>-</td><td>Control contra operacion total</td></tr>
+          <tr class="report-total"><td colspan="4">Liquidado parcial</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedGross)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td><td></td></tr>
+          <tr class="report-total"><td colspan="4">Pendiente operativo bruto</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingGross)}</td><td>-</td><td>-</td><td>Control contra operacion total</td></tr>
         </tbody>
       </table>
     </div>
@@ -3571,9 +3577,6 @@ async function init() {
   $("#partial-save").addEventListener("click", savePartialBilling);
   $("#partial-date").addEventListener("change", () => {
     if (!$("#partial-due").value) $("#partial-due").value = $("#partial-date").value;
-  });
-  $("#partial-net").addEventListener("input", () => {
-    if (!$("#partial-iva").value.trim()) setMoneyInput("#partial-iva", parseMoneyInput($("#partial-net").value) * 0.105);
   });
   $("#partial-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-partial-delete]");
