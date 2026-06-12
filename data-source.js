@@ -561,29 +561,33 @@ function buildOperationAccountMovements(operation) {
     const amount = Math.abs(parseMoney(line.importeNeto) + parseMoney(line.iva));
     if (!amount) return;
     const fecha = line.fecha || operationDate;
-    const vencimiento = line.vencimiento || line.fecha || dueBaseDate;
+    const planVencimientos = normalizeText(line.planVencimientos);
+    const planItems = parsePlanItems(planVencimientos, amount, planVencimientos ? fecha : line.vencimiento || line.fecha || dueBaseDate);
     const comprobante = line.comprobante || `Parcial ${line.id || ""}`.trim();
     const baseConcept = `facturacion parcial${line.cantidad ? ` ${line.cantidad} cab.` : ""} sobre operacion total`;
-    const pushPartial = ({ role, cliente, counterpart, importe }) => {
+    const pushPartial = ({ role, cliente, counterpart, sign }) => {
       if (!cliente) return;
-      pushMovement(movements, {
-        id: `${operation.id}-${line.id}-${role}`,
-        cliente,
-        fecha,
-        vencimiento,
-        origen: "FACTURACION_PARCIAL",
-        concepto: conceptWithCounterpart(baseConcept, counterpart),
-        comprobante,
-        operacion: operation.id,
-        contraparte: counterpart,
-        vendedor: operation.vendedor || draft.vendedor || "",
-        comprador: operation.comprador || draft.comprador || "",
-        consignataria: operationConsignee,
-        tipoOperacion: operation.tipo || draft.tipo || "",
-        destinoOperacion: operation.destino || draft.destino || "",
-        consignatariaCuenta: false,
-        importe,
-        estado: "PENDIENTE"
+      planItems.forEach((item, index) => {
+        const multiple = planItems.length > 1 || Boolean(planVencimientos);
+        pushMovement(movements, {
+          id: `${operation.id}-${line.id}-${role}${multiple ? `-${index}` : ""}`,
+          cliente,
+          fecha,
+          vencimiento: item.vencimiento || line.vencimiento || line.fecha || dueBaseDate,
+          origen: "FACTURACION_PARCIAL",
+          concepto: conceptWithCounterpart(`${baseConcept}${multiple ? ` cuota ${index + 1}` : ""}`, counterpart),
+          comprobante,
+          operacion: operation.id,
+          contraparte: counterpart,
+          vendedor: operation.vendedor || draft.vendedor || "",
+          comprador: operation.comprador || draft.comprador || "",
+          consignataria: operationConsignee,
+          tipoOperacion: operation.tipo || draft.tipo || "",
+          destinoOperacion: operation.destino || draft.destino || "",
+          consignatariaCuenta: false,
+          importe: sign * Math.abs(Number(item.importe || 0)),
+          estado: "PENDIENTE"
+        });
       });
     };
     if (parteCuenta === "VENDEDOR" || parteCuenta === "AMBAS") {
@@ -591,7 +595,7 @@ function buildOperationAccountMovements(operation) {
         role: "FP-VENDEDOR",
         cliente: operation.vendedor || draft.vendedor,
         counterpart: operation.comprador || draft.comprador || operationConsignee,
-        importe: -amount
+        sign: -1
       });
     }
     if (parteCuenta === "COMPRADOR" || parteCuenta === "AMBAS") {
@@ -599,7 +603,7 @@ function buildOperationAccountMovements(operation) {
         role: "FP-COMPRADOR",
         cliente: operation.comprador || draft.comprador,
         counterpart: operation.vendedor || draft.vendedor || operationConsignee,
-        importe: amount
+        sign: 1
       });
     }
   });
@@ -1738,6 +1742,7 @@ class BackupDataSource {
       id: `FP-${Date.now()}`,
       fecha: formatDateForDisplay(input.fecha),
       vencimiento: formatDateForDisplay(input.vencimiento || input.fecha),
+      planVencimientos: normalizeText(input.planVencimientos),
       comprobante: normalizeText(input.comprobante),
       parteCuenta: normalizeKey(input.parteCuenta || "NINGUNA"),
       cantidad: parseMoney(input.cantidad),

@@ -1671,7 +1671,7 @@ function renderPartialBilling() {
     ? partials.map((line) => `
       <tr>
         <td>${escapeHtml(line.fecha || "-")}</td>
-        <td>${escapeHtml(line.vencimiento || "-")}</td>
+        <td>${escapeHtml(line.planVencimientos || line.vencimiento || "-")}</td>
         <td>${escapeHtml(line.comprobante || "-")}</td>
         <td>${escapeHtml(partialPartyLabel(line.parteCuenta))}</td>
         <td>${plainNumberValue(line.cantidad)}</td>
@@ -2721,6 +2721,7 @@ async function savePartialBilling() {
       body: JSON.stringify({
         fecha: $("#partial-date").value,
         vencimiento: $("#partial-due").value,
+        planVencimientos: $("#partial-due-plan").value,
         comprobante: $("#partial-receipt").value,
         parteCuenta: $("#partial-party").value,
         cantidad: parseMoneyInput($("#partial-heads").value),
@@ -2731,6 +2732,7 @@ async function savePartialBilling() {
     });
     await openSale(state.selectedOperationId, "sale");
     $("#partial-receipt").value = "";
+    $("#partial-due-plan").value = "";
     $("#partial-heads").value = "";
     $("#partial-net").value = "";
     $("#partial-iva").value = "";
@@ -3034,7 +3036,7 @@ function renderReport() {
   const partialRows = (operation.facturacionParcial || []).map((line) => `
     <tr>
       <td>${escapeHtml(line.fecha || "-")}</td>
-      <td>${escapeHtml(line.vencimiento || "-")}</td>
+      <td>${escapeHtml(line.planVencimientos || line.vencimiento || "-")}</td>
       <td>${escapeHtml(line.comprobante || "-")}</td>
       <td>${escapeHtml(partialPartyLabel(line.parteCuenta))}</td>
       <td>${plainNumberValue(line.cantidad)}</td>
@@ -3162,7 +3164,7 @@ function renderReport() {
     <div class="report-section">
       <h3>Control de facturacion parcial</h3>
       <table class="report-table">
-        <thead><tr><th>Fecha</th><th>Vto.</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Neto</th><th>IVA</th><th>Total</th><th>Observaciones</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Neto</th><th>IVA</th><th>Total</th><th>Observaciones</th></tr></thead>
         <tbody>${partialRows}
           <tr class="report-total"><td colspan="4">Facturado parcial</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td><td>${moneyValue(partialTotals.billedNet + partialTotals.billedIva)}</td><td></td></tr>
           <tr class="report-total"><td colspan="4">Pendiente operativo</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingNet)}</td><td>-</td><td>-</td><td>Control contra operacion total</td></tr>
