@@ -3039,6 +3039,7 @@ function renderReport() {
   const sellerObservation = $("#liq-observaciones-prod").value || (operation.liquidacion && operation.liquidacion.observacionesProd) || draft.observacionesProd || "";
   const buyerObservation = $("#liq-observaciones-comp").value || (operation.liquidacion && operation.liquidacion.observacionesComp) || draft.observacionesComp || "";
   const partialTotals = partialBillingTotals(operation);
+  const hasPartialBilling = (operation.facturacionParcial || []).length > 0;
   const partialRows = (operation.facturacionParcial || []).map((line) => `
     <tr>
       <td>${escapeHtml(line.fecha || "-")}</td>
@@ -3178,6 +3179,44 @@ function renderReport() {
       </table>
     </div>
   ` : "";
+  const partialFinalReport = hasPartialBilling ? `
+    <div class="report-section">
+      <h3>Liquidaciones parciales consolidadas</h3>
+      <table class="report-table">
+        <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Impacta</th><th>Cant.</th><th>Bruto liquidado</th><th>Neto a cobrar</th><th>IVA dato</th><th>Observaciones</th></tr></thead>
+        <tbody>${partialRows}
+          <tr class="report-total"><td colspan="4">Total liquidado real</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedGross)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td><td></td></tr>
+          <tr class="report-total"><td colspan="4">Pendiente contra operacion total</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingGross)}</td><td>-</td><td>-</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+  ` : "";
+  const sellerFinalNet = hasPartialBilling ? partialTotals.billedNet + (Number(calc.netoTotalProd || 0) - Number(calc.netoLiquidacionProd || 0)) : calc.netoTotalProd;
+  const buyerFinalNet = hasPartialBilling ? partialTotals.billedNet + (Number(calc.netoTotalComp || 0) - Number(calc.netoLiquidacionComp || 0)) : calc.netoTotalComp;
+  const sellerLiquidationSummary = hasPartialBilling ? `
+    ${partialFinalReport}
+    <div class="report-net seller-net"><span>NETO LIQUIDACIONES PARCIALES</span><strong>${moneyValue(partialTotals.billedNet)}</strong></div>
+  ` : `
+    <div class="report-section"><h3>Liquidacion / facturado</h3><table class="report-table"><tbody>
+      <tr><th>Comprobante</th><td>${escapeHtml($("#liq-comprobante-prod").value || "-")}</td><th>Importe bruto operacion</th><td>${moneyValue(calc.brutoVend || numberValue("#liq-bruto-vend"))}</td></tr>
+      <tr><th>Importe facturado</th><td>${moneyValue(calc.facturado)}</td><th>IVA liquidacion</th><td>${moneyValue(calc.ivaProd)}</td></tr>
+    </tbody></table></div>
+    ${sellerExpensesReport}
+    ${calc.comFactProd ? `<div class="report-line"><span>Comision sobre facturado</span><strong>${moneyValue(calc.comFactProd)}</strong></div>` : ""}
+    <div class="report-net seller-net"><span>NETO LIQUIDACION</span><strong>${moneyValue(calc.netoLiquidacionProd)}</strong></div>
+  `;
+  const buyerLiquidationSummary = hasPartialBilling ? `
+    ${partialFinalReport}
+    <div class="report-net buyer-net"><span>NETO LIQUIDACIONES PARCIALES</span><strong>${moneyValue(partialTotals.billedNet)}</strong></div>
+  ` : `
+    <div class="report-section"><h3>Liquidacion / facturado</h3><table class="report-table"><tbody>
+      <tr><th>Comprobante</th><td>${escapeHtml($("#liq-comprobante-comp").value || "-")}</td><th>Importe bruto operacion</th><td>${moneyValue(calc.brutoComp || numberValue("#liq-bruto-comp"))}</td></tr>
+      <tr><th>Importe facturado</th><td>${moneyValue(calc.facturado)}</td><th>IVA liquidacion</th><td>${moneyValue(calc.ivaComp)}</td></tr>
+    </tbody></table></div>
+    ${buyerExpensesReport}
+    ${calc.comFactComp ? `<div class="report-line"><span>Comision sobre facturado</span><strong>${moneyValue(calc.comFactComp)}</strong></div>` : ""}
+    <div class="report-net buyer-net"><span>NETO LIQUIDACION</span><strong>${moneyValue(calc.netoLiquidacionComp)}</strong></div>
+  `;
   const controlReport = `
     <div class="report-pages">
       <section class="report-page-block seller-report">
@@ -3217,19 +3256,13 @@ function renderReport() {
         ${isDirectOperation(operation) ? detailReport : ""}
         ${frigoReport}
         ${dueReport(sellerDueRows)}
-        <div class="report-section"><h3>Liquidacion / facturado</h3><table class="report-table"><tbody>
-          <tr><th>Comprobante</th><td>${escapeHtml($("#liq-comprobante-prod").value || "-")}</td><th>Importe bruto operacion</th><td>${moneyValue(calc.brutoVend || numberValue("#liq-bruto-vend"))}</td></tr>
-          <tr><th>Importe facturado</th><td>${moneyValue(calc.facturado)}</td><th>IVA liquidacion</th><td>${moneyValue(calc.ivaProd)}</td></tr>
-        </tbody></table></div>
-        ${sellerExpensesReport}
-        ${calc.comFactProd ? `<div class="report-line"><span>Comision sobre facturado</span><strong>${moneyValue(calc.comFactProd)}</strong></div>` : ""}
-        <div class="report-net seller-net"><span>NETO LIQUIDACION</span><strong>${moneyValue(calc.netoLiquidacionProd)}</strong></div>
+        ${sellerLiquidationSummary}
         ${calc.efectivoProd || calc.cashExpenseProd || calc.comEfProd ? `<div class="report-section"><h3>Efectivo</h3><table class="report-table"><tbody>
           <tr><th>${frigoCalc ? "Efectivo + IVA" : "Efectivo"}</th><td>${moneyValue(frigoCalc ? calc.cashWithIvaProd : calc.efectivoProd)}</td><th></th><td></td></tr>
           ${calc.cashExpenseProd ? `<tr><th>Gasto descontado efectivo</th><td>${moneyValue(calc.cashExpenseProd)}</td><th>Concepto</th><td>${escapeHtml($("#liq-cash-exp-concept-prod").value || "-")}</td></tr>` : ""}
         ${calc.comEfProd ? `<tr><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfProd)}</td><th></th><td></td></tr>` : ""}
         </tbody></table></div>` : ""}
-        <div class="report-net seller-net total"><span>NETO TOTAL OPERACION</span><strong>${moneyValue(calc.netoTotalProd)}</strong></div>
+        <div class="report-net seller-net total"><span>NETO TOTAL OPERACION</span><strong>${moneyValue(sellerFinalNet)}</strong></div>
         ${reportExportButton("seller")}
       </section>
       <section class="report-page-block buyer-report">
@@ -3240,17 +3273,11 @@ function renderReport() {
         <div class="report-section"><h3>Carga real comprador</h3><table class="report-table control-table">${loadTableHead}<tbody>${buyerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
         ${detailReport}
         ${dueReport(buyerDueRows)}
-        <div class="report-section"><h3>Liquidacion / facturado</h3><table class="report-table"><tbody>
-          <tr><th>Comprobante</th><td>${escapeHtml($("#liq-comprobante-comp").value || "-")}</td><th>Importe bruto operacion</th><td>${moneyValue(calc.brutoComp || numberValue("#liq-bruto-comp"))}</td></tr>
-          <tr><th>Importe facturado</th><td>${moneyValue(calc.facturado)}</td><th>IVA liquidacion</th><td>${moneyValue(calc.ivaComp)}</td></tr>
-        </tbody></table></div>
-        ${buyerExpensesReport}
-        ${calc.comFactComp ? `<div class="report-line"><span>Comision sobre facturado</span><strong>${moneyValue(calc.comFactComp)}</strong></div>` : ""}
-        <div class="report-net buyer-net"><span>NETO LIQUIDACION</span><strong>${moneyValue(calc.netoLiquidacionComp)}</strong></div>
+        ${buyerLiquidationSummary}
         ${calc.efectivoComp || calc.comEfComp ? `<div class="report-section"><h3>Efectivo</h3><table class="report-table"><tbody>
           <tr><th>Efectivo</th><td>${moneyValue(calc.efectivoComp)}</td><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfComp)}</td></tr>
         </tbody></table></div>` : ""}
-        <div class="report-net buyer-net total"><span>NETO TOTAL OPERACION</span><strong>${moneyValue(calc.netoTotalComp)}</strong></div>
+        <div class="report-net buyer-net total"><span>NETO TOTAL OPERACION</span><strong>${moneyValue(buyerFinalNet)}</strong></div>
         ${reportExportButton("buyer")}
       </section>
     </div>
