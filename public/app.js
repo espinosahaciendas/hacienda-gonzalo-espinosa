@@ -14,9 +14,11 @@ const state = {
   editingSaleLineId: "",
   editingExternalMovementId: "",
   commissionistRows: [],
-  usuario: null
+  usuario: null,
+  reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
+const APP_BUILD = "20260616-parciales-vencimientos";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2524,7 +2526,30 @@ function setOperationStep(step) {
   $all("[data-operation-step]").forEach((button) => {
     button.classList.toggle("active", button.dataset.operationStep === nextStep);
   });
-  if (selected && nextStep === "report") renderReport();
+  if (selected && nextStep === "report") {
+    renderReport();
+    refreshOperationForReport();
+  }
+}
+
+async function refreshOperationForReport() {
+  if (!state.selectedOperationId || state.reportRefreshInFlight) return;
+  const operationId = state.selectedOperationId;
+  state.reportRefreshInFlight = true;
+  try {
+    const response = await fetchJson(`/api/operaciones/${encodeURIComponent(operationId)}`);
+    if (state.selectedOperationId !== operationId || state.operationStep !== "report") return;
+    state.currentOperation = {
+      ...(state.currentOperation || {}),
+      ...(response.item || {})
+    };
+    renderSaleLines(state.currentOperation.saleLines || []);
+    renderReport();
+  } catch (error) {
+    console.warn("No se pudo refrescar la operacion para el reporte", error);
+  } finally {
+    state.reportRefreshInFlight = false;
+  }
 }
 
 async function openSale(operationId, step = "sale") {
@@ -3260,6 +3285,7 @@ function renderReport() {
       <div>
         <h2>Gonzalo Espinosa Hacienda y Liquidaciones</h2>
         <p class="subtle">${escapeHtml(title)} - Operacion ${escapeHtml(operation.id)}</p>
+        <p class="report-build">Actualizacion ${escapeHtml(APP_BUILD)}</p>
       </div>
       <img class="report-logo" src="/logo-espinosa-blanco.png" alt="">
     </div>

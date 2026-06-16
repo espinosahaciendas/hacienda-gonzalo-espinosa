@@ -894,6 +894,12 @@ label textarea {
   margin-bottom: 14px;
 }
 
+.report-build {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+
 .report-title,
 .report-kv,
 .report-line,
