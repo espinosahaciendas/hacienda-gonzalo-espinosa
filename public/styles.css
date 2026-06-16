@@ -230,6 +230,24 @@ h2 {
   margin-bottom: 18px;
 }
 
+.dashboard-period-panel,
+.calculator-panel {
+  margin-bottom: 18px;
+}
+
+.dashboard-period-panel .panel-head {
+  align-items: end;
+}
+
+.dashboard-period-panel .form-actions {
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.dashboard-period-panel .form-actions label {
+  min-width: 150px;
+}
+
 .mobile-summary-view {
   max-width: 980px;
 }
@@ -1588,6 +1606,12 @@ label textarea {
   }
 
   .dashboard-report-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dashboard-period-panel .panel-head,
+  .dashboard-period-panel .form-actions {
     align-items: stretch;
     flex-direction: column;
   }

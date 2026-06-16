@@ -131,6 +131,33 @@
           </article>
         </div>
 
+        <div class="panel dashboard-period-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Resumen por periodo</h2>
+              <p class="subtle">Cantidad de operaciones, cabezas y categorias cargadas.</p>
+            </div>
+            <div class="form-actions">
+              <label>Desde<input id="dashboard-period-from" type="date"></label>
+              <label>Hasta<input id="dashboard-period-to" type="date"></label>
+              <button type="button" class="ghost-button" id="dashboard-period-run">Ver periodo</button>
+            </div>
+          </div>
+          <div class="cc-grid">
+            <div><span>Operaciones</span><strong id="period-operations">-</strong></div>
+            <div><span>Cabezas</span><strong id="period-heads">-</strong></div>
+            <div><span>Importe bruto vendedor</span><strong id="period-seller-total">$ 0,00</strong></div>
+            <div><span>Categorias</span><strong id="period-category-count">-</strong></div>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead><tr><th>Categoria</th><th>Cabezas</th><th>Operaciones</th></tr></thead>
+              <tbody id="period-category-body"></tbody>
+            </table>
+          </div>
+          <p class="form-message" id="period-message"></p>
+        </div>
+
         <div class="dashboard-due-grid">
           <div class="panel">
             <div class="panel-head">
@@ -307,6 +334,24 @@
           <div class="form-actions">
             <button type="button" class="primary-button" id="operation-start-new">Nueva operacion</button>
             <button type="button" class="ghost-button" id="operation-show-history">Ver operaciones cargadas</button>
+          </div>
+        </div>
+        <div class="panel calculator-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Calculadora de pesada</h2>
+              <p class="subtle">Calcule kg netos y promedio sin salir de la carga.</p>
+            </div>
+          </div>
+          <div class="form-grid">
+            <label>Kg bruto<input id="calc-weight-gross" inputmode="decimal"></label>
+            <label>Desbaste %<input id="calc-weight-shrink" inputmode="decimal" value="0"></label>
+            <label>Cabezas<input id="calc-weight-heads" inputmode="decimal"></label>
+            <label>Merma / ajuste kg<input id="calc-weight-adjust" inputmode="decimal" value="0"></label>
+          </div>
+          <div class="cc-grid">
+            <div><span>Kg netos</span><strong id="calc-weight-net">0 kgs</strong></div>
+            <div><span>Promedio</span><strong id="calc-weight-average">0 kgs/cab</strong></div>
           </div>
         </div>
         <div class="operation-layout workspace-mode" id="operation-layout">

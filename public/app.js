@@ -93,6 +93,7 @@ function normalizeSearch(value) {
 }
 
 function setView(view) {
+  const previousView = state.vista;
   state.vista = view;
   $all(".view").forEach((section) => section.classList.toggle("active", section.id === view));
   $all("nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
@@ -105,6 +106,9 @@ function setView(view) {
     comisionistas: "Comisionistas"
   };
   $("#view-title").textContent = titles[view] || "Sistema";
+  if (!state.restoringHistory && previousView !== view) {
+    window.history.pushState({ view }, "", `#${view}`);
+  }
 }
 
 function preferredInitialView() {
@@ -196,6 +200,56 @@ function renderMetrics() {
   $("#cc-total-movimientos").textContent = state.cuenta ? currency.format(state.cuenta.totalMovimientos) : "-";
   $("#cc-total-pagos").textContent = state.cuenta ? currency.format(state.cuenta.totalPagos) : "-";
   renderDashboardDueLists();
+}
+
+function operationDateForPeriod(operation) {
+  return parseDisplayDate(operation.fechaCarga || operation.fecha || operation.draftData?.fechaCarga || operation.draftData?.fecha);
+}
+
+async function renderPeriodStats() {
+  const from = parseInputDate($("#dashboard-period-from").value);
+  const to = parseInputDate($("#dashboard-period-to").value);
+  const message = $("#period-message");
+  message.textContent = "Calculando periodo...";
+  message.className = "form-message";
+  const operations = state.operaciones.filter((operation) => {
+    const date = operationDateForPeriod(operation);
+    if (!date) return false;
+    date.setHours(0, 0, 0, 0);
+    if (from && date < dateOnly(from)) return false;
+    if (to && date > dateOnly(to)) return false;
+    return true;
+  });
+  const details = await Promise.all(operations.map((operation) =>
+    fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`).then((response) => response.item).catch(() => operation)
+  ));
+  const categories = new Map();
+  let heads = 0;
+  let sellerTotal = 0;
+  details.forEach((operation) => {
+    (operation.saleLines || []).forEach((line) => {
+      const category = line.categoria || "Sin categoria";
+      const count = Number(line.cabezas || 0);
+      heads += count;
+      sellerTotal += Number(line.importeVend || 0);
+      const current = categories.get(category) || { heads: 0, operations: new Set() };
+      current.heads += count;
+      current.operations.add(operation.id);
+      categories.set(category, current);
+    });
+  });
+  const rows = Array.from(categories.entries())
+    .map(([categoria, item]) => ({ categoria, heads: item.heads, operations: item.operations.size }))
+    .sort((a, b) => b.heads - a.heads || a.categoria.localeCompare(b.categoria, "es"));
+  $("#period-operations").textContent = operations.length;
+  $("#period-heads").textContent = plainNumberValue(heads);
+  $("#period-seller-total").textContent = moneyValue(sellerTotal);
+  $("#period-category-count").textContent = rows.length;
+  $("#period-category-body").innerHTML = rows.length
+    ? rows.map((row) => `<tr><td>${escapeHtml(row.categoria)}</td><td>${plainNumberValue(row.heads)}</td><td>${row.operations}</td></tr>`).join("")
+    : `<tr><td colspan="3">Sin categorias para el periodo.</td></tr>`;
+  message.textContent = operations.length ? "Periodo calculado." : "No hay operaciones en ese periodo.";
+  message.className = `form-message ${operations.length ? "ok" : ""}`.trim();
 }
 
 function amountClass(value) {
@@ -1494,6 +1548,17 @@ function renderOperaciones() {
 function renderCategories() {
   renderCategorySuggestions();
   renderCategoryAdmin();
+}
+
+function renderWeightCalculator() {
+  const gross = parseMoneyInput($("#calc-weight-gross").value);
+  const shrink = parseMoneyInput($("#calc-weight-shrink").value);
+  const heads = parseMoneyInput($("#calc-weight-heads").value);
+  const adjust = parseMoneyInput($("#calc-weight-adjust").value);
+  const net = Math.max(gross * (1 - shrink / 100) + adjust, 0);
+  const average = heads ? net / heads : 0;
+  $("#calc-weight-net").textContent = `${plainNumberValue(net)} kgs`;
+  $("#calc-weight-average").textContent = `${plainNumberValue(average)} kgs/cab`;
 }
 
 function renderCategoryAdmin() {
@@ -3011,6 +3076,8 @@ function printReportParty(party) {
     .report-kv span,.report-kv strong{padding:3px 4px;border-bottom:1px solid #cbd7d4}.report-kv span{color:#52706b}
     .report-section h3{margin:0 0 3px;font-size:8pt;text-transform:uppercase}
     .report-table{width:100%;border-collapse:collapse;font-size:7.5pt}.control-table{font-size:6.6pt}
+    .partial-report-table,.partial-due-table{table-layout:fixed;font-size:6.5pt}
+    .partial-report-table th,.partial-report-table td,.partial-due-table th,.partial-due-table td{overflow-wrap:anywhere;padding:2.5px 3px}
     .report-table th,.report-table td{border:1px solid #cbd7d4;padding:3px 4px;text-align:left;vertical-align:top}
     .report-total{background:#edf3f1;font-weight:bold}.seller-net{background:#eaf2ff}.buyer-net{background:#fff0e6}
     button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:6mm}body{margin:0}button{display:none}}
@@ -3044,6 +3111,16 @@ function renderReport() {
     <tr>
       <td>${escapeHtml(line.fecha || "-")}</td>
       <td>${escapeHtml(line.planVencimientos || line.vencimiento || "-")}</td>
+      <td>${escapeHtml(line.comprobante || "-")}</td>
+      <td>${plainNumberValue(line.cantidad)}</td>
+      <td>${moneyValue(line.importeBruto || line.importeNeto)}</td>
+      <td>${moneyValue(line.importeNeto)}</td>
+      <td>${moneyValue(line.iva)}</td>
+    </tr>
+  `).join("");
+  const partialFinalRows = (operation.facturacionParcial || []).map((line) => `
+    <tr>
+      <td>${escapeHtml(line.fecha || "-")}</td>
       <td>${escapeHtml(line.comprobante || "-")}</td>
       <td>${plainNumberValue(line.cantidad)}</td>
       <td>${moneyValue(line.importeBruto || line.importeNeto)}</td>
@@ -3219,10 +3296,10 @@ function renderReport() {
     <div class="report-section partial-report-section">
       <h3>Liquidaciones parciales consolidadas</h3>
       <table class="report-table partial-report-table">
-        <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Cant.</th><th>Bruto liquidado</th><th>Neto a cobrar</th><th>IVA dato</th></tr></thead>
-        <tbody>${partialRows}
-          <tr class="report-total"><td colspan="3">Total liquidado real</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedGross)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td></tr>
-          <tr class="report-total"><td colspan="3">Pendiente contra operacion total</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingGross)}</td><td>-</td><td>-</td></tr>
+        <thead><tr><th>Fecha</th><th>Comprobante</th><th>Cant.</th><th>Bruto liquidado</th><th>Neto a cobrar</th><th>IVA dato</th></tr></thead>
+        <tbody>${partialFinalRows}
+          <tr class="report-total"><td colspan="2">Total liquidado real</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedGross)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td></tr>
+          <tr class="report-total"><td colspan="2">Pendiente contra operacion total</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingGross)}</td><td>-</td><td>-</td></tr>
         </tbody>
       </table>
     </div>
@@ -3486,11 +3563,22 @@ async function addRenspa() {
 }
 
 async function init() {
+  window.history.replaceState({ view: state.vista }, "", `#${state.vista}`);
+  window.addEventListener("popstate", (event) => {
+    const view = event.state?.view || preferredInitialView();
+    state.restoringHistory = true;
+    setView(view);
+    state.restoringHistory = false;
+  });
   $all("nav button").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
   $("#mobile-refresh").addEventListener("click", reloadAppData);
   $("#download-backup").addEventListener("click", downloadBackup);
+  $("#dashboard-period-run").addEventListener("click", renderPeriodStats);
+  ["#calc-weight-gross", "#calc-weight-shrink", "#calc-weight-heads", "#calc-weight-adjust"].forEach((selector) => {
+    $(selector).addEventListener("input", renderWeightCalculator);
+  });
   $("#commissionist-load").addEventListener("click", loadCommissionistOperations);
   $("#commissionist-generate").addEventListener("click", generateCommissionistMovement);
   $("#commissionist-percent").addEventListener("input", renderCommissionistRows);
@@ -3786,6 +3874,8 @@ async function init() {
   $("#operation-date").value = new Date().toISOString().slice(0, 10);
   $("#operation-load-date").value = $("#operation-date").value;
   const today = new Date().toISOString().slice(0, 10);
+  $("#dashboard-period-from").value = today.slice(0, 8) + "01";
+  $("#dashboard-period-to").value = today;
   $("#commissionist-from").value = today.slice(0, 8) + "01";
   $("#commissionist-to").value = today;
   $("#commissionist-due").value = today;
