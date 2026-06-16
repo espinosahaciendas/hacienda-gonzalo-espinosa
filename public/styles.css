@@ -268,6 +268,29 @@ h2 {
   margin-top: 12px;
 }
 
+.sale-calculator-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 14px;
+  padding: 0;
+}
+
+.sale-calculator-panel summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 10px 12px;
+  background: #f4f8f6;
+}
+
+.sale-calculator-panel[open] {
+  padding: 0 12px 12px;
+}
+
+.sale-calculator-panel[open] summary {
+  margin: 0 -12px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
 .mobile-summary-view {
   max-width: 980px;
 }

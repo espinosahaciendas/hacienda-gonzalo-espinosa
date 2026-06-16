@@ -209,6 +209,16 @@ function operationDateForPeriod(operation) {
   return parseDisplayDate(operation.fechaCarga || operation.fecha || operation.draftData?.fechaCarga || operation.draftData?.fecha);
 }
 
+function periodDestinationLabel(operation) {
+  const destination = normalizeSearch(operation.destino || operation.draftData?.destino || "");
+  const frigo = isFrigorificoIvaOperation(operation);
+  if (destination.includes("faena") || frigo) return frigo ? "FAENA / FRIGORIFICO" : "FAENA";
+  if (destination.includes("invernada")) return "INVERNADA";
+  if (destination.includes("cria")) return "CRIA";
+  if (destination.includes("reproduccion")) return "REPRODUCCION";
+  return (operation.destino || operation.draftData?.destino || "Sin destino").toUpperCase();
+}
+
 async function renderPeriodStats() {
   const from = parseInputDate($("#dashboard-period-from").value);
   const to = parseInputDate($("#dashboard-period-to").value);
@@ -216,7 +226,12 @@ async function renderPeriodStats() {
   const message = $("#period-message");
   message.textContent = "Calculando periodo...";
   message.className = "form-message";
-  const operations = state.operaciones.filter((operation) => {
+  const details = await Promise.all(state.operaciones.map((operation) =>
+    fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`)
+      .then((response) => ({ ...operation, ...(response.item || {}) }))
+      .catch(() => operation)
+  ));
+  const operations = details.filter((operation) => {
     const date = operationDateForPeriod(operation);
     if (!date) return false;
     date.setHours(0, 0, 0, 0);
@@ -224,15 +239,12 @@ async function renderPeriodStats() {
     if (to && date > dateOnly(to)) return false;
     return true;
   });
-  const details = await Promise.all(operations.map((operation) =>
-    fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`).then((response) => response.item).catch(() => operation)
-  ));
   const categories = new Map();
   const destinations = new Map();
   let heads = 0;
   let sellerTotal = 0;
-  details.forEach((operation) => {
-    const destination = operation.destino || "Sin destino";
+  operations.forEach((operation) => {
+    const destination = periodDestinationLabel(operation);
     const destinationCurrent = destinations.get(destination) || { heads: 0, amount: 0, operations: new Set() };
     destinationCurrent.operations.add(operation.id);
     (operation.saleLines || []).forEach((line) => {

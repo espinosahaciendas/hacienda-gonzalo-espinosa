@@ -350,36 +350,6 @@
             <button type="button" class="ghost-button" id="operation-show-history">Ver operaciones cargadas</button>
           </div>
         </div>
-        <div class="panel calculator-panel">
-          <div class="panel-head">
-            <div>
-              <h2>Calculadora de pesada</h2>
-              <p class="subtle">Sume varios tickets de balanza para obtener bruto, neto y promedio.</p>
-            </div>
-          </div>
-          <div class="form-grid">
-            <label>Ticket kg<input id="calc-ticket-kg" inputmode="decimal" placeholder="Kg del ticket"></label>
-            <label>Detalle ticket<input id="calc-ticket-note" placeholder="Opcional"></label>
-            <label class="button-label"><button type="button" class="ghost-button" id="calc-ticket-add">Agregar ticket</button></label>
-            <label>Desbaste %<input id="calc-weight-shrink" inputmode="decimal" value="0"></label>
-            <label>Cabezas<input id="calc-weight-heads" inputmode="decimal"></label>
-            <label>Merma / ajuste kg<input id="calc-weight-adjust" inputmode="decimal" value="0"></label>
-          </div>
-          <div class="table-wrap compact-table">
-            <table>
-              <thead><tr><th>Ticket</th><th>Kg</th><th>Detalle</th><th></th></tr></thead>
-              <tbody id="calc-ticket-body"></tbody>
-            </table>
-          </div>
-          <div class="cc-grid">
-            <div><span>Kg bruto total</span><strong id="calc-weight-gross-total">0 kgs</strong></div>
-            <div><span>Kg netos</span><strong id="calc-weight-net">0 kgs</strong></div>
-            <div><span>Promedio</span><strong id="calc-weight-average">0 kgs/cab</strong></div>
-          </div>
-          <div class="form-actions">
-            <button type="button" class="ghost-button" id="calc-ticket-clear">Limpiar tickets</button>
-          </div>
-        </div>
         <div class="operation-layout workspace-mode" id="operation-layout">
           <form class="panel operation-form" id="operation-form">
             <div class="panel-head">
@@ -515,6 +485,32 @@
                 </div>
                 <button type="button" class="ghost-button" data-operation-step="liquidation">Continuar a liquidacion</button>
               </div>
+              <details class="calculator-panel sale-calculator-panel">
+                <summary>Calculadora de pesada por tickets</summary>
+                <p class="subtle">Sume varios tickets de balanza para obtener bruto, neto y promedio mientras carga la venta.</p>
+                <div class="form-grid">
+                  <label>Ticket kg<input id="calc-ticket-kg" inputmode="decimal" placeholder="Kg del ticket"></label>
+                  <label>Detalle ticket<input id="calc-ticket-note" placeholder="Opcional"></label>
+                  <label class="button-label"><button type="button" class="ghost-button" id="calc-ticket-add">Agregar ticket</button></label>
+                  <label>Desbaste %<input id="calc-weight-shrink" inputmode="decimal" value="0"></label>
+                  <label>Cabezas<input id="calc-weight-heads" inputmode="decimal"></label>
+                  <label>Merma / ajuste kg<input id="calc-weight-adjust" inputmode="decimal" value="0"></label>
+                </div>
+                <div class="table-wrap compact-table">
+                  <table>
+                    <thead><tr><th>Ticket</th><th>Kg</th><th>Detalle</th><th></th></tr></thead>
+                    <tbody id="calc-ticket-body"></tbody>
+                  </table>
+                </div>
+                <div class="cc-grid">
+                  <div><span>Kg bruto total</span><strong id="calc-weight-gross-total">0 kgs</strong></div>
+                  <div><span>Kg netos</span><strong id="calc-weight-net">0 kgs</strong></div>
+                  <div><span>Promedio</span><strong id="calc-weight-average">0 kgs/cab</strong></div>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" id="calc-ticket-clear">Limpiar tickets</button>
+                </div>
+              </details>
               <section class="sale-section">
                 <div class="section-head">
                   <h3>Detalle cargado</h3>
