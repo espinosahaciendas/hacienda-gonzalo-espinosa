@@ -1704,9 +1704,21 @@ function renderSaleLines(lines) {
   renderPartialBilling();
 }
 
+function operationPartialBillingLines(operation = state.currentOperation) {
+  const direct = Array.isArray(operation?.facturacionParcial) ? operation.facturacionParcial : [];
+  const draft = Array.isArray(operation?.draftData?.facturacionParcial) ? operation.draftData.facturacionParcial : [];
+  const seen = new Set();
+  return [...direct, ...draft].filter((line) => {
+    const key = String(line.id || `${line.fecha}|${line.comprobante}|${line.importeNeto}|${line.importeBruto}`);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function partialBillingTotals(operation = state.currentOperation) {
   const lines = operation?.saleLines || [];
-  const partials = operation?.facturacionParcial || [];
+  const partials = operationPartialBillingLines(operation);
   const totalHeads = lines.reduce((sum, line) => sum + Number(line.cabezas || 0), 0);
   const totalGross = lines.reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
   const billedHeads = partials.reduce((sum, line) => sum + Number(line.cantidad || 0), 0);
@@ -1730,7 +1742,7 @@ function partialBillingTotals(operation = state.currentOperation) {
 function renderPartialBilling() {
   if (!$("#partial-total-heads")) return;
   const operation = state.currentOperation || {};
-  const partials = operation.facturacionParcial || [];
+  const partials = operationPartialBillingLines(operation);
   const totals = partialBillingTotals(operation);
   $("#partial-total-heads").textContent = `${plainNumberValue(totals.totalHeads)} cab.`;
   $("#partial-total-net").textContent = moneyValue(totals.totalGross);
@@ -3105,9 +3117,10 @@ function renderReport() {
   const controlOnly = state.reportMode === "control" || !operation.liquidacionConfirmada;
   const sellerObservation = $("#liq-observaciones-prod").value || (operation.liquidacion && operation.liquidacion.observacionesProd) || draft.observacionesProd || "";
   const buyerObservation = $("#liq-observaciones-comp").value || (operation.liquidacion && operation.liquidacion.observacionesComp) || draft.observacionesComp || "";
+  const partialLines = operationPartialBillingLines(operation);
   const partialTotals = partialBillingTotals(operation);
-  const hasPartialBilling = (operation.facturacionParcial || []).length > 0;
-  const partialRows = (operation.facturacionParcial || []).map((line) => `
+  const hasPartialBilling = partialLines.length > 0;
+  const partialRows = partialLines.map((line) => `
     <tr>
       <td>${escapeHtml(line.fecha || "-")}</td>
       <td>${escapeHtml(line.planVencimientos || line.vencimiento || "-")}</td>
@@ -3118,7 +3131,7 @@ function renderReport() {
       <td>${moneyValue(line.iva)}</td>
     </tr>
   `).join("");
-  const partialFinalRows = (operation.facturacionParcial || []).map((line) => `
+  const partialFinalRows = partialLines.map((line) => `
     <tr>
       <td>${escapeHtml(line.fecha || "-")}</td>
       <td>${escapeHtml(line.comprobante || "-")}</td>
@@ -3128,7 +3141,7 @@ function renderReport() {
       <td>${moneyValue(line.iva)}</td>
     </tr>
   `).join("");
-  const partialDueItems = (operation.facturacionParcial || []).flatMap((line) => {
+  const partialDueItems = partialLines.flatMap((line) => {
     const amount = Number(line.importeNeto || 0);
     if (!amount) return [];
     if (String(line.planVencimientos || "").trim()) {
@@ -3280,7 +3293,7 @@ function renderReport() {
       </table>
     </div>
   `;
-  const partialReport = (operation.facturacionParcial || []).length ? `
+  const partialReport = partialLines.length ? `
     <div class="report-section partial-report-section">
       <h3>Control de facturacion parcial</h3>
       <table class="report-table partial-report-table">
