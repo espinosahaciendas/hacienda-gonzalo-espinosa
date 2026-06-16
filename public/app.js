@@ -15,10 +15,11 @@ const state = {
   editingExternalMovementId: "",
   commissionistRows: [],
   usuario: null,
+  weightTickets: [],
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260616-parciales-vencimientos";
+const APP_BUILD = "20260616-resumenes-parciales";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -211,6 +212,7 @@ function operationDateForPeriod(operation) {
 async function renderPeriodStats() {
   const from = parseInputDate($("#dashboard-period-from").value);
   const to = parseInputDate($("#dashboard-period-to").value);
+  const commissionRate = parseMoneyInput($("#period-commission-rate").value);
   const message = $("#period-message");
   message.textContent = "Calculando periodo...";
   message.className = "form-message";
@@ -226,30 +228,45 @@ async function renderPeriodStats() {
     fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`).then((response) => response.item).catch(() => operation)
   ));
   const categories = new Map();
+  const destinations = new Map();
   let heads = 0;
   let sellerTotal = 0;
   details.forEach((operation) => {
+    const destination = operation.destino || "Sin destino";
+    const destinationCurrent = destinations.get(destination) || { heads: 0, amount: 0, operations: new Set() };
+    destinationCurrent.operations.add(operation.id);
     (operation.saleLines || []).forEach((line) => {
       const category = line.categoria || "Sin categoria";
       const count = Number(line.cabezas || 0);
+      const amount = Number(line.importeVend || 0);
       heads += count;
-      sellerTotal += Number(line.importeVend || 0);
-      const current = categories.get(category) || { heads: 0, operations: new Set() };
+      sellerTotal += amount;
+      destinationCurrent.heads += count;
+      destinationCurrent.amount += amount;
+      const current = categories.get(category) || { heads: 0, amount: 0, operations: new Set() };
       current.heads += count;
+      current.amount += amount;
       current.operations.add(operation.id);
       categories.set(category, current);
     });
+    destinations.set(destination, destinationCurrent);
   });
-  const rows = Array.from(categories.entries())
-    .map(([categoria, item]) => ({ categoria, heads: item.heads, operations: item.operations.size }))
+  const categoryRows = Array.from(categories.entries())
+    .map(([categoria, item]) => ({ categoria, heads: item.heads, amount: item.amount, operations: item.operations.size }))
     .sort((a, b) => b.heads - a.heads || a.categoria.localeCompare(b.categoria, "es"));
+  const destinationRows = Array.from(destinations.entries())
+    .map(([destino, item]) => ({ destino, heads: item.heads, amount: item.amount, operations: item.operations.size }))
+    .sort((a, b) => b.heads - a.heads || a.destino.localeCompare(b.destino, "es"));
   $("#period-operations").textContent = operations.length;
   $("#period-heads").textContent = plainNumberValue(heads);
   $("#period-seller-total").textContent = moneyValue(sellerTotal);
-  $("#period-category-count").textContent = rows.length;
-  $("#period-category-body").innerHTML = rows.length
-    ? rows.map((row) => `<tr><td>${escapeHtml(row.categoria)}</td><td>${plainNumberValue(row.heads)}</td><td>${row.operations}</td></tr>`).join("")
-    : `<tr><td colspan="3">Sin categorias para el periodo.</td></tr>`;
+  $("#period-commission-total").textContent = moneyValue(sellerTotal * commissionRate / 100);
+  $("#period-destination-body").innerHTML = destinationRows.length
+    ? destinationRows.map((row) => `<tr><td>${escapeHtml(row.destino)}</td><td>${row.operations}</td><td>${plainNumberValue(row.heads)}</td><td>${moneyValue(row.amount)}</td></tr>`).join("")
+    : `<tr><td colspan="4">Sin destinos para el periodo.</td></tr>`;
+  $("#period-category-body").innerHTML = categoryRows.length
+    ? categoryRows.map((row) => `<tr><td>${escapeHtml(row.categoria)}</td><td>${plainNumberValue(row.heads)}</td><td>${row.operations}</td><td>${moneyValue(row.amount)}</td></tr>`).join("")
+    : `<tr><td colspan="4">Sin categorias para el periodo.</td></tr>`;
   message.textContent = operations.length ? "Periodo calculado." : "No hay operaciones en ese periodo.";
   message.className = `form-message ${operations.length ? "ok" : ""}`.trim();
 }
@@ -1553,14 +1570,38 @@ function renderCategories() {
 }
 
 function renderWeightCalculator() {
-  const gross = parseMoneyInput($("#calc-weight-gross").value);
+  const gross = state.weightTickets.reduce((sum, ticket) => sum + Number(ticket.kg || 0), 0);
   const shrink = parseMoneyInput($("#calc-weight-shrink").value);
   const heads = parseMoneyInput($("#calc-weight-heads").value);
   const adjust = parseMoneyInput($("#calc-weight-adjust").value);
   const net = Math.max(gross * (1 - shrink / 100) + adjust, 0);
   const average = heads ? net / heads : 0;
+  $("#calc-ticket-body").innerHTML = state.weightTickets.length
+    ? state.weightTickets.map((ticket, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${plainNumberValue(ticket.kg)} kgs</td>
+        <td>${escapeHtml(ticket.note || "-")}</td>
+        <td><button type="button" class="small-button danger-button" data-calc-ticket-remove="${ticket.id}">Quitar</button></td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="4">Sin tickets cargados.</td></tr>`;
+  $("#calc-weight-gross-total").textContent = `${plainNumberValue(gross)} kgs`;
   $("#calc-weight-net").textContent = `${plainNumberValue(net)} kgs`;
   $("#calc-weight-average").textContent = `${plainNumberValue(average)} kgs/cab`;
+}
+
+function addWeightTicket() {
+  const kg = parseMoneyInput($("#calc-ticket-kg").value);
+  if (!kg) return;
+  state.weightTickets.push({
+    id: `T-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    kg,
+    note: $("#calc-ticket-note").value
+  });
+  $("#calc-ticket-kg").value = "";
+  $("#calc-ticket-note").value = "";
+  renderWeightCalculator();
 }
 
 function renderCategoryAdmin() {
@@ -1711,7 +1752,16 @@ function operationPartialBillingLines(operation = state.currentOperation) {
   const draft = Array.isArray(operation?.draftData?.facturacionParcial) ? operation.draftData.facturacionParcial : [];
   const seen = new Set();
   return [...direct, ...draft].filter((line) => {
-    const key = String(line.id || `${line.fecha}|${line.comprobante}|${line.importeNeto}|${line.importeBruto}`);
+    const key = [
+      line.fecha,
+      line.planVencimientos || line.vencimiento,
+      line.comprobante,
+      line.parteCuenta,
+      Number(line.cantidad || 0).toFixed(2),
+      Number(line.importeBruto || 0).toFixed(2),
+      Number(line.importeNeto || 0).toFixed(2),
+      Number(line.iva || 0).toFixed(2)
+    ].join("|");
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -1743,7 +1793,15 @@ function reportPartialBillingLines(operation = state.currentOperation) {
   const fromScreen = visiblePartialBillingLines();
   const seen = new Set();
   return [...fromOperation, ...fromScreen].filter((line) => {
-    const key = String(line.id || `${line.fecha}|${line.comprobante}|${line.importeNeto}|${line.importeBruto}`);
+    const key = [
+      line.fecha,
+      line.planVencimientos || line.vencimiento,
+      line.comprobante,
+      Number(line.cantidad || 0).toFixed(2),
+      Number(line.importeBruto || 0).toFixed(2),
+      Number(line.importeNeto || 0).toFixed(2),
+      Number(line.iva || 0).toFixed(2)
+    ].join("|");
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -3155,6 +3213,36 @@ function printReportParty(party) {
   popup.focus();
 }
 
+function printReportSheet() {
+  const sheet = $("#report-sheet");
+  if (!sheet || !sheet.innerHTML.trim()) return;
+  const clone = sheet.cloneNode(true);
+  clone.querySelectorAll(".report-export-actions").forEach((node) => node.remove());
+  const popup = window.open("", "_blank");
+  if (!popup) return;
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte_${escapeHtml(state.currentOperation?.id || "")}</title><style>
+    body{font-family:Arial,sans-serif;margin:8mm;color:#173632;background:white}
+    .report-pages{display:block}.report-page-block{break-after:page;border:0;padding:0;font-size:8.5pt;line-height:1.12;margin-bottom:8mm}
+    .report-header{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #173632;padding-bottom:5px;margin-bottom:5px}
+    .report-header h2{font-size:14px;margin:0}.subtle,.report-build{color:#52706b;margin:2px 0}.report-build{font-size:7pt}
+    .report-logo{width:72px;height:72px;object-fit:contain;background:#173632;border-radius:6px;padding:4px}
+    .report-title,.report-kv,.report-note,.report-line,.report-net,.report-section{margin-top:5px}
+    .report-title,.report-line,.report-net{border:1px solid #cbd7d4;padding:5px 6px}
+    .report-title strong,.report-title span,.report-note span,.report-note strong{display:block}
+    .report-kv{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid #cbd7d4}
+    .report-kv span,.report-kv strong{padding:3px 4px;border-bottom:1px solid #cbd7d4}.report-kv span{color:#52706b}
+    .report-section h3{margin:0 0 3px;font-size:8pt;text-transform:uppercase}
+    .report-table{width:100%;border-collapse:collapse;font-size:7.5pt}.control-table{font-size:6.6pt}
+    .partial-report-table,.partial-due-table{table-layout:fixed;font-size:6.5pt}
+    .partial-report-table th,.partial-report-table td,.partial-due-table th,.partial-due-table td{overflow-wrap:anywhere;padding:2.5px 3px}
+    .report-table th,.report-table td{border:1px solid #cbd7d4;padding:3px 4px;text-align:left;vertical-align:top}
+    .report-total{background:#edf3f1;font-weight:bold}.seller-net{background:#eaf2ff}.buyer-net{background:#fff0e6}
+    button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:6mm}body{margin:0}button{display:none}}
+  </style></head><body>${clone.innerHTML}<button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
+  popup.document.close();
+  popup.focus();
+}
+
 function renderReport() {
   const operation = state.currentOperation;
   if (!operation) return;
@@ -3207,15 +3295,6 @@ function renderReport() {
       importe: amount
     }];
   });
-  const partialDueRows = partialDueItems.map((item) => `
-    <tr>
-      <td>${escapeHtml(item.fecha || "-")}</td>
-      <td>${escapeHtml(item.comprobante || "-")}</td>
-      <td>${plainNumberValue(item.cantidad)}</td>
-      <td>${escapeHtml(item.detalle || "-")}</td>
-      <td>${moneyValue(item.importe)}</td>
-    </tr>
-  `).join("");
   const partialDueTotals = Array.from(partialDueItems.reduce((map, item) => {
     const key = item.fecha || "-";
     map.set(key, (map.get(key) || 0) + Number(item.importe || 0));
@@ -3223,14 +3302,14 @@ function renderReport() {
   }, new Map()).entries())
     .sort((a, b) => (parseDisplayDate(a[0])?.getTime() || 0) - (parseDisplayDate(b[0])?.getTime() || 0));
   const partialDueTotalRows = partialDueTotals.map(([fecha, importe]) => `
-    <tr class="report-total"><td colspan="4">Total a cobrar ${escapeHtml(fecha)}</td><td>${moneyValue(importe)}</td></tr>
+    <tr class="report-total"><td>${escapeHtml(fecha)}</td><td>Total a cobrar por liquidaciones parciales</td><td>${moneyValue(importe)}</td></tr>
   `).join("");
   const partialDueReport = hasPartialBilling ? `
     <div class="report-section partial-due-section">
       <h3>Cobros por fecha</h3>
       <table class="report-table partial-due-table">
-        <thead><tr><th>Fecha de cobro</th><th>Comprobante</th><th>Cant.</th><th>Detalle</th><th>Neto a cobrar</th></tr></thead>
-        <tbody>${partialDueRows || `<tr><td colspan="5">Sin vencimientos parciales informados.</td></tr>`}${partialDueTotalRows}</tbody>
+        <thead><tr><th>Fecha de cobro</th><th>Detalle</th><th>Neto a cobrar</th></tr></thead>
+        <tbody>${partialDueTotalRows || `<tr><td colspan="3">Sin vencimientos parciales informados.</td></tr>`}</tbody>
       </table>
     </div>
   ` : "";
@@ -3640,9 +3719,27 @@ async function init() {
   $("#mobile-refresh").addEventListener("click", reloadAppData);
   $("#download-backup").addEventListener("click", downloadBackup);
   $("#dashboard-period-run").addEventListener("click", renderPeriodStats);
-  ["#calc-weight-gross", "#calc-weight-shrink", "#calc-weight-heads", "#calc-weight-adjust"].forEach((selector) => {
+  ["#calc-weight-shrink", "#calc-weight-heads", "#calc-weight-adjust"].forEach((selector) => {
     $(selector).addEventListener("input", renderWeightCalculator);
   });
+  $("#calc-ticket-add").addEventListener("click", addWeightTicket);
+  $("#calc-ticket-kg").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addWeightTicket();
+    }
+  });
+  $("#calc-ticket-clear").addEventListener("click", () => {
+    state.weightTickets = [];
+    renderWeightCalculator();
+  });
+  $("#calc-ticket-body").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-calc-ticket-remove]");
+    if (!button) return;
+    state.weightTickets = state.weightTickets.filter((ticket) => String(ticket.id) !== String(button.dataset.calcTicketRemove));
+    renderWeightCalculator();
+  });
+  $("#period-commission-rate").addEventListener("input", renderPeriodStats);
   $("#commissionist-load").addEventListener("click", loadCommissionistOperations);
   $("#commissionist-generate").addEventListener("click", generateCommissionistMovement);
   $("#commissionist-percent").addEventListener("input", renderCommissionistRows);
@@ -3915,7 +4012,7 @@ async function init() {
     if (!event.target.matches("[data-detail-field]")) return;
     recalculateLiquidationDetailRow(event.target);
   });
-  $("#print-report").addEventListener("click", () => window.print());
+  $("#print-report").addEventListener("click", printReportSheet);
   $("#report-control-mode").addEventListener("click", () => {
     state.reportMode = "control";
     renderReport();

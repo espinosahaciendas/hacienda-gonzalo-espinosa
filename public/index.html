@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20260616-parciales-vencimientos">
+    <link rel="stylesheet" href="/styles.css?v=20260616-resumenes-parciales">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -37,6 +37,7 @@
       <nav>
         <button class="active" data-view="tablero">Tablero</button>
         <button data-view="consulta">Consulta movil</button>
+        <button data-view="resumenes">Resumenes</button>
         <button data-view="clientes">Clientes</button>
         <button data-view="operaciones">Operaciones</button>
         <button data-view="cuenta">Cuenta corriente</button>
@@ -131,33 +132,6 @@
           </article>
         </div>
 
-        <div class="panel dashboard-period-panel">
-          <div class="panel-head">
-            <div>
-              <h2>Resumen por periodo</h2>
-              <p class="subtle">Cantidad de operaciones, cabezas y categorias cargadas.</p>
-            </div>
-            <div class="form-actions">
-              <label>Desde<input id="dashboard-period-from" type="date"></label>
-              <label>Hasta<input id="dashboard-period-to" type="date"></label>
-              <button type="button" class="ghost-button" id="dashboard-period-run">Ver periodo</button>
-            </div>
-          </div>
-          <div class="cc-grid">
-            <div><span>Operaciones</span><strong id="period-operations">-</strong></div>
-            <div><span>Cabezas</span><strong id="period-heads">-</strong></div>
-            <div><span>Importe bruto vendedor</span><strong id="period-seller-total">$ 0,00</strong></div>
-            <div><span>Categorias</span><strong id="period-category-count">-</strong></div>
-          </div>
-          <div class="table-wrap compact-table">
-            <table>
-              <thead><tr><th>Categoria</th><th>Cabezas</th><th>Operaciones</th></tr></thead>
-              <tbody id="period-category-body"></tbody>
-            </table>
-          </div>
-          <p class="form-message" id="period-message"></p>
-        </div>
-
         <div class="dashboard-due-grid">
           <div class="panel">
             <div class="panel-head">
@@ -208,6 +182,46 @@
           <div class="form-actions">
             <button type="button" class="ghost-button" id="download-backup">Descargar backup de datos</button>
           </div>
+        </div>
+      </section>
+
+      <section id="resumenes" class="view">
+        <div class="panel dashboard-period-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Resumen por periodo</h2>
+              <p class="subtle">Operaciones, cabezas, destino, categorias e importe estimado.</p>
+            </div>
+            <div class="form-actions">
+              <label>Desde<input id="dashboard-period-from" type="date"></label>
+              <label>Hasta<input id="dashboard-period-to" type="date"></label>
+              <label>% comision estimada<input id="period-commission-rate" inputmode="decimal" value="1"></label>
+              <button type="button" class="ghost-button" id="dashboard-period-run">Ver periodo</button>
+            </div>
+          </div>
+          <div class="cc-grid">
+            <div><span>Operaciones</span><strong id="period-operations">-</strong></div>
+            <div><span>Cabezas</span><strong id="period-heads">-</strong></div>
+            <div><span>Importe bruto vendedor</span><strong id="period-seller-total">$ 0,00</strong></div>
+            <div><span>Comision estimada</span><strong id="period-commission-total">$ 0,00</strong></div>
+          </div>
+          <div class="summary-grid">
+            <div class="table-wrap compact-table">
+              <h3>Por destino</h3>
+              <table>
+                <thead><tr><th>Destino</th><th>Operaciones</th><th>Cabezas</th><th>Importe</th></tr></thead>
+                <tbody id="period-destination-body"></tbody>
+              </table>
+            </div>
+            <div class="table-wrap compact-table">
+              <h3>Por categoria</h3>
+              <table>
+                <thead><tr><th>Categoria</th><th>Cabezas</th><th>Operaciones</th><th>Importe</th></tr></thead>
+                <tbody id="period-category-body"></tbody>
+              </table>
+            </div>
+          </div>
+          <p class="form-message" id="period-message"></p>
         </div>
       </section>
 
@@ -340,18 +354,30 @@
           <div class="panel-head">
             <div>
               <h2>Calculadora de pesada</h2>
-              <p class="subtle">Calcule kg netos y promedio sin salir de la carga.</p>
+              <p class="subtle">Sume varios tickets de balanza para obtener bruto, neto y promedio.</p>
             </div>
           </div>
           <div class="form-grid">
-            <label>Kg bruto<input id="calc-weight-gross" inputmode="decimal"></label>
+            <label>Ticket kg<input id="calc-ticket-kg" inputmode="decimal" placeholder="Kg del ticket"></label>
+            <label>Detalle ticket<input id="calc-ticket-note" placeholder="Opcional"></label>
+            <label class="button-label"><button type="button" class="ghost-button" id="calc-ticket-add">Agregar ticket</button></label>
             <label>Desbaste %<input id="calc-weight-shrink" inputmode="decimal" value="0"></label>
             <label>Cabezas<input id="calc-weight-heads" inputmode="decimal"></label>
             <label>Merma / ajuste kg<input id="calc-weight-adjust" inputmode="decimal" value="0"></label>
           </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead><tr><th>Ticket</th><th>Kg</th><th>Detalle</th><th></th></tr></thead>
+              <tbody id="calc-ticket-body"></tbody>
+            </table>
+          </div>
           <div class="cc-grid">
+            <div><span>Kg bruto total</span><strong id="calc-weight-gross-total">0 kgs</strong></div>
             <div><span>Kg netos</span><strong id="calc-weight-net">0 kgs</strong></div>
             <div><span>Promedio</span><strong id="calc-weight-average">0 kgs/cab</strong></div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="ghost-button" id="calc-ticket-clear">Limpiar tickets</button>
           </div>
         </div>
         <div class="operation-layout workspace-mode" id="operation-layout">
@@ -1245,6 +1271,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260616-parciales-vencimientos"></script>
+    <script src="/app.js?v=20260616-resumenes-parciales"></script>
   </body>
 </html>
