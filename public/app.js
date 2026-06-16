@@ -1716,9 +1716,41 @@ function operationPartialBillingLines(operation = state.currentOperation) {
   });
 }
 
-function partialBillingTotals(operation = state.currentOperation) {
+function visiblePartialBillingLines() {
+  const rows = $all("#partial-body tr");
+  return rows.map((row) => {
+    const cells = Array.from(row.children || []);
+    if (cells.length < 8 || normalizeSearch(row.textContent).includes("sin lineas")) return null;
+    const line = {
+      id: `visible-${cells.map((cell) => cell.textContent.trim()).join("|")}`,
+      fecha: cells[0]?.textContent.trim() || "",
+      planVencimientos: cells[1]?.textContent.trim() || "",
+      comprobante: cells[2]?.textContent.trim() || "",
+      cantidad: parseMoneyInput(cells[4]?.textContent || 0),
+      importeBruto: parseMoneyInput(cells[5]?.textContent || 0),
+      importeNeto: parseMoneyInput(cells[6]?.textContent || 0),
+      iva: parseMoneyInput(cells[7]?.textContent || 0),
+      observaciones: cells[8]?.textContent.trim() || ""
+    };
+    return line.fecha || line.comprobante || line.importeNeto ? line : null;
+  }).filter(Boolean);
+}
+
+function reportPartialBillingLines(operation = state.currentOperation) {
+  const fromOperation = operationPartialBillingLines(operation);
+  const fromScreen = visiblePartialBillingLines();
+  const seen = new Set();
+  return [...fromOperation, ...fromScreen].filter((line) => {
+    const key = String(line.id || `${line.fecha}|${line.comprobante}|${line.importeNeto}|${line.importeBruto}`);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function partialBillingTotals(operation = state.currentOperation, partialLines = null) {
   const lines = operation?.saleLines || [];
-  const partials = operationPartialBillingLines(operation);
+  const partials = Array.isArray(partialLines) ? partialLines : operationPartialBillingLines(operation);
   const totalHeads = lines.reduce((sum, line) => sum + Number(line.cabezas || 0), 0);
   const totalGross = lines.reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
   const billedHeads = partials.reduce((sum, line) => sum + Number(line.cantidad || 0), 0);
@@ -3117,20 +3149,9 @@ function renderReport() {
   const controlOnly = state.reportMode === "control" || !operation.liquidacionConfirmada;
   const sellerObservation = $("#liq-observaciones-prod").value || (operation.liquidacion && operation.liquidacion.observacionesProd) || draft.observacionesProd || "";
   const buyerObservation = $("#liq-observaciones-comp").value || (operation.liquidacion && operation.liquidacion.observacionesComp) || draft.observacionesComp || "";
-  const partialLines = operationPartialBillingLines(operation);
-  const partialTotals = partialBillingTotals(operation);
+  const partialLines = reportPartialBillingLines(operation);
+  const partialTotals = partialBillingTotals(operation, partialLines);
   const hasPartialBilling = partialLines.length > 0;
-  const partialRows = partialLines.map((line) => `
-    <tr>
-      <td>${escapeHtml(line.fecha || "-")}</td>
-      <td>${escapeHtml(line.planVencimientos || line.vencimiento || "-")}</td>
-      <td>${escapeHtml(line.comprobante || "-")}</td>
-      <td>${plainNumberValue(line.cantidad)}</td>
-      <td>${moneyValue(line.importeBruto || line.importeNeto)}</td>
-      <td>${moneyValue(line.importeNeto)}</td>
-      <td>${moneyValue(line.iva)}</td>
-    </tr>
-  `).join("");
   const partialFinalRows = partialLines.map((line) => `
     <tr>
       <td>${escapeHtml(line.fecha || "-")}</td>
@@ -3179,6 +3200,15 @@ function renderReport() {
   const partialDueTotalRows = partialDueTotals.map(([fecha, importe]) => `
     <tr class="report-total"><td colspan="4">Total a cobrar ${escapeHtml(fecha)}</td><td>${moneyValue(importe)}</td></tr>
   `).join("");
+  const partialDueReport = hasPartialBilling ? `
+    <div class="report-section partial-due-section">
+      <h3>Cobros por fecha</h3>
+      <table class="report-table partial-due-table">
+        <thead><tr><th>Fecha de cobro</th><th>Comprobante</th><th>Cant.</th><th>Detalle</th><th>Neto a cobrar</th></tr></thead>
+        <tbody>${partialDueRows || `<tr><td colspan="5">Sin vencimientos parciales informados.</td></tr>`}${partialDueTotalRows}</tbody>
+      </table>
+    </div>
+  ` : "";
 
   const detailRows = detail.map((item) => `
     <tr>
@@ -3297,13 +3327,14 @@ function renderReport() {
     <div class="report-section partial-report-section">
       <h3>Control de facturacion parcial</h3>
       <table class="report-table partial-report-table">
-        <thead><tr><th>Fecha</th><th>Vto. / plan</th><th>Comprobante</th><th>Cant.</th><th>Bruto</th><th>Neto a cobrar</th><th>IVA dato</th></tr></thead>
-        <tbody>${partialRows}
-          <tr class="report-total"><td colspan="3">Liquidado parcial</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedGross)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td></tr>
-          <tr class="report-total"><td colspan="3">Pendiente operativo bruto</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingGross)}</td><td>-</td><td>-</td></tr>
+        <thead><tr><th>Fecha</th><th>Comprobante</th><th>Cant.</th><th>Bruto</th><th>Neto a cobrar</th><th>IVA dato</th></tr></thead>
+        <tbody>${partialFinalRows}
+          <tr class="report-total"><td colspan="2">Liquidado parcial</td><td>${plainNumberValue(partialTotals.billedHeads)}</td><td>${moneyValue(partialTotals.billedGross)}</td><td>${moneyValue(partialTotals.billedNet)}</td><td>${moneyValue(partialTotals.billedIva)}</td></tr>
+          <tr class="report-total"><td colspan="2">Pendiente operativo bruto</td><td>${plainNumberValue(partialTotals.pendingHeads)}</td><td>${moneyValue(partialTotals.pendingGross)}</td><td>-</td><td>-</td></tr>
         </tbody>
       </table>
     </div>
+    ${partialDueReport}
   ` : "";
   const partialFinalReport = hasPartialBilling ? `
     <div class="report-section partial-report-section">
@@ -3316,13 +3347,7 @@ function renderReport() {
         </tbody>
       </table>
     </div>
-    <div class="report-section partial-due-section">
-      <h3>Cobros por fecha</h3>
-      <table class="report-table partial-due-table">
-        <thead><tr><th>Fecha de cobro</th><th>Comprobante</th><th>Cant.</th><th>Detalle</th><th>Neto a cobrar</th></tr></thead>
-        <tbody>${partialDueRows || `<tr><td colspan="5">Sin vencimientos parciales informados.</td></tr>`}${partialDueTotalRows}</tbody>
-      </table>
-    </div>
+    ${partialDueReport}
   ` : "";
   const sellerFinalNet = hasPartialBilling ? partialTotals.billedNet + (Number(calc.netoTotalProd || 0) - Number(calc.netoLiquidacionProd || 0)) : calc.netoTotalProd;
   const buyerFinalNet = hasPartialBilling ? partialTotals.billedNet + (Number(calc.netoTotalComp || 0) - Number(calc.netoLiquidacionComp || 0)) : calc.netoTotalComp;

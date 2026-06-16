@@ -1018,26 +1018,24 @@ label textarea {
 
 .partial-report-table th:nth-child(2),
 .partial-report-table td:nth-child(2) {
-  width: 14%;
+  width: 22%;
 }
 
 .partial-report-table th:nth-child(3),
 .partial-report-table td:nth-child(3) {
-  width: 17%;
+  width: 9%;
 }
 
 .partial-report-table th:nth-child(4),
 .partial-report-table td:nth-child(4) {
-  width: 8%;
+  width: 19%;
 }
 
 .partial-report-table th:nth-child(5),
 .partial-report-table td:nth-child(5),
 .partial-report-table th:nth-child(6),
-.partial-report-table td:nth-child(6),
-.partial-report-table th:nth-child(7),
-.partial-report-table td:nth-child(7) {
-  width: 16%;
+.partial-report-table td:nth-child(6) {
+  width: 19%;
 }
 
 .partial-due-table {
