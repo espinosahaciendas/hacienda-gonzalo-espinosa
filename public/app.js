@@ -19,7 +19,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260616-resumenes-parciales";
+const APP_BUILD = "20260617-comisionistas-consignatarias";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -488,6 +488,8 @@ function currentAccountConceptText(movement, viewMode) {
 }
 
 function movementCommissionistKey(movement) {
+  const directCommissionist = normalizeSearch(movement.comisionista || "");
+  if (directCommissionist) return directCommissionist;
   const detail = commissionistDetailFromObservation(movement.observacion);
   const detailCommissionist = normalizeSearch(detail?.comisionista || "");
   if (detailCommissionist) return detailCommissionist;
@@ -704,11 +706,16 @@ function populateCurrentAccountClients() {
 }
 
 function populateCommissionistClients() {
-  const names = state.clientes
-    .filter((client) => normalizeSearch(client.tipo) === "comisionista")
-    .map((client) => client.nombre)
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b, "es"));
+  const commissionistTypes = new Set(["comisionista", "consignataria"]);
+  const usedAsCommissionist = (state.cuenta?.movimientos || [])
+    .map((movement) => movement.comisionista)
+    .filter(Boolean);
+  const names = Array.from(new Set([
+    ...state.clientes
+      .filter((client) => commissionistTypes.has(normalizeSearch(client.tipo)))
+      .map((client) => client.nombre),
+    ...usedAsCommissionist
+  ].filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"));
   $("#commissionist-client-list").innerHTML = names
     .map((name) => `<option value="${escapeHtml(name)}"></option>`)
     .join("");
@@ -1316,6 +1323,13 @@ function operationCommissionistKey(detail) {
   );
 }
 
+function operationCommissionistKeys(detail) {
+  return Array.from(new Set([
+    operationCommissionistKey(detail),
+    normalizeSearch(detail.consignataria || detail.draftData?.consignataria || "")
+  ].filter(Boolean)));
+}
+
 function renderCommissionistRows() {
   const percent = percentValue("#commissionist-percent");
   const selectedRows = state.commissionistRows.filter((row) => row.selected);
@@ -1366,7 +1380,7 @@ async function loadCommissionistOperations() {
   state.commissionistRows = details
     .filter(Boolean)
     .filter((detail) => detail.liquidacion)
-    .filter((detail) => operationCommissionistKey(detail) === normalizeSearch(selectedCommissionist))
+    .filter((detail) => operationCommissionistKeys(detail).includes(normalizeSearch(selectedCommissionist)))
     .map((detail) => {
       const liq = detail.liquidacion || {};
       return {
