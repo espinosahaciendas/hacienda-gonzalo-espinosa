@@ -19,7 +19,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260617-comisionistas-consignatarias";
+const APP_BUILD = "20260617-reporte-saldo-pendiente";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -448,12 +448,12 @@ function getExactCurrentAccountClient(query) {
 
 function getExactCurrentAccountConsignee(query) {
   if (!query) return "";
-  return (state.cuenta.movimientos || []).some((movement) => movementConsigneeKey(movement) === query) ? query : "";
+  return (state.cuenta.movimientos || []).some((movement) => movementConsigneeKey(movement) === query || movementCommissionistAccountKey(movement) === query) ? query : "";
 }
 
 function getExactCurrentAccountCommissionist(query) {
   if (!query) return "";
-  return (state.cuenta.movimientos || []).some((movement) => movementCommissionistKey(movement) === query) ? query : "";
+  return (state.cuenta.movimientos || []).some((movement) => movementCommissionistAccountKey(movement) === query) ? query : "";
 }
 
 function movementConsigneeKey(movement) {
@@ -471,7 +471,7 @@ function isConsigneeInformationalDue(movement) {
 }
 
 function isCommissionPendingMovement(movement, viewMode = "CLIENTE") {
-  if (viewMode === "CONSIGNATARIA") return isConsigneeOwnCharge(movement);
+  if (viewMode === "CONSIGNATARIA") return isConsigneeOwnCharge(movement) || Boolean(movementCommissionistAccountKey(movement));
   return String(movement?.origen || "").toUpperCase() === "COMISION";
 }
 
@@ -497,6 +497,14 @@ function movementCommissionistKey(movement) {
   return "";
 }
 
+function movementCommissionistAccountKey(movement) {
+  const detail = commissionistDetailFromObservation(movement.observacion);
+  const detailCommissionist = normalizeSearch(detail?.comisionista || "");
+  if (detailCommissionist) return detailCommissionist;
+  if (normalizeSearch(movement.concepto).includes("comisionista")) return normalizeSearch(movement.cliente);
+  return "";
+}
+
 function matchesCurrentAccountClientSearch(movement, words, exactClient = "") {
   if (exactClient) return movementAccountEntities(movement).includes(exactClient);
   if (!words.length) return true;
@@ -506,18 +514,19 @@ function matchesCurrentAccountClientSearch(movement, words, exactClient = "") {
 
 function matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee = "") {
   const consignee = movementConsigneeKey(movement);
-  if (exactConsignee) return consignee === exactConsignee;
+  const commissionistAccount = movementCommissionistAccountKey(movement);
+  if (exactConsignee) return consignee === exactConsignee || commissionistAccount === exactConsignee;
   if (!words.length) return true;
   const haystack = normalizeSearch(`${movement.consignataria || ""} ${movement.cliente || ""} ${movement.contraparte || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
   return words.every((word) => haystack.includes(word));
 }
 
 function matchesCurrentAccountCommissionistSearch(movement, words, exactCommissionist = "") {
-  const commissionist = movementCommissionistKey(movement);
+  const commissionist = movementCommissionistAccountKey(movement);
   if (exactCommissionist) return commissionist === exactCommissionist;
   if (!words.length) return Boolean(commissionist);
   const detail = commissionistDetailFromObservation(movement.observacion);
-  const haystack = normalizeSearch(`${movement.comisionista || ""} ${detail?.comisionista || ""} ${movement.cliente || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
+  const haystack = normalizeSearch(`${detail?.comisionista || ""} ${movement.cliente || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
   return words.every((word) => haystack.includes(word));
 }
 
@@ -591,7 +600,7 @@ function renderCuentaCorriente() {
   });
   const balance = viewMode === "CONSIGNATARIA"
     ? movements
-      .filter(isConsigneeOwnCharge)
+      .filter((movement) => isConsigneeOwnCharge(movement) || movementCommissionistAccountKey(movement))
       .reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
     : movements.reduce((sum, movement) => sum + Number(movement.importe || 0), 0);
   const selectedClient = words.length ? $("#cc-client-search").value.trim() : (viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : viewMode === "COMISIONISTA" ? "Todos los comisionistas" : "Todos");
@@ -1098,18 +1107,22 @@ function printCurrentAccountReport(forcedType = "") {
       const dateB = parseDisplayDate(type === "SALDOS" ? b.fecha : b.vencimiento)?.getTime() || 0;
       return dateA - dateB;
     });
-  const accountBalance = filters.viewMode === "CONSIGNATARIA"
-    ? rows.filter(isConsigneeOwnCharge).reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
-    : rows.reduce((sum, movement) => sum + Number(movement.importe || 0), 0);
   const pendingBalance = rows.filter((movement) => !movement.paymentId)
     .reduce((sum, movement) => sum + Math.sign(movement.importe) * Number(movement.importePendiente ?? Math.abs(movement.importe)), 0);
+  const accountBalance = filters.viewMode === "CONSIGNATARIA"
+    ? rows
+      .filter((movement) => isConsigneeOwnCharge(movement) || movementCommissionistAccountKey(movement))
+      .reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
+    : pendingBalance;
   const applied = rows.filter((movement) => !movement.paymentId)
     .reduce((sum, movement) => sum + Number(movement.importeImputado || 0), 0);
   const imputationsByMovement = currentAccountImputationsByMovement();
   const balances = new Map();
   const commissionBalances = new Map();
   rows.forEach((movement) => {
-    balances.set(movement.cliente, (balances.get(movement.cliente) || 0) + Number(movement.importe || 0));
+    if (!movement.paymentId) {
+      balances.set(movement.cliente, (balances.get(movement.cliente) || 0) + pendingSignedAmount(movement));
+    }
     if (isCommissionPendingMovement(movement, filters.viewMode) && String(movement.estado || "").toUpperCase() !== "IMPUTADO") {
       commissionBalances.set(movement.cliente, (commissionBalances.get(movement.cliente) || 0) + pendingSignedAmount(movement));
     }
@@ -1130,7 +1143,7 @@ function printCurrentAccountReport(forcedType = "") {
   const periodLabel = `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${currentAccountReportStyles()}</style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${escapeHtml(title)}</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
-  <div class="summary"><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Periodo</span><strong>${escapeHtml(periodLabel)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Comisiones pendientes" : "Saldo de los movimientos"}</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Vencimientos informativos" : "Saldo pendiente"}</span><strong>${moneyValue(pendingBalance)}</strong></div><div><span>Comisiones pendientes</span><strong>${moneyValue(commissionTotal)}</strong></div></div>
+  <div class="summary"><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Periodo</span><strong>${escapeHtml(periodLabel)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Comisiones pendientes" : "Saldo pendiente real"}</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Vencimientos informativos" : "Saldo pendiente"}</span><strong>${moneyValue(pendingBalance)}</strong></div><div><span>Comisiones pendientes</span><strong>${moneyValue(commissionTotal)}</strong></div></div>
   ${balancesTable}
   ${commissionsTable}
   <h2>Detalle de movimientos e imputaciones</h2>
