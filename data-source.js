@@ -523,7 +523,7 @@ function buildOperationAccountMovements(operation) {
       consignataria: operationConsignee,
       tipoOperacion: operation.tipo || draft.tipo || "",
       destinoOperacion: operation.destino || draft.destino || "",
-      consignatariaCuenta: consigneeAppliesToRole(role),
+      consignatariaCuenta: false,
       importe: Math.abs(Number(amount || 0)),
       estado: "PENDIENTE"
     });
