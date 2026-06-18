@@ -370,6 +370,21 @@ h2 {
   white-space: nowrap;
 }
 
+#cash-body td small {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  margin-top: 3px;
+}
+
+.cash-recovered-row {
+  color: var(--muted);
+}
+
+.cash-recovered-row .amount {
+  color: var(--muted);
+}
+
 .empty-mobile {
   color: var(--muted);
   margin: 0;

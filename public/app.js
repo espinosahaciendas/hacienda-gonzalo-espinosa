@@ -2,6 +2,7 @@ const state = {
   clientes: [],
   operaciones: [],
   cuenta: null,
+  caja: { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 },
   vista: "tablero",
   selectedClientId: "",
   showAllClients: false,
@@ -19,7 +20,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260617-reporte-saldo-pendiente";
+const APP_BUILD = "20260618-caja-diaria";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -106,6 +107,7 @@ function setView(view) {
     clientes: "Clientes",
     operaciones: "Operaciones",
     cuenta: "Cuenta corriente",
+    caja: "Caja diaria",
     comisionistas: "Comisionistas"
   };
   $("#view-title").textContent = titles[view] || "Sistema";
@@ -132,6 +134,8 @@ function applyUserRole(user) {
     "#tab-save",
     "#category-admin-toggle",
     "#download-backup",
+    "#cash-form",
+    "#cash-clear",
     "#commissionist-load",
     "#commissionist-generate"
   ];
@@ -165,12 +169,13 @@ async function logout() {
 }
 
 async function reloadAppData() {
-  const [clientes, operaciones, cuenta, categorias, tabs] = await Promise.all([
+  const [clientes, operaciones, cuenta, categorias, tabs, caja] = await Promise.all([
     fetchJson("/api/clientes"),
     fetchJson("/api/operaciones"),
     fetchJson("/api/cuenta-corriente/resumen"),
     fetchJson("/api/categorias"),
-    fetchJson("/api/tabs")
+    fetchJson("/api/tabs"),
+    fetchJson("/api/caja-diaria")
   ]);
 
   state.clientes = clientes.items || [];
@@ -178,8 +183,10 @@ async function reloadAppData() {
   state.cuenta = cuenta;
   state.categorias = categorias.items || [];
   state.tabRules = tabs.items || [];
+  state.caja = caja || { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 };
 
   renderMetrics();
+  renderCajaDiaria();
   renderClientes();
   renderOperaciones();
   renderCategories();
@@ -193,6 +200,136 @@ async function reloadAppData() {
 
 function downloadBackup() {
   window.location.href = "/api/backup/download";
+}
+
+function setCashMessage(message, type = "") {
+  const node = $("#cash-message");
+  if (!node) return;
+  node.textContent = message || "";
+  node.className = `form-message ${type}`.trim();
+}
+
+function resetCashForm() {
+  $("#cash-id").value = "";
+  $("#cash-date").value = new Date().toISOString().slice(0, 10);
+  $("#cash-concept").value = "";
+  $("#cash-provider").value = "";
+  $("#cash-category").value = "Gasto oficina";
+  $("#cash-amount").value = "";
+  $("#cash-method").value = "Efectivo";
+  $("#cash-source").value = "";
+  $("#cash-paid-by").value = "";
+  $("#cash-receipt").value = "";
+  $("#cash-recovered").checked = false;
+  $("#cash-notes").value = "";
+  setCashMessage("");
+}
+
+function renderCajaDiaria() {
+  if (!$("#cash-body")) return;
+  const caja = state.caja || {};
+  const items = caja.items || [];
+  $("#cash-total-today").textContent = moneyValue(caja.totalHoy);
+  $("#cash-total-month").textContent = moneyValue(caja.totalMes);
+  $("#cash-pending-recover").textContent = moneyValue(caja.pendienteRecuperar);
+  $("#cash-total-all").textContent = moneyValue(caja.total);
+  $("#cash-body").innerHTML = items.length
+    ? items.map((item) => `
+        <tr class="${item.recuperado ? "cash-recovered-row" : ""}">
+          <td>${escapeHtml(item.fecha || "-")}</td>
+          <td><strong>${escapeHtml(item.concepto || "-")}</strong>${item.proveedor ? `<small>${escapeHtml(item.proveedor)}</small>` : ""}</td>
+          <td>${escapeHtml(item.categoria || "-")}</td>
+          <td class="amount negative">${moneyValue(item.importe)}</td>
+          <td>${escapeHtml(item.origenEfectivo || "-")}</td>
+          <td>${escapeHtml(item.pagadoPor || "-")}</td>
+          <td>${item.recuperado ? "Recuperado" : "Pendiente"}</td>
+          <td>
+            ${state.usuario?.rol === "CONSULTA" ? "-" : `<button type="button" class="small-button" data-cash-edit="${escapeHtml(item.id)}">Editar</button>
+            <button type="button" class="small-button danger-button" data-cash-delete="${escapeHtml(item.id)}">Eliminar</button>`}
+          </td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="8">Sin movimientos de caja cargados.</td></tr>`;
+}
+
+function fillCashForm(item) {
+  $("#cash-id").value = item.id || "";
+  $("#cash-date").value = dateToInput(item.fecha);
+  $("#cash-concept").value = item.concepto || "";
+  $("#cash-provider").value = item.proveedor || "";
+  $("#cash-category").value = item.categoria || "Gasto oficina";
+  $("#cash-amount").value = moneyValue(item.importe);
+  $("#cash-method").value = item.medio || "Efectivo";
+  $("#cash-source").value = item.origenEfectivo || "";
+  $("#cash-paid-by").value = item.pagadoPor || "";
+  $("#cash-receipt").value = item.comprobante || "";
+  $("#cash-recovered").checked = Boolean(item.recuperado);
+  $("#cash-notes").value = item.observacion || "";
+  setCashMessage("Movimiento listo para editar.", "ok");
+}
+
+async function saveCashMovement(event) {
+  event.preventDefault();
+  setCashMessage("Guardando movimiento...");
+  const payload = {
+    id: $("#cash-id").value,
+    fecha: $("#cash-date").value,
+    concepto: $("#cash-concept").value,
+    proveedor: $("#cash-provider").value,
+    categoria: $("#cash-category").value,
+    importe: parseMoneyInput($("#cash-amount").value),
+    medio: $("#cash-method").value,
+    origenEfectivo: $("#cash-source").value,
+    pagadoPor: $("#cash-paid-by").value,
+    comprobante: $("#cash-receipt").value,
+    recuperado: $("#cash-recovered").checked,
+    observacion: $("#cash-notes").value
+  };
+  try {
+    const path = payload.id ? `/api/caja-diaria/${encodeURIComponent(payload.id)}` : "/api/caja-diaria";
+    await fetchJson(path, { method: payload.id ? "PUT" : "POST", body: JSON.stringify(payload) });
+    setCashMessage("Movimiento de caja guardado.", "ok");
+    resetCashForm();
+    await reloadAppData();
+    setView("caja");
+  } catch (error) {
+    setCashMessage(error.message, "error");
+  }
+}
+
+async function deleteCashMovement(id) {
+  if (!window.confirm("Se eliminara este movimiento de caja. ¿Continuar?")) return;
+  await fetchJson(`/api/caja-diaria/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await reloadAppData();
+  setView("caja");
+}
+
+function printCashReport() {
+  const caja = state.caja || {};
+  const rows = caja.items || [];
+  const popup = window.open("", "_blank", "width=1000,height=800");
+  if (!popup) return;
+  popup.document.write(`<!doctype html><html><head><title>Caja diaria</title><style>
+    body{font-family:Arial,sans-serif;margin:12mm;color:#173632}
+    header{border-bottom:2px solid #173632;padding-bottom:8px;margin-bottom:12px}
+    h1{font-size:20px;margin:0} p{margin:4px 0}.summary{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+    .summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}
+    table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700}.pending{color:#9b1c1c;font-weight:700}
+    button{margin-top:16px;padding:8px 12px}@media print{@page{size:A4 landscape;margin:8mm}button{display:none}body{margin:0}}
+  </style></head><body>
+    <header><h1>Gonzalo Espinosa Hacienda y Liquidaciones</h1><p>Caja diaria - gastos internos de oficina</p></header>
+    <div class="summary">
+      <div><span>Hoy</span><strong>${moneyValue(caja.totalHoy)}</strong></div>
+      <div><span>Mes actual</span><strong>${moneyValue(caja.totalMes)}</strong></div>
+      <div><span>Pendiente recuperar</span><strong>${moneyValue(caja.pendienteRecuperar)}</strong></div>
+      <div><span>Total registrado</span><strong>${moneyValue(caja.total)}</strong></div>
+    </div>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoria</th><th>Importe</th><th>Salio de</th><th>Pagado por</th><th>Comprobante</th><th>Estado</th><th>Observacion</th></tr></thead><tbody>
+      ${rows.map((item) => `<tr><td>${escapeHtml(item.fecha || "-")}</td><td>${escapeHtml(item.concepto || "-")}${item.proveedor ? `<br>${escapeHtml(item.proveedor)}` : ""}</td><td>${escapeHtml(item.categoria || "-")}</td><td class="amount">${moneyValue(item.importe)}</td><td>${escapeHtml(item.origenEfectivo || "-")}</td><td>${escapeHtml(item.pagadoPor || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td class="${item.recuperado ? "" : "pending"}">${item.recuperado ? "Recuperado" : "Pendiente"}</td><td>${escapeHtml(item.observacion || "-")}</td></tr>`).join("")}
+    </tbody></table>
+    <button onclick="window.print()">Imprimir / guardar PDF</button>
+  </body></html>`);
+  popup.document.close();
 }
 
 function renderMetrics() {
@@ -3817,6 +3954,20 @@ async function init() {
   $("#cc-print-due-report").addEventListener("click", printCurrentAccountDueReport);
   $("#dashboard-print-next7").addEventListener("click", () => printCurrentAccountDueReport({ range: "NEXT_7", all: true }));
   $("#dashboard-print-next-week").addEventListener("click", () => printCurrentAccountDueReport({ range: "NEXT_WEEK", all: true }));
+  $("#cash-form").addEventListener("submit", saveCashMovement);
+  $("#cash-clear").addEventListener("click", resetCashForm);
+  $("#cash-print").addEventListener("click", printCashReport);
+  $("#cash-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
+  $("#cash-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
+  $("#cash-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-cash-edit]");
+    const deleteButton = event.target.closest("[data-cash-delete]");
+    if (editButton) {
+      const item = (state.caja.items || []).find((row) => row.id === editButton.dataset.cashEdit);
+      if (item) fillCashForm(item);
+    }
+    if (deleteButton) deleteCashMovement(deleteButton.dataset.cashDelete);
+  });
   $("#cc-open-external").addEventListener("click", () => openCurrentAccountPanel("#cc-external-panel"));
   $("#cc-close-external").addEventListener("click", () => {
     state.editingExternalMovementId = "";
@@ -4079,6 +4230,7 @@ async function init() {
   $("#commissionist-from").value = today.slice(0, 8) + "01";
   $("#commissionist-to").value = today;
   $("#commissionist-due").value = today;
+  resetCashForm();
   syncOperationType();
   setOperationModeNew();
   showOperationWorkspace();

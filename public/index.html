@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20260617-reporte-saldo-pendiente">
+    <link rel="stylesheet" href="/styles.css?v=20260618-caja-diaria">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -41,6 +41,7 @@
         <button data-view="clientes">Clientes</button>
         <button data-view="operaciones">Operaciones</button>
         <button data-view="cuenta">Cuenta corriente</button>
+        <button data-view="caja">Caja diaria</button>
         <button data-view="comisionistas">Comisionistas</button>
       </nav>
     </aside>
@@ -1218,6 +1219,103 @@
         </div>
       </section>
 
+      <section id="caja" class="view">
+        <div class="metrics">
+          <article>
+            <span>Hoy</span>
+            <strong id="cash-total-today">$ 0,00</strong>
+          </article>
+          <article>
+            <span>Mes actual</span>
+            <strong id="cash-total-month">$ 0,00</strong>
+          </article>
+          <article>
+            <span>Pendiente de recuperar</span>
+            <strong id="cash-pending-recover">$ 0,00</strong>
+          </article>
+          <article>
+            <span>Total registrado</span>
+            <strong id="cash-total-all">$ 0,00</strong>
+          </article>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Movimiento de caja</h2>
+              <p class="subtle">Registro interno de gastos de oficina. No impacta cuenta corriente de clientes.</p>
+            </div>
+            <button type="button" class="ghost-button" id="cash-clear">Nuevo gasto</button>
+          </div>
+          <form id="cash-form">
+            <input type="hidden" id="cash-id">
+            <div class="form-grid">
+              <label>Fecha<input id="cash-date" type="date" required></label>
+              <label>Concepto<input id="cash-concept" placeholder="Ej.: Libreria, combustible, sellado" required></label>
+              <label>Proveedor / destino<input id="cash-provider" placeholder="Opcional"></label>
+              <label>Categoria
+                <select id="cash-category">
+                  <option>Gasto oficina</option>
+                  <option>Libreria</option>
+                  <option>Combustible</option>
+                  <option>Comida / viaticos</option>
+                  <option>Correo / cadeteria</option>
+                  <option>Impuestos / sellados</option>
+                  <option>Servicios</option>
+                  <option>Otro</option>
+                </select>
+              </label>
+              <label>Importe<input id="cash-amount" inputmode="decimal" placeholder="$ 0,00" required></label>
+              <label>Medio
+                <select id="cash-method">
+                  <option>Efectivo</option>
+                  <option>Transferencia</option>
+                  <option>Tarjeta</option>
+                  <option>E-cheq</option>
+                  <option>Otro</option>
+                </select>
+              </label>
+              <label>Salio de<input id="cash-source" placeholder="Ej.: Gonzalo, caja oficina, cuenta bancaria"></label>
+              <label>Pagado por<input id="cash-paid-by" placeholder="Quien adelanto el dinero"></label>
+              <label>Comprobante<input id="cash-receipt" placeholder="Ticket / factura / referencia"></label>
+              <label class="checkbox-line"><input id="cash-recovered" type="checkbox"> Recuperado / rendido</label>
+            </div>
+            <label>Observaciones<textarea id="cash-notes" rows="2" placeholder="Detalle interno"></textarea></label>
+            <div class="form-actions">
+              <button type="submit" class="primary-button">Guardar movimiento</button>
+              <p class="form-message" id="cash-message"></p>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Detalle de caja</h2>
+              <p class="subtle">Gastos internos registrados, separados de clientes y operaciones.</p>
+            </div>
+            <button type="button" class="ghost-button" id="cash-print">Imprimir / PDF</button>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Concepto</th>
+                  <th>Categoria</th>
+                  <th>Importe</th>
+                  <th>Salio de</th>
+                  <th>Pagado por</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="cash-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section id="comisionistas" class="view">
         <div class="panel">
           <div class="panel-head">
@@ -1267,6 +1365,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260617-reporte-saldo-pendiente"></script>
+    <script src="/app.js?v=20260618-caja-diaria"></script>
   </body>
 </html>
