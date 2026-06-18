@@ -1173,7 +1173,8 @@ class BackupDataSource {
       categories: asArray(backup.categories),
       tabRules: asArray(backup.tabRules),
       currentAccountPayments: asArray(backup.currentAccountPayments),
-      currentAccountManualMovements: asArray(backup.currentAccountManualMovements)
+      currentAccountManualMovements: asArray(backup.currentAccountManualMovements),
+      cajaDiaria: asArray(backup.cajaDiaria)
     });
   }
 
@@ -1892,6 +1893,100 @@ class BackupDataSource {
     };
   }
 
+  async getCajaDiaria() {
+    const data = this.readData();
+    const items = asArray(data.cajaDiaria)
+      .map((item) => ({
+        id: item.id,
+        fecha: item.fecha,
+        concepto: item.concepto,
+        proveedor: item.proveedor || "",
+        categoria: item.categoria || "Gasto oficina",
+        importe: parseMoney(item.importe),
+        medio: item.medio || "Efectivo",
+        origenEfectivo: item.origenEfectivo || "",
+        pagadoPor: item.pagadoPor || "",
+        comprobante: item.comprobante || "",
+        recuperado: Boolean(item.recuperado),
+        observacion: item.observacion || "",
+        creadoEn: item.creadoEn || "",
+        actualizadoEn: item.actualizadoEn || ""
+      }))
+      .filter((item) => item.id)
+      .sort((a, b) => {
+        const dateA = parseDateLoose(a.fecha)?.getTime() || 0;
+        const dateB = parseDateLoose(b.fecha)?.getTime() || 0;
+        return dateB - dateA;
+      });
+    const today = formatDateLocal(new Date());
+    const monthKey = today.slice(3);
+    const total = items.reduce((sum, item) => sum + parseMoney(item.importe), 0);
+    const totalHoy = items
+      .filter((item) => item.fecha === today)
+      .reduce((sum, item) => sum + parseMoney(item.importe), 0);
+    const totalMes = items
+      .filter((item) => String(item.fecha || "").slice(3) === monthKey)
+      .reduce((sum, item) => sum + parseMoney(item.importe), 0);
+    const pendienteRecuperar = items
+      .filter((item) => !item.recuperado)
+      .reduce((sum, item) => sum + parseMoney(item.importe), 0);
+    return { items, total, totalHoy, totalMes, pendienteRecuperar };
+  }
+
+  async saveCajaDiaria(input) {
+    const data = this.readData();
+    const items = asArray(data.cajaDiaria);
+    const id = normalizeText(input.id) || `CAJA-${Date.now()}`;
+    const concepto = normalizeText(input.concepto);
+    const importe = Math.abs(parseMoney(input.importe));
+    if (!concepto || !importe) {
+      const error = new Error("Falta cargar concepto e importe de caja.");
+      error.statusCode = 400;
+      throw error;
+    }
+    const now = new Date().toISOString();
+    const index = items.findIndex((item) => String(item.id) === String(id));
+    const saved = {
+      id,
+      fecha: input.fecha ? formatDateForDisplay(input.fecha) : formatDateLocal(new Date()),
+      concepto,
+      proveedor: normalizeText(input.proveedor),
+      categoria: normalizeText(input.categoria) || "Gasto oficina",
+      importe,
+      medio: normalizeText(input.medio) || "Efectivo",
+      origenEfectivo: normalizeText(input.origenEfectivo),
+      pagadoPor: normalizeText(input.pagadoPor),
+      comprobante: normalizeText(input.comprobante),
+      recuperado: Boolean(input.recuperado),
+      observacion: normalizeText(input.observacion),
+      creadoEn: index >= 0 ? items[index].creadoEn || now : now,
+      actualizadoEn: now
+    };
+    if (index >= 0) {
+      items[index] = { ...items[index], ...saved };
+    } else {
+      items.push(saved);
+    }
+    data.cajaDiaria = items;
+    this.saveData(data);
+    return saved;
+  }
+
+  async deleteCajaDiaria(itemId) {
+    const data = this.readData();
+    const items = asArray(data.cajaDiaria);
+    const id = normalizeText(itemId);
+    const next = items.filter((item) => String(item.id) !== id);
+    if (next.length === items.length) {
+      const error = new Error("No se encontro el movimiento de caja.");
+      error.statusCode = 404;
+      throw error;
+    }
+    data.cajaDiaria = next;
+    this.saveData(data);
+    return { id };
+  }
+
   async saveMovimientoExterno(input) {
     const data = this.readData();
     const baseId = `EXT-${Date.now()}`;
@@ -2172,6 +2267,9 @@ class PostgresJsonDataSource extends BackupDataSource {
   async saveLiquidacion(operationId, input) { return this.withRemoteData(() => super.saveLiquidacion(operationId, input), true); }
   async getOperaciones() { return this.withRemoteData(() => super.getOperaciones()); }
   async getCuentaCorrienteResumen() { return this.withRemoteData(() => super.getCuentaCorrienteResumen()); }
+  async getCajaDiaria() { return this.withRemoteData(() => super.getCajaDiaria()); }
+  async saveCajaDiaria(input) { return this.withRemoteData(() => super.saveCajaDiaria(input), true); }
+  async deleteCajaDiaria(itemId) { return this.withRemoteData(() => super.deleteCajaDiaria(itemId), true); }
   async saveMovimientoExterno(input) { return this.withRemoteData(() => super.saveMovimientoExterno(input), true); }
   async updateMovimientoExterno(movementId, input) { return this.withRemoteData(() => super.updateMovimientoExterno(movementId, input), true); }
   async deleteMovimientoExterno(movementId) { return this.withRemoteData(() => super.deleteMovimientoExterno(movementId), true); }

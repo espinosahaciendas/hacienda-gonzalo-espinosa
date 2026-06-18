@@ -118,7 +118,8 @@ async function handleApi(req, res) {
         "/api/operaciones",
         "/api/categorias",
         "/api/tabs",
-        "/api/cuenta-corriente/resumen"
+        "/api/cuenta-corriente/resumen",
+        "/api/caja-diaria"
       ]
     });
     return;
@@ -340,6 +341,31 @@ async function handleApi(req, res) {
   if (parsed.pathname === "/api/cuenta-corriente/resumen") {
     sendJson(res, 200, await dataSource.getCuentaCorrienteResumen());
     return;
+  }
+
+  if (parsed.pathname === "/api/caja-diaria") {
+    if (req.method === "GET") {
+      sendJson(res, 200, await dataSource.getCajaDiaria());
+      return;
+    }
+    if (req.method === "POST") {
+      const body = await readBody(req);
+      sendJson(res, 200, { item: await dataSource.saveCajaDiaria(body) });
+      return;
+    }
+  }
+
+  const cajaDiariaMatch = parsed.pathname.match(/^\/api\/caja-diaria\/([^/]+)$/);
+  if (cajaDiariaMatch) {
+    if (req.method === "PUT") {
+      const body = await readBody(req);
+      sendJson(res, 200, { item: await dataSource.saveCajaDiaria({ ...body, id: decodeURIComponent(cajaDiariaMatch[1]) }) });
+      return;
+    }
+    if (req.method === "DELETE") {
+      sendJson(res, 200, { item: await dataSource.deleteCajaDiaria(decodeURIComponent(cajaDiariaMatch[1])) });
+      return;
+    }
   }
 
   if (parsed.pathname === "/api/cuenta-corriente/movimientos-externos" && req.method === "POST") {
