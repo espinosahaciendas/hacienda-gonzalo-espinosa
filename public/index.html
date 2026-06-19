@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20260618-caja-diaria">
+    <link rel="stylesheet" href="/styles.css?v=20260619-tablero-pendientes-vencidos">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -161,6 +161,35 @@
                 <tbody id="dashboard-due-week-body"></tbody>
               </table>
             </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Pendientes vencidos</h2>
+              <p class="subtle">Movimientos con vencimiento anterior a hoy y saldo abierto. Sirve para controlar pagos sin imputar, cobros vencidos o reclamos pendientes.</p>
+            </div>
+            <span class="subtle" id="dashboard-pending-count">-</span>
+          </div>
+          <div class="cc-grid dashboard-pending-kpis">
+            <div><span>Vencido a cobrar</span><strong id="dashboard-pending-positive">$ 0,00</strong></div>
+            <div><span>Vencido a pagar</span><strong id="dashboard-pending-negative">$ 0,00</strong></div>
+            <div><span>Neto vencido</span><strong id="dashboard-pending-net">$ 0,00</strong></div>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Vto.</th>
+                  <th>Cliente</th>
+                  <th>Concepto</th>
+                  <th>Comprobante</th>
+                  <th>Pendiente</th>
+                </tr>
+              </thead>
+              <tbody id="dashboard-pending-body"></tbody>
+            </table>
           </div>
         </div>
 
@@ -1365,6 +1394,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260618-caja-diaria"></script>
+    <script src="/app.js?v=20260619-tablero-pendientes-vencidos"></script>
   </body>
 </html>

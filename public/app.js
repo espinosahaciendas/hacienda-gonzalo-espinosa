@@ -20,7 +20,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260618-caja-diaria";
+const APP_BUILD = "20260619-tablero-pendientes-vencidos";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -458,7 +458,49 @@ function renderDashboardDueLists() {
   $("#dashboard-due-week-body").innerHTML = week.length
     ? week.slice(0, 10).map((movement) => dashboardDueRow(movement, "week")).join("")
     : `<tr><td colspan="3">Sin vencimientos esta semana.</td></tr>`;
+  renderDashboardPendingList();
   renderMobileSummary();
+}
+
+function renderDashboardPendingList() {
+  if (!state.cuenta || !$("#dashboard-pending-body")) return;
+  const today = dateOnly(new Date()).getTime();
+  const pending = (state.cuenta.movimientos || [])
+    .filter((movement) => !movement.paymentId)
+    .filter((movement) => !["IMPUTADO", "ANULADO"].includes(String(movement.estado || "").toUpperCase()))
+    .map((movement) => ({ ...movement, pendienteFirmado: signedPendingAmount(movement), dueDate: parseDisplayDate(movement.vencimiento) }))
+    .filter((movement) => movement.dueDate && dateOnly(movement.dueDate).getTime() < today)
+    .filter((movement) => Math.abs(movement.pendienteFirmado) > 0.01)
+    .sort((a, b) => {
+      const dateA = a.dueDate?.getTime() || Number.MAX_SAFE_INTEGER;
+      const dateB = b.dueDate?.getTime() || Number.MAX_SAFE_INTEGER;
+      return dateA - dateB || Math.abs(b.pendienteFirmado) - Math.abs(a.pendienteFirmado);
+    });
+  const positive = pending
+    .filter((movement) => movement.pendienteFirmado > 0)
+    .reduce((sum, movement) => sum + movement.pendienteFirmado, 0);
+  const negative = pending
+    .filter((movement) => movement.pendienteFirmado < 0)
+    .reduce((sum, movement) => sum + movement.pendienteFirmado, 0);
+  const net = positive + negative;
+  $("#dashboard-pending-count").textContent = `${pending.length} vencido/s`;
+  $("#dashboard-pending-positive").textContent = moneyValue(positive);
+  $("#dashboard-pending-positive").className = amountClass(positive);
+  $("#dashboard-pending-negative").textContent = moneyValue(negative);
+  $("#dashboard-pending-negative").className = amountClass(negative);
+  $("#dashboard-pending-net").textContent = moneyValue(net);
+  $("#dashboard-pending-net").className = amountClass(net);
+  $("#dashboard-pending-body").innerHTML = pending.length
+    ? pending.slice(0, 12).map((movement) => `
+        <tr class="${isCashMovement(movement) ? "movement-cash" : ""}">
+          <td>${escapeHtml(movement.vencimiento || "-")}</td>
+          <td>${escapeHtml(movement.cliente || "-")}</td>
+          <td>${escapeHtml(currentAccountDueDetailText(movement))}</td>
+          <td>${escapeHtml(movement.comprobante || "-")}</td>
+          <td class="${amountClass(movement.pendienteFirmado)}">${moneyValue(movement.pendienteFirmado)}</td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="5">Sin pendientes vencidos.</td></tr>`;
 }
 
 function signedPendingAmount(movement) {
