@@ -8,6 +8,7 @@ const PORT = Number(process.env.PORT || 4100);
 const AUTH_REQUIRED = process.env.AUTH_REQUIRED === "1";
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
+const LOCAL_DOCUMENTS_DIR = path.join(ROOT, "data", "documentos");
 const dataSource = createDataSource();
 
 const MIME_TYPES = {
@@ -38,6 +39,15 @@ function sendJsonDownload(res, filename, payload) {
     "Content-Length": Buffer.byteLength(body)
   });
   res.end(body);
+}
+
+function sendBinaryDownload(res, filename, mimeType, content) {
+  res.writeHead(200, {
+    "Content-Type": mimeType || "application/octet-stream",
+    "Content-Disposition": `inline; filename="${String(filename || "documento.pdf").replace(/"/g, "")}"`,
+    "Content-Length": Buffer.byteLength(content)
+  });
+  res.end(content);
 }
 
 function parseCookies(req) {
@@ -77,6 +87,155 @@ function readBody(req) {
     });
     req.on("error", reject);
   });
+}
+
+function readRawBody(req, limit = 25_000_000) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let length = 0;
+    req.on("data", (chunk) => {
+      length += chunk.length;
+      if (length > limit) {
+        reject(new Error("El archivo es demasiado grande. Maximo permitido: 25 MB."));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+function splitBuffer(buffer, delimiter) {
+  const parts = [];
+  let start = 0;
+  let index = buffer.indexOf(delimiter, start);
+  while (index >= 0) {
+    parts.push(buffer.slice(start, index));
+    start = index + delimiter.length;
+    index = buffer.indexOf(delimiter, start);
+  }
+  parts.push(buffer.slice(start));
+  return parts;
+}
+
+async function parseMultipartForm(req) {
+  const contentType = req.headers["content-type"] || "";
+  const match = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  if (!match) {
+    const error = new Error("Formato de carga invalido.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const boundary = Buffer.from(`--${match[1] || match[2]}`);
+  const raw = await readRawBody(req);
+  const fields = {};
+  const files = {};
+  splitBuffer(raw, boundary).forEach((part) => {
+    let chunk = part;
+    if (chunk.slice(0, 2).toString() === "\r\n") chunk = chunk.slice(2);
+    if (!chunk.length || chunk.toString("utf8", 0, 2) === "--") return;
+    const headerEnd = chunk.indexOf(Buffer.from("\r\n\r\n"));
+    if (headerEnd < 0) return;
+    const headerText = chunk.slice(0, headerEnd).toString("utf8");
+    let content = chunk.slice(headerEnd + 4);
+    if (content.slice(-2).toString() === "\r\n") content = content.slice(0, -2);
+    const name = (headerText.match(/name="([^"]+)"/) || [])[1];
+    if (!name) return;
+    const filename = (headerText.match(/filename="([^"]*)"/) || [])[1];
+    const type = (headerText.match(/Content-Type:\s*([^\r\n]+)/i) || [])[1] || "application/octet-stream";
+    if (filename !== undefined && filename !== "") {
+      files[name] = { filename, mimeType: type.trim(), content };
+    } else {
+      fields[name] = content.toString("utf8");
+    }
+  });
+  return { fields, files };
+}
+
+function storageConfig() {
+  return {
+    provider: process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY ? "SUPABASE" : "LOCAL",
+    url: String(process.env.SUPABASE_URL || "").replace(/\/$/, ""),
+    key: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+    bucket: process.env.SUPABASE_STORAGE_BUCKET || "comprobantes"
+  };
+}
+
+function storagePathEncode(value) {
+  return String(value || "").split("/").map(encodeURIComponent).join("/");
+}
+
+function safeFileName(value) {
+  return String(value || "documento.pdf")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120) || "documento.pdf";
+}
+
+function documentStoragePath(fields, id, filename) {
+  const year = new Date().getFullYear();
+  const entityType = safeFileName(fields.entidadTipo || "general").toLowerCase();
+  const entityId = safeFileName(fields.entidadId || fields.operacion || fields.movimientoId || "sin-referencia");
+  return `${year}/${entityType}/${entityId}/${id}-${safeFileName(filename)}`;
+}
+
+async function uploadDocumentFile(storagePath, file) {
+  const config = storageConfig();
+  if (config.provider === "SUPABASE") {
+    const response = await fetch(`${config.url}/storage/v1/object/${config.bucket}/${storagePathEncode(storagePath)}`, {
+      method: "POST",
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+        "Content-Type": file.mimeType || "application/pdf",
+        "x-upsert": "false"
+      },
+      body: file.content
+    });
+    if (!response.ok) throw new Error(`No se pudo subir el PDF a Supabase Storage: ${await response.text()}`);
+    return { provider: config.provider, bucket: config.bucket, path: storagePath };
+  }
+  const localPath = path.join(LOCAL_DOCUMENTS_DIR, storagePath);
+  fs.mkdirSync(path.dirname(localPath), { recursive: true });
+  fs.writeFileSync(localPath, file.content);
+  return { provider: config.provider, bucket: "local", path: storagePath };
+}
+
+async function downloadDocumentFile(documento) {
+  if (documento.storageProvider === "SUPABASE") {
+    const config = storageConfig();
+    const response = await fetch(`${config.url}/storage/v1/object/${documento.storageBucket}/${storagePathEncode(documento.storagePath)}`, {
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`
+      }
+    });
+    if (!response.ok) throw new Error(`No se pudo leer el PDF original: ${await response.text()}`);
+    return Buffer.from(await response.arrayBuffer());
+  }
+  return fs.readFileSync(path.join(LOCAL_DOCUMENTS_DIR, documento.storagePath));
+}
+
+async function deleteDocumentFile(documento) {
+  if (!documento) return;
+  if (documento.storageProvider === "SUPABASE") {
+    const config = storageConfig();
+    await fetch(`${config.url}/storage/v1/object/${documento.storageBucket}`, {
+      method: "DELETE",
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ prefixes: [documento.storagePath] })
+    });
+    return;
+  }
+  fs.rmSync(path.join(LOCAL_DOCUMENTS_DIR, documento.storagePath), { force: true });
 }
 
 function sendStatic(req, res) {
@@ -119,7 +278,8 @@ async function handleApi(req, res) {
         "/api/categorias",
         "/api/tabs",
         "/api/cuenta-corriente/resumen",
-        "/api/caja-diaria"
+        "/api/caja-diaria",
+        "/api/documentos"
       ]
     });
     return;
@@ -366,6 +526,60 @@ async function handleApi(req, res) {
       sendJson(res, 200, { item: await dataSource.deleteCajaDiaria(decodeURIComponent(cajaDiariaMatch[1])) });
       return;
     }
+  }
+
+  if (parsed.pathname === "/api/documentos") {
+    if (req.method === "GET") {
+      sendJson(res, 200, { items: await dataSource.getDocumentos(parsed.query) });
+      return;
+    }
+    if (req.method === "POST") {
+      const { fields, files } = await parseMultipartForm(req);
+      const file = files.archivo;
+      if (!file || !file.content.length) {
+        sendJson(res, 400, { error: "Falta seleccionar un PDF." });
+        return;
+      }
+      if (file.mimeType !== "application/pdf" && !String(file.filename || "").toLowerCase().endsWith(".pdf")) {
+        sendJson(res, 400, { error: "Solo se admiten archivos PDF." });
+        return;
+      }
+      const id = `DOC-${Date.now()}`;
+      const storagePath = documentStoragePath(fields, id, file.filename);
+      const stored = await uploadDocumentFile(storagePath, file);
+      const item = await dataSource.saveDocumento({
+        id,
+        ...fields,
+        nombreOriginal: file.filename,
+        mimeType: file.mimeType,
+        bytes: file.content.length,
+        storageProvider: stored.provider,
+        storageBucket: stored.bucket,
+        storagePath: stored.path
+      });
+      sendJson(res, 200, { item });
+      return;
+    }
+  }
+
+  const documentoDownloadMatch = parsed.pathname.match(/^\/api\/documentos\/([^/]+)\/descargar$/);
+  if (documentoDownloadMatch && req.method === "GET") {
+    const documento = await dataSource.getDocumento(decodeURIComponent(documentoDownloadMatch[1]));
+    if (!documento) {
+      sendJson(res, 404, { error: "No se encontro el documento." });
+      return;
+    }
+    const content = await downloadDocumentFile(documento);
+    sendBinaryDownload(res, documento.nombreOriginal || `${documento.id}.pdf`, documento.mimeType || "application/pdf", content);
+    return;
+  }
+
+  const documentoMatch = parsed.pathname.match(/^\/api\/documentos\/([^/]+)$/);
+  if (documentoMatch && req.method === "DELETE") {
+    const documento = await dataSource.getDocumento(decodeURIComponent(documentoMatch[1]));
+    await deleteDocumentFile(documento);
+    sendJson(res, 200, { item: await dataSource.deleteDocumento(decodeURIComponent(documentoMatch[1])) });
+    return;
   }
 
   if (parsed.pathname === "/api/cuenta-corriente/movimientos-externos" && req.method === "POST") {

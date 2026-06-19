@@ -1174,7 +1174,8 @@ class BackupDataSource {
       tabRules: asArray(backup.tabRules),
       currentAccountPayments: asArray(backup.currentAccountPayments),
       currentAccountManualMovements: asArray(backup.currentAccountManualMovements),
-      cajaDiaria: asArray(backup.cajaDiaria)
+      cajaDiaria: asArray(backup.cajaDiaria),
+      documentos: asArray(backup.documentos)
     });
   }
 
@@ -1987,6 +1988,75 @@ class BackupDataSource {
     return { id };
   }
 
+  async getDocumentos(filters = {}) {
+    const data = this.readData();
+    const entidadTipo = normalizeText(filters.entidadTipo);
+    const entidadId = normalizeText(filters.entidadId);
+    const cliente = normalizeKey(filters.cliente);
+    const operacion = normalizeText(filters.operacion);
+    const movimientoId = normalizeText(filters.movimientoId);
+    return asArray(data.documentos)
+      .filter((item) => !entidadTipo || item.entidadTipo === entidadTipo)
+      .filter((item) => !entidadId || item.entidadId === entidadId)
+      .filter((item) => !cliente || normalizeKey(item.cliente) === cliente)
+      .filter((item) => !operacion || item.operacion === operacion)
+      .filter((item) => !movimientoId || item.movimientoId === movimientoId)
+      .sort((a, b) => String(b.creadoEn || "").localeCompare(String(a.creadoEn || "")));
+  }
+
+  async getDocumento(documentId) {
+    const data = this.readData();
+    return asArray(data.documentos).find((item) => String(item.id) === String(documentId)) || null;
+  }
+
+  async saveDocumento(input) {
+    const data = this.readData();
+    const documentos = asArray(data.documentos);
+    const id = normalizeText(input.id) || `DOC-${Date.now()}`;
+    const now = new Date().toISOString();
+    const saved = {
+      id,
+      entidadTipo: normalizeText(input.entidadTipo || "GENERAL"),
+      entidadId: normalizeText(input.entidadId || ""),
+      cliente: normalizeText(input.cliente),
+      operacion: normalizeText(input.operacion),
+      movimientoId: normalizeText(input.movimientoId),
+      pagoId: normalizeText(input.pagoId),
+      tipo: normalizeText(input.tipo || "Comprobante"),
+      titulo: normalizeText(input.titulo || input.nombreOriginal || "Comprobante PDF"),
+      observacion: normalizeText(input.observacion),
+      nombreOriginal: normalizeText(input.nombreOriginal),
+      mimeType: normalizeText(input.mimeType || "application/pdf"),
+      bytes: Number(input.bytes || 0),
+      storageProvider: normalizeText(input.storageProvider),
+      storageBucket: normalizeText(input.storageBucket),
+      storagePath: normalizeText(input.storagePath),
+      creadoEn: now,
+      actualizadoEn: now
+    };
+    const index = documentos.findIndex((item) => String(item.id) === String(id));
+    if (index >= 0) documentos[index] = { ...documentos[index], ...saved, creadoEn: documentos[index].creadoEn || now };
+    else documentos.push(saved);
+    data.documentos = documentos;
+    this.saveData(data);
+    return saved;
+  }
+
+  async deleteDocumento(documentId) {
+    const data = this.readData();
+    const documentos = asArray(data.documentos);
+    const id = normalizeText(documentId);
+    const next = documentos.filter((item) => String(item.id) !== id);
+    if (next.length === documentos.length) {
+      const error = new Error("No se encontro el documento.");
+      error.statusCode = 404;
+      throw error;
+    }
+    data.documentos = next;
+    this.saveData(data);
+    return { id };
+  }
+
   async saveMovimientoExterno(input) {
     const data = this.readData();
     const baseId = `EXT-${Date.now()}`;
@@ -2270,6 +2340,10 @@ class PostgresJsonDataSource extends BackupDataSource {
   async getCajaDiaria() { return this.withRemoteData(() => super.getCajaDiaria()); }
   async saveCajaDiaria(input) { return this.withRemoteData(() => super.saveCajaDiaria(input), true); }
   async deleteCajaDiaria(itemId) { return this.withRemoteData(() => super.deleteCajaDiaria(itemId), true); }
+  async getDocumentos(filters) { return this.withRemoteData(() => super.getDocumentos(filters)); }
+  async getDocumento(documentId) { return this.withRemoteData(() => super.getDocumento(documentId)); }
+  async saveDocumento(input) { return this.withRemoteData(() => super.saveDocumento(input), true); }
+  async deleteDocumento(documentId) { return this.withRemoteData(() => super.deleteDocumento(documentId), true); }
   async saveMovimientoExterno(input) { return this.withRemoteData(() => super.saveMovimientoExterno(input), true); }
   async updateMovimientoExterno(movementId, input) { return this.withRemoteData(() => super.updateMovimientoExterno(movementId, input), true); }
   async deleteMovimientoExterno(movementId) { return this.withRemoteData(() => super.deleteMovimientoExterno(movementId), true); }
