@@ -1203,6 +1203,28 @@
             <div><span>Saldo</span><strong id="cc-selected-balance">$ 0,00</strong></div>
             <div><span>Movimientos</span><strong id="cc-selected-count">0</strong></div>
           </div>
+          <div class="cc-subpanel" id="cc-commission-summary-panel" hidden>
+            <div class="panel-head">
+              <div>
+                <h3>Comisiones pendientes para facturar</h3>
+                <p class="subtle">Separadas entre comision sobre facturado y comision sobre efectivo.</p>
+              </div>
+              <span class="subtle" id="cc-commission-summary-count">Sin comisiones pendientes</span>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Sobre facturado</th>
+                    <th>Sobre efectivo</th>
+                    <th>Total pendiente</th>
+                  </tr>
+                </thead>
+                <tbody id="cc-commission-summary-body"></tbody>
+              </table>
+            </div>
+          </div>
           <div class="table-wrap compact-table">
             <table>
               <thead>
@@ -1465,6 +1487,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260619-tablero-pendientes-vencidos"></script>
+    <script src="/app.js?v=20260619-comisiones-discriminadas"></script>
   </body>
 </html>

@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260619-archivo-documental";
+const APP_BUILD = "20260619-comisiones-discriminadas";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -782,6 +782,38 @@ function isCommissionPendingMovement(movement, viewMode = "CLIENTE") {
   return String(movement?.origen || "").toUpperCase() === "COMISION";
 }
 
+function commissionKind(movement) {
+  const text = normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.observacion || ""}`);
+  return text.includes("efectivo") ? "efectivo" : "facturado";
+}
+
+function commissionSplitSummary(movements, viewMode = "CLIENTE") {
+  const byClient = new Map();
+  (movements || []).forEach((movement) => {
+    const status = String(movement?.estado || "").toUpperCase();
+    if (movement?.paymentId || status === "IMPUTADO" || status === "ANULADO") return;
+    if (!isCommissionPendingMovement(movement, viewMode)) return;
+    const client = movement?.cliente || "Sin cliente";
+    const row = byClient.get(client) || { cliente: client, facturado: 0, efectivo: 0, total: 0 };
+    const amount = pendingSignedAmount(movement);
+    if (commissionKind(movement) === "efectivo") row.efectivo += amount;
+    else row.facturado += amount;
+    row.total += amount;
+    byClient.set(client, row);
+  });
+  return [...byClient.values()]
+    .filter((row) => Math.abs(row.total) > 0.01 || Math.abs(row.facturado) > 0.01 || Math.abs(row.efectivo) > 0.01)
+    .sort((a, b) => Math.abs(b.total) - Math.abs(a.total) || a.cliente.localeCompare(b.cliente));
+}
+
+function commissionSplitTotals(rows) {
+  return (rows || []).reduce((totals, row) => ({
+    facturado: totals.facturado + Number(row.facturado || 0),
+    efectivo: totals.efectivo + Number(row.efectivo || 0),
+    total: totals.total + Number(row.total || 0)
+  }), { facturado: 0, efectivo: 0, total: 0 });
+}
+
 function currentAccountConceptText(movement, viewMode) {
   if (viewMode !== "CONSIGNATARIA") return movement.concepto || "-";
   if (isConsigneeOwnCharge(movement)) {
@@ -918,6 +950,34 @@ function renderCuentaCorriente() {
   $("#cc-selected-balance").textContent = moneyValue(balance);
   $("#cc-selected-balance").className = amountClass(balance);
   $("#cc-selected-count").textContent = movements.length;
+  const commissionRows = commissionSplitSummary(movements, viewMode);
+  const commissionTotals = commissionSplitTotals(commissionRows);
+  const commissionPanel = $("#cc-commission-summary-panel");
+  if (commissionPanel) commissionPanel.hidden = !commissionRows.length;
+  if ($("#cc-commission-summary-count")) {
+    $("#cc-commission-summary-count").textContent = commissionRows.length
+      ? `${commissionRows.length} cliente/s - Total ${moneyValue(commissionTotals.total)}`
+      : "Sin comisiones pendientes";
+  }
+  if ($("#cc-commission-summary-body")) {
+    $("#cc-commission-summary-body").innerHTML = commissionRows.length
+      ? commissionRows.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.cliente)}</td>
+            <td class="${amountClass(row.facturado)}">${Math.abs(row.facturado) > 0.01 ? moneyValue(row.facturado) : "-"}</td>
+            <td class="${amountClass(row.efectivo)}">${Math.abs(row.efectivo) > 0.01 ? moneyValue(row.efectivo) : "-"}</td>
+            <td class="${amountClass(row.total)}">${moneyValue(row.total)}</td>
+          </tr>
+        `).join("") + `
+          <tr>
+            <th>Total</th>
+            <th class="${amountClass(commissionTotals.facturado)}">${moneyValue(commissionTotals.facturado)}</th>
+            <th class="${amountClass(commissionTotals.efectivo)}">${moneyValue(commissionTotals.efectivo)}</th>
+            <th class="${amountClass(commissionTotals.total)}">${moneyValue(commissionTotals.total)}</th>
+          </tr>
+        `
+      : `<tr><td colspan="4">Sin comisiones pendientes para esta busqueda.</td></tr>`;
+  }
   $("#cc-due-title").textContent = viewMode === "CONSIGNATARIA" ? "Vencimientos de clientes y comisiones" : "Vencimientos pendientes";
   $("#cc-due-subtitle").textContent = viewMode === "CONSIGNATARIA"
     ? "Incluye vencimientos informativos entre la consignataria y tus clientes, y comisiones pendientes a cobrar."
@@ -1430,26 +1490,24 @@ function printCurrentAccountReport(forcedType = "") {
     .reduce((sum, movement) => sum + Number(movement.importeImputado || 0), 0);
   const imputationsByMovement = currentAccountImputationsByMovement();
   const balances = new Map();
-  const commissionBalances = new Map();
   rows.forEach((movement) => {
     if (!movement.paymentId) {
       balances.set(movement.cliente, (balances.get(movement.cliente) || 0) + pendingSignedAmount(movement));
     }
-    if (isCommissionPendingMovement(movement, filters.viewMode) && String(movement.estado || "").toUpperCase() !== "IMPUTADO") {
-      commissionBalances.set(movement.cliente, (commissionBalances.get(movement.cliente) || 0) + pendingSignedAmount(movement));
-    }
   });
-  const commissionTotal = [...commissionBalances.values()].reduce((sum, amount) => sum + Number(amount || 0), 0);
+  const commissionRows = commissionSplitSummary(rows, filters.viewMode);
+  const commissionTotals = commissionSplitTotals(commissionRows);
+  const commissionByClient = new Map(commissionRows.map((row) => [row.cliente, row]));
+  const commissionTotal = commissionTotals.total;
   const balanceRows = [...balances.entries()]
-    .map(([cliente, saldo]) => ({ cliente, saldo, comision: commissionBalances.get(cliente) || 0 }))
-    .filter((item) => Math.abs(item.saldo) > 0.01 || Math.abs(item.comision) > 0.01)
-    .sort((a, b) => Math.abs(b.comision || 0) - Math.abs(a.comision || 0) || Math.abs(b.saldo) - Math.abs(a.saldo));
-  const commissionRows = [...commissionBalances.entries()]
-    .map(([cliente, saldo]) => ({ cliente, saldo }))
-    .filter((item) => Math.abs(item.saldo) > 0.01)
-    .sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo));
-  const balancesTable = type === "SALDOS" ? `<h2>Saldo por cliente</h2><table class="compact"><thead><tr><th>Cliente</th><th>Saldo</th><th>Comision pendiente</th></tr></thead><tbody>${balanceRows.length ? balanceRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td><td class="amount ${item.comision < 0 ? "negative" : "positive"}">${Math.abs(item.comision) > 0.01 ? moneyValue(item.comision) : "-"}</td></tr>`).join("") : `<tr><td colspan="3">Sin saldos para los filtros aplicados.</td></tr>`}</tbody></table>` : "";
-  const commissionsTable = commissionRows.length ? `<h2>Comisiones pendientes</h2><table class="compact"><thead><tr><th>Cliente / productor</th><th>Comision pendiente</th></tr></thead><tbody>${commissionRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td></tr>`).join("")}<tr><th>Total comisiones</th><td class="amount ${commissionTotal < 0 ? "negative" : "positive"}">${moneyValue(commissionTotal)}</td></tr></tbody></table>` : "";
+    .map(([cliente, saldo]) => {
+      const commission = commissionByClient.get(cliente) || { facturado: 0, efectivo: 0, total: 0 };
+      return { cliente, saldo, ...commission };
+    })
+    .filter((item) => Math.abs(item.saldo) > 0.01 || Math.abs(item.total) > 0.01)
+    .sort((a, b) => Math.abs(b.total || 0) - Math.abs(a.total || 0) || Math.abs(b.saldo) - Math.abs(a.saldo));
+  const balancesTable = type === "SALDOS" ? `<h2>Saldo por cliente</h2><table class="compact"><thead><tr><th>Cliente</th><th>Saldo</th><th>Comision s/facturado</th><th>Comision s/efectivo</th><th>Total comision</th></tr></thead><tbody>${balanceRows.length ? balanceRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td><td class="amount ${item.facturado < 0 ? "negative" : "positive"}">${Math.abs(item.facturado) > 0.01 ? moneyValue(item.facturado) : "-"}</td><td class="amount ${item.efectivo < 0 ? "negative" : "positive"}">${Math.abs(item.efectivo) > 0.01 ? moneyValue(item.efectivo) : "-"}</td><td class="amount ${item.total < 0 ? "negative" : "positive"}">${Math.abs(item.total) > 0.01 ? moneyValue(item.total) : "-"}</td></tr>`).join("") : `<tr><td colspan="5">Sin saldos para los filtros aplicados.</td></tr>`}</tbody></table>` : "";
+  const commissionsTable = commissionRows.length ? `<h2>Comisiones pendientes</h2><table class="compact"><thead><tr><th>Cliente / productor</th><th>Sobre facturado</th><th>Sobre efectivo</th><th>Total pendiente</th></tr></thead><tbody>${commissionRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.facturado < 0 ? "negative" : "positive"}">${Math.abs(item.facturado) > 0.01 ? moneyValue(item.facturado) : "-"}</td><td class="amount ${item.efectivo < 0 ? "negative" : "positive"}">${Math.abs(item.efectivo) > 0.01 ? moneyValue(item.efectivo) : "-"}</td><td class="amount ${item.total < 0 ? "negative" : "positive"}">${moneyValue(item.total)}</td></tr>`).join("")}<tr><th>Total comisiones</th><th class="amount ${commissionTotals.facturado < 0 ? "negative" : "positive"}">${moneyValue(commissionTotals.facturado)}</th><th class="amount ${commissionTotals.efectivo < 0 ? "negative" : "positive"}">${moneyValue(commissionTotals.efectivo)}</th><th class="amount ${commissionTotal < 0 ? "negative" : "positive"}">${moneyValue(commissionTotal)}</th></tr></tbody></table>` : "";
 
   const filterLabel = $("#cc-client-search").value.trim() || (filters.viewMode === "COMISIONISTA" ? "Todos los comisionistas" : filters.viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos los clientes");
   const periodLabel = `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`;
