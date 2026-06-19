@@ -42,6 +42,7 @@
         <button data-view="operaciones">Operaciones</button>
         <button data-view="cuenta">Cuenta corriente</button>
         <button data-view="caja">Caja diaria</button>
+        <button data-view="archivo">Archivo documental</button>
         <button data-view="comisionistas">Comisionistas</button>
       </nav>
     </aside>
@@ -1340,6 +1341,76 @@
                 </tr>
               </thead>
               <tbody id="cash-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="archivo" class="view">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Archivo documental</h2>
+              <p class="subtle">PDF originales de liquidaciones, facturas, pagos y comprobantes. Los archivos quedan guardados en Storage y la base conserva la referencia.</p>
+            </div>
+          </div>
+          <form id="document-form">
+            <div class="form-grid">
+              <label>Relacionado con
+                <select id="document-entity-type">
+                  <option value="MOVIMIENTO">Movimiento cuenta corriente</option>
+                  <option value="OPERACION">Operacion</option>
+                  <option value="PAGO">Pago / cobro</option>
+                  <option value="CLIENTE">Cliente</option>
+                  <option value="GENERAL">General</option>
+                </select>
+              </label>
+              <label>Referencia / ID<input id="document-entity-id" placeholder="Operacion, movimiento, pago o referencia"></label>
+              <label>Cliente<input id="document-client" list="cc-client-list" autocomplete="off"></label>
+              <label>Tipo
+                <select id="document-type">
+                  <option>Liquidacion</option>
+                  <option>Factura</option>
+                  <option>Recibo / pago</option>
+                  <option>Transferencia</option>
+                  <option>E-cheq</option>
+                  <option>Nota de credito/debito</option>
+                  <option>Otro comprobante</option>
+                </select>
+              </label>
+              <label>Titulo<input id="document-title" placeholder="Ej.: Liquidacion comprador A-0004..."></label>
+              <label>PDF<input id="document-file" type="file" accept="application/pdf,.pdf"></label>
+            </div>
+            <label>Observaciones<textarea id="document-notes" rows="2" placeholder="Detalle interno"></textarea></label>
+            <div class="form-actions">
+              <button type="submit" class="primary-button">Adjuntar PDF</button>
+              <button type="button" class="ghost-button" id="document-clear">Limpiar</button>
+              <p class="form-message" id="document-message"></p>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Documentos cargados</h2>
+              <p class="subtle" id="document-summary">Sin documentos cargados.</p>
+            </div>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Cliente</th>
+                  <th>Tipo</th>
+                  <th>Titulo</th>
+                  <th>Referencia</th>
+                  <th>Archivo / ubicacion</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="document-body"></tbody>
             </table>
           </div>
         </div>

@@ -3,6 +3,7 @@ const state = {
   operaciones: [],
   cuenta: null,
   caja: { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 },
+  documentos: [],
   vista: "tablero",
   selectedClientId: "",
   showAllClients: false,
@@ -20,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260619-tablero-pendientes-vencidos";
+const APP_BUILD = "20260619-archivo-documental";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -108,6 +109,7 @@ function setView(view) {
     operaciones: "Operaciones",
     cuenta: "Cuenta corriente",
     caja: "Caja diaria",
+    archivo: "Archivo documental",
     comisionistas: "Comisionistas"
   };
   $("#view-title").textContent = titles[view] || "Sistema";
@@ -136,6 +138,7 @@ function applyUserRole(user) {
     "#download-backup",
     "#cash-form",
     "#cash-clear",
+    "#document-form",
     "#commissionist-load",
     "#commissionist-generate"
   ];
@@ -169,13 +172,14 @@ async function logout() {
 }
 
 async function reloadAppData() {
-  const [clientes, operaciones, cuenta, categorias, tabs, caja] = await Promise.all([
+  const [clientes, operaciones, cuenta, categorias, tabs, caja, documentos] = await Promise.all([
     fetchJson("/api/clientes"),
     fetchJson("/api/operaciones"),
     fetchJson("/api/cuenta-corriente/resumen"),
     fetchJson("/api/categorias"),
     fetchJson("/api/tabs"),
-    fetchJson("/api/caja-diaria")
+    fetchJson("/api/caja-diaria"),
+    fetchJson("/api/documentos")
   ]);
 
   state.clientes = clientes.items || [];
@@ -184,9 +188,11 @@ async function reloadAppData() {
   state.categorias = categorias.items || [];
   state.tabRules = tabs.items || [];
   state.caja = caja || { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 };
+  state.documentos = documentos.items || [];
 
   renderMetrics();
   renderCajaDiaria();
+  renderDocumentos();
   renderClientes();
   renderOperaciones();
   renderCategories();
@@ -200,6 +206,128 @@ async function reloadAppData() {
 
 function downloadBackup() {
   window.location.href = "/api/backup/download";
+}
+
+function setDocumentMessage(message, type = "") {
+  const node = $("#document-message");
+  if (!node) return;
+  node.textContent = message || "";
+  node.className = `form-message ${type}`.trim();
+}
+
+function resetDocumentForm() {
+  $("#document-entity-type").value = "MOVIMIENTO";
+  $("#document-entity-id").value = "";
+  $("#document-client").value = "";
+  $("#document-type").value = "Liquidacion";
+  $("#document-title").value = "";
+  $("#document-file").value = "";
+  $("#document-notes").value = "";
+  setDocumentMessage("");
+}
+
+function documentReferenceText(documento) {
+  const type = documento.entidadTipo || "GENERAL";
+  const id = documento.entidadId || documento.operacion || documento.movimientoId || documento.pagoId || "-";
+  return `${type}: ${id}`;
+}
+
+function relatedDocumentsForMovement(movement) {
+  const movementId = String(movement.id || "");
+  const operationId = String(movement.operacion || "");
+  const paymentId = String(movement.paymentId || "");
+  return (state.documentos || []).filter((documento) =>
+    (movementId && String(documento.movimientoId || documento.entidadId) === movementId)
+    || (operationId && String(documento.operacion || documento.entidadId) === operationId)
+    || (paymentId && String(documento.pagoId || documento.entidadId) === paymentId)
+  );
+}
+
+function documentActionButtons(movement) {
+  const docs = relatedDocumentsForMovement(movement);
+  const payload = encodeURIComponent(JSON.stringify({
+    id: movement.id || "",
+    cliente: movement.cliente || "",
+    operacion: movement.operacion || "",
+    pagoId: movement.paymentId || "",
+    comprobante: movement.comprobante || "",
+    concepto: movement.concepto || ""
+  }));
+  return ` <button type="button" class="small-button" data-document-attach="${payload}">Adjuntar PDF</button>${docs.length ? ` <button type="button" class="small-button" data-document-list="${payload}">PDFs (${docs.length})</button>` : ""}`;
+}
+
+function renderDocumentos() {
+  if (!$("#document-body")) return;
+  const docs = state.documentos || [];
+  $("#document-summary").textContent = docs.length ? `${docs.length} documento/s cargado/s.` : "Sin documentos cargados.";
+  $("#document-body").innerHTML = docs.length
+    ? docs.map((documento) => `
+        <tr>
+          <td>${escapeHtml(documento.creadoEn ? new Date(documento.creadoEn).toLocaleDateString("es-AR") : "-")}</td>
+          <td>${escapeHtml(documento.cliente || "-")}</td>
+          <td>${escapeHtml(documento.tipo || "-")}</td>
+          <td><strong>${escapeHtml(documento.titulo || "-")}</strong>${documento.observacion ? `<small>${escapeHtml(documento.observacion)}</small>` : ""}</td>
+          <td>${escapeHtml(documentReferenceText(documento))}</td>
+          <td>${escapeHtml(documento.nombreOriginal || "-")}<small>${escapeHtml(`${documento.storageProvider || "-"} / ${documento.storageBucket || "-"} / ${documento.storagePath || "-"}`)}</small></td>
+          <td><a class="small-button" href="/api/documentos/${encodeURIComponent(documento.id)}/descargar" target="_blank" rel="noopener">Ver PDF</a>${state.usuario?.rol === "CONSULTA" ? "" : ` <button type="button" class="small-button danger-button" data-document-delete="${escapeHtml(documento.id)}">Eliminar</button>`}</td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="7">Sin documentos cargados.</td></tr>`;
+}
+
+function fillDocumentFormFromMovement(movement) {
+  const isPayment = Boolean(movement.pagoId);
+  $("#document-entity-type").value = isPayment ? "PAGO" : movement.operacion ? "OPERACION" : "MOVIMIENTO";
+  $("#document-entity-id").value = isPayment ? movement.pagoId : movement.operacion || movement.id || "";
+  $("#document-client").value = movement.cliente || "";
+  $("#document-title").value = movement.comprobante ? `${movement.comprobante} - ${movement.cliente || ""}`.trim() : movement.concepto || "";
+  $("#document-type").value = isPayment ? "Recibo / pago" : "Liquidacion";
+  $("#document-notes").value = movement.concepto || "";
+  setView("archivo");
+  setDocumentMessage("Referencia cargada. Selecciona el PDF y guarda.", "ok");
+}
+
+async function saveDocument(event) {
+  event.preventDefault();
+  const file = $("#document-file").files[0];
+  if (!file) {
+    setDocumentMessage("Falta seleccionar un PDF.", "error");
+    return;
+  }
+  setDocumentMessage("Subiendo PDF...");
+  const entityType = $("#document-entity-type").value;
+  const entityId = $("#document-entity-id").value.trim();
+  const form = new FormData();
+  form.append("archivo", file);
+  form.append("entidadTipo", entityType);
+  form.append("entidadId", entityId);
+  form.append("cliente", $("#document-client").value);
+  form.append("tipo", $("#document-type").value);
+  form.append("titulo", $("#document-title").value || file.name);
+  form.append("observacion", $("#document-notes").value);
+  if (entityType === "OPERACION") form.append("operacion", entityId);
+  if (entityType === "MOVIMIENTO") form.append("movimientoId", entityId);
+  if (entityType === "PAGO") form.append("pagoId", entityId);
+  try {
+    const response = await fetch("/api/documentos", { method: "POST", body: form });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || "No se pudo subir el PDF.");
+    }
+    resetDocumentForm();
+    await reloadAppData();
+    setView("archivo");
+    setDocumentMessage("PDF adjuntado correctamente.", "ok");
+  } catch (error) {
+    setDocumentMessage(error.message, "error");
+  }
+}
+
+async function deleteDocument(documentId) {
+  if (!window.confirm("Se eliminara la referencia y el PDF original. ¿Continuar?")) return;
+  await fetchJson(`/api/documentos/${encodeURIComponent(documentId)}`, { method: "DELETE" });
+  await reloadAppData();
+  setView("archivo");
 }
 
 function setCashMessage(message, type = "") {
@@ -798,6 +926,11 @@ function renderCuentaCorriente() {
   $("#cc-movements-body").innerHTML = movements.length
     ? movements.slice(0, 200).map((movement) => {
         const detail = commissionistDetailFromObservation(movement.observacion);
+        const baseActions = movement.paymentId
+          ? `<button type="button" class="small-button" data-cc-payment-receipt="${escapeHtml(movement.paymentId)}">Ver comprobante</button>${movement.estado === "ANULADO" ? "" : ` <button type="button" class="small-button danger-button" data-cc-payment-cancel="${escapeHtml(movement.paymentId)}">Anular</button>`}`
+          : movement.operacion
+            ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>`
+            : externalMovementActions(movement);
         return `
         <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
           <td>${escapeHtml(movement.fecha || "-")}</td>
@@ -808,7 +941,7 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.operacion || "-")}</td>
           <td class="${amountClass(movement.importe)}">${moneyValue(Math.sign(movement.importe) * Number(movement.importePendiente ?? Math.abs(movement.importe)))}</td>
           <td>${escapeHtml(movement.estado || "-")}</td>
-          <td>${movement.paymentId ? `<button type="button" class="small-button" data-cc-payment-receipt="${escapeHtml(movement.paymentId)}">Ver comprobante</button>${movement.estado === "ANULADO" ? "" : ` <button type="button" class="small-button danger-button" data-cc-payment-cancel="${escapeHtml(movement.paymentId)}">Anular</button>`}` : movement.operacion ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>` : externalMovementActions(movement)}</td>
+          <td>${baseActions}${documentActionButtons(movement)}</td>
         </tr>
         ${detail ? `<tr class="cc-detail-row"><td colspan="9">${commissionistDetailHtml(detail)}</td></tr>` : ""}
       `;
@@ -4010,6 +4143,12 @@ async function init() {
     }
     if (deleteButton) deleteCashMovement(deleteButton.dataset.cashDelete);
   });
+  $("#document-form").addEventListener("submit", saveDocument);
+  $("#document-clear").addEventListener("click", resetDocumentForm);
+  $("#document-body").addEventListener("click", (event) => {
+    const deleteButton = event.target.closest("[data-document-delete]");
+    if (deleteButton) deleteDocument(deleteButton.dataset.documentDelete);
+  });
   $("#cc-open-external").addEventListener("click", () => openCurrentAccountPanel("#cc-external-panel"));
   $("#cc-close-external").addEventListener("click", () => {
     state.editingExternalMovementId = "";
@@ -4049,6 +4188,16 @@ async function init() {
     if (event.target.matches("[data-cc-counterparty-impute]")) refreshCounterpartyImputationSummary();
   });
   $("#cc-movements-body").addEventListener("click", async (event) => {
+    const attachDocumentButton = event.target.closest("[data-document-attach]");
+    if (attachDocumentButton) {
+      fillDocumentFormFromMovement(JSON.parse(decodeURIComponent(attachDocumentButton.dataset.documentAttach)));
+      return;
+    }
+    const listDocumentButton = event.target.closest("[data-document-list]");
+    if (listDocumentButton) {
+      fillDocumentFormFromMovement(JSON.parse(decodeURIComponent(listDocumentButton.dataset.documentList)));
+      return;
+    }
     const receiptButton = event.target.closest("[data-cc-payment-receipt]");
     if (receiptButton) {
       const payment = (state.cuenta.pagos || []).find((item) => item.id === receiptButton.dataset.ccPaymentReceipt);
