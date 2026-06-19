@@ -254,6 +254,59 @@
           </div>
           <p class="form-message" id="period-message"></p>
         </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Comisiones reales por periodo</h2>
+              <p class="subtle">Toma las comisiones cargadas en cuenta corriente, separadas por facturado y efectivo.</p>
+            </div>
+            <div class="form-actions">
+              <label>Desde<input id="real-commission-from" type="date"></label>
+              <label>Hasta<input id="real-commission-to" type="date"></label>
+              <label>Cliente<input id="real-commission-client" list="cc-client-list" autocomplete="off" placeholder="Todos"></label>
+              <label>Estado
+                <select id="real-commission-status">
+                  <option value="TODOS">Todos</option>
+                  <option value="PENDIENTE">Pendientes</option>
+                  <option value="PARCIAL">Parciales</option>
+                  <option value="IMPUTADO">Imputadas</option>
+                </select>
+              </label>
+              <label>Tipo
+                <select id="real-commission-kind">
+                  <option value="TODAS">Todas</option>
+                  <option value="FACTURADO">Sobre facturado</option>
+                  <option value="EFECTIVO">Sobre efectivo</option>
+                </select>
+              </label>
+              <button type="button" class="ghost-button" id="real-commission-run">Ver comisiones</button>
+            </div>
+          </div>
+          <div class="cc-grid">
+            <div><span>Comisiones sobre facturado</span><strong id="real-commission-facturado">$ 0,00</strong></div>
+            <div><span>Comisiones sobre efectivo</span><strong id="real-commission-efectivo">$ 0,00</strong></div>
+            <div><span>Total real</span><strong id="real-commission-total">$ 0,00</strong></div>
+            <div><span>Movimientos</span><strong id="real-commission-count">0</strong></div>
+          </div>
+          <div class="summary-grid">
+            <div class="table-wrap compact-table">
+              <h3>Por cliente</h3>
+              <table>
+                <thead><tr><th>Cliente</th><th>Facturado</th><th>Efectivo</th><th>Total</th></tr></thead>
+                <tbody id="real-commission-client-body"></tbody>
+              </table>
+            </div>
+            <div class="table-wrap compact-table">
+              <h3>Detalle real</h3>
+              <table>
+                <thead><tr><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Comprobante</th><th>Importe</th><th>Estado</th></tr></thead>
+                <tbody id="real-commission-detail-body"></tbody>
+              </table>
+            </div>
+          </div>
+          <p class="form-message" id="real-commission-message"></p>
+        </div>
       </section>
 
       <section id="clientes" class="view">
@@ -1487,6 +1540,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260619-comisiones-discriminadas"></script>
+    <script src="/app.js?v=20260619-comisiones-reales-periodo"></script>
   </body>
 </html>

@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260619-comisiones-discriminadas";
+const APP_BUILD = "20260619-comisiones-reales-periodo";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -110,6 +110,7 @@ function setView(view) {
     cuenta: "Cuenta corriente",
     caja: "Caja diaria",
     archivo: "Archivo documental",
+    resumenes: "Resumenes",
     comisionistas: "Comisionistas"
   };
   $("#view-title").textContent = titles[view] || "Sistema";
@@ -546,6 +547,98 @@ async function renderPeriodStats() {
     : `<tr><td colspan="4">Sin categorias para el periodo.</td></tr>`;
   message.textContent = operations.length ? "Periodo calculado." : "No hay operaciones en ese periodo.";
   message.className = `form-message ${operations.length ? "ok" : ""}`.trim();
+}
+
+function movementDateForRealCommission(movement) {
+  return parseDisplayDate(movement?.fecha) || parseDisplayDate(movement?.vencimiento) || null;
+}
+
+function isRealClientCommissionMovement(movement) {
+  if (String(movement?.origen || "").toUpperCase() !== "COMISION") return false;
+  if (movement?.paymentId) return false;
+  if (normalizeSearch(movement?.concepto).includes("comisionista")) return false;
+  return true;
+}
+
+function realCommissionRowsForFilters() {
+  if (!state.cuenta) return [];
+  const from = parseInputDate($("#real-commission-from").value);
+  const to = parseInputDate($("#real-commission-to").value);
+  const clientQuery = normalizeSearch($("#real-commission-client").value);
+  const status = $("#real-commission-status").value;
+  const kind = $("#real-commission-kind").value;
+  const words = clientQuery.split(" ").filter(Boolean);
+  return (state.cuenta.movimientos || [])
+    .filter(isRealClientCommissionMovement)
+    .map((movement) => ({ ...movement, commissionDate: movementDateForRealCommission(movement), commissionKind: commissionKind(movement) }))
+    .filter((movement) => {
+      if (!movement.commissionDate) return false;
+      const date = dateOnly(movement.commissionDate);
+      if (from && date < dateOnly(from)) return false;
+      if (to && date > dateOnly(to)) return false;
+      if (status !== "TODOS" && String(movement.estado || "").toUpperCase() !== status) return false;
+      if (kind === "FACTURADO" && movement.commissionKind !== "facturado") return false;
+      if (kind === "EFECTIVO" && movement.commissionKind !== "efectivo") return false;
+      if (words.length) {
+        const haystack = normalizeSearch(`${movement.cliente || ""} ${movement.contraparte || ""} ${movement.consignataria || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
+        if (!words.every((word) => haystack.includes(word))) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => (b.commissionDate?.getTime() || 0) - (a.commissionDate?.getTime() || 0) || String(a.cliente || "").localeCompare(String(b.cliente || ""), "es"));
+}
+
+function renderRealCommissionSummary() {
+  if (!state.cuenta || !$("#real-commission-detail-body")) return;
+  const rows = realCommissionRowsForFilters();
+  const byClient = new Map();
+  let facturado = 0;
+  let efectivo = 0;
+  rows.forEach((movement) => {
+    const amount = Number(movement.importe || 0);
+    const client = movement.cliente || "Sin cliente";
+    const current = byClient.get(client) || { cliente: client, facturado: 0, efectivo: 0, total: 0 };
+    if (movement.commissionKind === "efectivo") {
+      efectivo += amount;
+      current.efectivo += amount;
+    } else {
+      facturado += amount;
+      current.facturado += amount;
+    }
+    current.total += amount;
+    byClient.set(client, current);
+  });
+  const total = facturado + efectivo;
+  const clientRows = [...byClient.values()]
+    .filter((row) => Math.abs(row.total) > 0.01)
+    .sort((a, b) => Math.abs(b.total) - Math.abs(a.total) || a.cliente.localeCompare(b.cliente, "es"));
+  $("#real-commission-facturado").textContent = moneyValue(facturado);
+  $("#real-commission-facturado").className = amountClass(facturado);
+  $("#real-commission-efectivo").textContent = moneyValue(efectivo);
+  $("#real-commission-efectivo").className = amountClass(efectivo);
+  $("#real-commission-total").textContent = moneyValue(total);
+  $("#real-commission-total").className = amountClass(total);
+  $("#real-commission-count").textContent = rows.length;
+  $("#real-commission-client-body").innerHTML = clientRows.length
+    ? clientRows.map((row) => `<tr><td>${escapeHtml(row.cliente)}</td><td class="${amountClass(row.facturado)}">${row.facturado ? moneyValue(row.facturado) : "-"}</td><td class="${amountClass(row.efectivo)}">${row.efectivo ? moneyValue(row.efectivo) : "-"}</td><td class="${amountClass(row.total)}">${moneyValue(row.total)}</td></tr>`).join("")
+    : `<tr><td colspan="4">Sin comisiones reales para estos filtros.</td></tr>`;
+  $("#real-commission-detail-body").innerHTML = rows.length
+    ? rows.slice(0, 200).map((movement) => {
+        const amount = Number(movement.importe || 0);
+        return `<tr class="${movement.commissionKind === "efectivo" ? "movement-cash" : ""}">
+          <td>${escapeHtml(formatDisplayDate(movement.commissionDate))}</td>
+          <td>${escapeHtml(movement.cliente || "-")}</td>
+          <td>${movement.commissionKind === "efectivo" ? "Sobre efectivo" : "Sobre facturado"}</td>
+          <td>${escapeHtml(movement.comprobante || "-")}</td>
+          <td class="${amountClass(amount)}">${moneyValue(amount)}</td>
+          <td>${escapeHtml(movement.estado || "-")}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="6">Sin detalle para estos filtros.</td></tr>`;
+  $("#real-commission-message").textContent = rows.length
+    ? "Resumen calculado con comisiones reales de cuenta corriente."
+    : "No hay comisiones reales en el periodo seleccionado.";
+  $("#real-commission-message").className = `form-message ${rows.length ? "ok" : ""}`.trim();
 }
 
 function amountClass(value) {
@@ -4128,6 +4221,11 @@ async function init() {
   $("#mobile-refresh").addEventListener("click", reloadAppData);
   $("#download-backup").addEventListener("click", downloadBackup);
   $("#dashboard-period-run").addEventListener("click", renderPeriodStats);
+  $("#real-commission-run").addEventListener("click", renderRealCommissionSummary);
+  ["#real-commission-from", "#real-commission-to", "#real-commission-client", "#real-commission-status", "#real-commission-kind"].forEach((selector) => {
+    $(selector).addEventListener("input", renderRealCommissionSummary);
+    $(selector).addEventListener("change", renderRealCommissionSummary);
+  });
   ["#calc-weight-shrink", "#calc-weight-heads", "#calc-weight-adjust"].forEach((selector) => {
     $(selector).addEventListener("input", renderWeightCalculator);
   });
@@ -4476,9 +4574,12 @@ async function init() {
   const today = new Date().toISOString().slice(0, 10);
   $("#dashboard-period-from").value = today.slice(0, 8) + "01";
   $("#dashboard-period-to").value = today;
+  $("#real-commission-from").value = today.slice(0, 8) + "01";
+  $("#real-commission-to").value = today;
   $("#commissionist-from").value = today.slice(0, 8) + "01";
   $("#commissionist-to").value = today;
   $("#commissionist-due").value = today;
+  renderRealCommissionSummary();
   resetCashForm();
   syncOperationType();
   setOperationModeNew();
