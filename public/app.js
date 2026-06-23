@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260622-calendario-cliente";
+const APP_BUILD = "20260623-calendario-solapa";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -108,6 +108,7 @@ function setView(view) {
     clientes: "Clientes",
     operaciones: "Operaciones",
     cuenta: "Cuenta corriente",
+    calendario: "Calendario",
     caja: "Caja diaria",
     archivo: "Archivo documental",
     resumenes: "Resumenes",
@@ -1773,24 +1774,20 @@ function calendarStatusAllowed(movement) {
 
 function calendarFilteredDueMovements() {
   const range = calendarRangeDates();
-  const useFilters = $("#cc-calendar-use-filters").checked;
-  const currentFilters = getCurrentAccountReportFilters();
-  const filters = useFilters
-    ? { ...currentFilters, dateFrom: null, dateTo: null }
-    : {
-        ...currentFilters,
-        viewMode: "CLIENTE",
-        query: "",
-        words: [],
-        exactClient: "",
-        exactConsignee: "",
-        exactCommissionist: "",
-        statusFilter: "TODOS",
-        conceptFilter: "TODOS",
-        dateFrom: null,
-        dateTo: null,
-        dueFilter: "TODOS"
-      };
+  const query = normalizeSearch($("#cc-calendar-client").value);
+  const filters = {
+    viewMode: "CLIENTE",
+    query,
+    words: query.split(" ").filter(Boolean),
+    exactClient: getExactCurrentAccountClient(query),
+    exactConsignee: "",
+    exactCommissionist: "",
+    statusFilter: "TODOS",
+    conceptFilter: "TODOS",
+    dateFrom: null,
+    dateTo: null,
+    dueFilter: "TODOS"
+  };
   const movements = (state.cuenta.movimientos || [])
     .filter((movement) => !movement.paymentId)
     .filter(calendarStatusAllowed)
@@ -4456,11 +4453,6 @@ async function init() {
   $("#cc-date-to").addEventListener("change", renderCuentaCorriente);
   $("#cc-print-report").addEventListener("click", () => printCurrentAccountReport());
   $("#cc-print-due-report").addEventListener("click", printCurrentAccountDueReport);
-  $("#cc-open-calendar-export").addEventListener("click", () => {
-    $("#cc-calendar-panel").hidden = false;
-    $("#cc-calendar-message").textContent = "";
-  });
-  $("#cc-close-calendar-export").addEventListener("click", () => { $("#cc-calendar-panel").hidden = true; });
   $("#cc-export-calendar").addEventListener("click", exportCurrentAccountCalendar);
   $("#cc-calendar-range").addEventListener("change", () => {
     const mode = $("#cc-calendar-range").value;

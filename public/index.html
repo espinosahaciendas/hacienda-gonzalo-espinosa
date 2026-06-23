@@ -38,6 +38,7 @@
         <button class="active" data-view="tablero">Tablero</button>
         <button data-view="consulta">Consulta movil</button>
         <button data-view="resumenes">Resumenes</button>
+        <button data-view="calendario">Calendario</button>
         <button data-view="clientes">Clientes</button>
         <button data-view="operaciones">Operaciones</button>
         <button data-view="cuenta">Cuenta corriente</button>
@@ -306,6 +307,43 @@
             </div>
           </div>
           <p class="form-message" id="real-commission-message"></p>
+        </div>
+      </section>
+
+      <section id="calendario" class="view">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Exportar vencimientos a Google Calendar</h2>
+              <p class="subtle">Descarga un archivo .ics con vencimientos del cliente. No incluye comisiones pendientes.</p>
+            </div>
+          </div>
+          <div class="form-grid">
+            <label>Periodo
+              <select id="cc-calendar-range">
+                <option value="TODAY">Hoy</option>
+                <option value="NEXT_7" selected>Proximos 7 dias</option>
+                <option value="NEXT_WEEK">Semana proxima</option>
+                <option value="CUSTOM">Rango manual</option>
+              </select>
+            </label>
+            <label>Desde<input id="cc-calendar-from" type="date"></label>
+            <label>Hasta<input id="cc-calendar-to" type="date"></label>
+            <label>Cliente<input id="cc-calendar-client" list="cc-client-list" autocomplete="off" placeholder="Todos"></label>
+            <label>Estado
+              <select id="cc-calendar-status">
+                <option value="ABIERTOS">Pendientes y parciales</option>
+                <option value="PENDIENTE">Solo pendientes</option>
+                <option value="PARCIAL">Solo parciales</option>
+              </select>
+            </label>
+            <label class="check-line"><input id="cc-calendar-factura" type="checkbox" checked> Incluir liquidacion / facturado</label>
+            <label class="check-line"><input id="cc-calendar-efectivo" type="checkbox" checked> Incluir efectivo</label>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="primary-button" id="cc-export-calendar">Descargar archivo calendario</button>
+          </div>
+          <p class="form-message" id="cc-calendar-message"></p>
         </div>
       </section>
 
@@ -1304,45 +1342,7 @@
               <h2 id="cc-due-title">Vencimientos pendientes</h2>
               <p class="subtle" id="cc-due-subtitle">Ordenados por fecha de vencimiento.</p>
             </div>
-            <div class="form-actions">
-              <button type="button" class="ghost-button" id="cc-open-calendar-export">Exportar calendario</button>
-              <button type="button" class="ghost-button" id="cc-print-due-report">Reporte vencimientos</button>
-            </div>
-          </div>
-          <div class="cc-subpanel" id="cc-calendar-panel" hidden>
-            <div class="panel-head">
-              <div>
-                <h3>Exportar vencimientos a Google Calendar</h3>
-                <p class="subtle">Descarga un archivo .ics con vencimientos del cliente. No incluye comisiones pendientes.</p>
-              </div>
-              <button type="button" class="ghost-button" id="cc-close-calendar-export">Cerrar</button>
-            </div>
-            <div class="form-grid">
-              <label>Periodo
-                <select id="cc-calendar-range">
-                  <option value="TODAY">Hoy</option>
-                  <option value="NEXT_7" selected>Proximos 7 dias</option>
-                  <option value="NEXT_WEEK">Semana proxima</option>
-                  <option value="CUSTOM">Rango manual</option>
-                </select>
-              </label>
-              <label>Desde<input id="cc-calendar-from" type="date"></label>
-              <label>Hasta<input id="cc-calendar-to" type="date"></label>
-              <label>Estado
-                <select id="cc-calendar-status">
-                  <option value="ABIERTOS">Pendientes y parciales</option>
-                  <option value="PENDIENTE">Solo pendientes</option>
-                  <option value="PARCIAL">Solo parciales</option>
-                </select>
-              </label>
-              <label class="check-line"><input id="cc-calendar-use-filters" type="checkbox" checked> Usar filtros actuales de cliente / consignataria</label>
-              <label class="check-line"><input id="cc-calendar-factura" type="checkbox" checked> Incluir liquidacion / facturado</label>
-              <label class="check-line"><input id="cc-calendar-efectivo" type="checkbox" checked> Incluir efectivo</label>
-            </div>
-            <div class="form-actions">
-              <button type="button" class="primary-button" id="cc-export-calendar">Descargar archivo calendario</button>
-            </div>
-            <p class="form-message" id="cc-calendar-message"></p>
+            <button type="button" class="ghost-button" id="cc-print-due-report">Reporte vencimientos</button>
           </div>
           <div class="table-wrap compact-table">
             <table>
@@ -1578,6 +1578,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260622-calendario-cliente"></script>
+    <script src="/app.js?v=20260623-calendario-solapa"></script>
   </body>
 </html>
