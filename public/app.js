@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260623-calendario-solapa";
+const APP_BUILD = "20260623-recibo-descuentos";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1433,14 +1433,36 @@ function printCurrentAccountReceipt(payment) {
   if (!popup) return;
   const instruments = payment.instrumentos?.length ? payment.instrumentos : [{ medio: payment.medio, fecha: payment.fecha, referencia: payment.referencia, importe: payment.importe }];
   const imputations = payment.imputaciones || [];
+  const isDiscountImputation = (item) => {
+    const text = normalizeSearch(`${item.concepto || ""} ${item.comprobante || ""}`);
+    return text.includes("comision") || text.includes("descuento") || text.includes("retencion");
+  };
+  const paidImputations = imputations.filter((item) => !isDiscountImputation(item));
+  const discountImputations = imputations.filter(isDiscountImputation);
+  const paidTotal = paidImputations.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const discountTotal = discountImputations.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const instrumentTotal = instruments.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const controlNet = paidTotal - discountTotal;
+  const imputationRows = (rows, emptyText) => rows.length
+    ? rows.map((item) => `<tr><td>${escapeHtml(item.vencimiento || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td>${escapeHtml(item.concepto || item.movementId)}</td><td class="amount">${moneyValue(item.importe)}</td><td class="amount">${moneyValue(item.saldoPendiente)}</td></tr>`).join("")
+    : `<tr><td colspan="5">${emptyText}</td></tr>`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(payment.id)}</title><style>
-    body{font-family:Arial,sans-serif;margin:18mm;color:#173632} header{display:flex;align-items:center;gap:18px;border-bottom:2px solid #173632;padding-bottom:12px} img{width:92px;height:92px;object-fit:contain;background:#173632;padding:8px} h1{font-size:20px;margin:0} h2{font-size:15px;margin-top:22px} p{margin:5px 0} table{width:100%;border-collapse:collapse;font-size:12px} th,td{border:1px solid #cbd7d4;padding:7px;text-align:left} th{background:#edf3f1} .amount{text-align:right;font-weight:700} button{margin-top:18px;padding:9px 14px}@media print{button{display:none}}
+    body{font-family:Arial,sans-serif;margin:18mm;color:#173632} header{display:flex;align-items:center;gap:18px;border-bottom:2px solid #173632;padding-bottom:12px} img{width:92px;height:92px;object-fit:contain;background:#173632;padding:8px} h1{font-size:20px;margin:0} h2{font-size:15px;margin-top:22px} p{margin:5px 0} table{width:100%;border-collapse:collapse;font-size:12px} th,td{border:1px solid #cbd7d4;padding:7px;text-align:left} th{background:#edf3f1} .amount{text-align:right;font-weight:700}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:16px 0}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:8px}.summary span{display:block;color:#52706b;font-size:11px}.summary strong{font-size:15px}.discount th{background:#f8ebe5}.discount-total{background:#fff3e8;font-weight:700}.net-total{background:#eaf2ff;font-weight:700} button{margin-top:18px;padding:9px 14px}@media print{button{display:none}}
   </style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${payment.tipo === "PAGO" ? "Comprobante de pago" : "Comprobante de cobro"}</h1><p><strong>${escapeHtml(payment.id)}</strong></p><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p></div></header>
   ${payment.anulado ? `<p><strong>COMPROBANTE ANULADO</strong></p>` : ""}
   <p><strong>Cliente:</strong> ${escapeHtml(payment.cliente)}</p><p><strong>Fecha:</strong> ${escapeHtml(payment.fecha)}</p><p><strong>Importe:</strong> ${moneyValue(payment.importe)}</p><p><strong>Referencia:</strong> ${escapeHtml(payment.referencia || "-")}</p>
+  <div class="summary">
+    <div><span>${payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
+    <div><span>Vencimientos aplicados</span><strong>${moneyValue(paidTotal)}</strong></div>
+    <div><span>Descuentos / comisiones</span><strong>${moneyValue(discountTotal)}</strong></div>
+    <div><span>Control neto</span><strong>${moneyValue(controlNet)}</strong></div>
+  </div>
   <h2>Detalle de instrumentos</h2><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${instruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("")}</tbody></table>
-  <h2>Imputaciones</h2><table><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe aplicado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputations.length ? imputations.map((item) => `<tr><td>${escapeHtml(item.vencimiento || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td>${escapeHtml(item.concepto || item.movementId)}</td><td class="amount">${moneyValue(item.importe)}</td><td class="amount">${moneyValue(item.saldoPendiente)}</td></tr>`).join("") : `<tr><td colspan="5">Sin imputacion puntual</td></tr>`}</tbody></table>
+  <h2>${payment.tipo === "PAGO" ? "Importes pagados / vencimientos cancelados" : "Importes cobrados / vencimientos cancelados"}</h2>
+  <table><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe aplicado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(paidImputations, "Sin vencimientos liquidados en este comprobante.")}</tbody></table>
+  <h2>Descuentos aplicados</h2>
+  <table class="discount"><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe descontado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(discountImputations, "Sin descuentos aplicados.")}<tr class="discount-total"><td colspan="3">Total descuentos / comisiones</td><td class="amount">${moneyValue(discountTotal)}</td><td></td></tr><tr class="net-total"><td colspan="3">Neto del comprobante</td><td class="amount">${moneyValue(instrumentTotal || payment.importe)}</td><td></td></tr></tbody></table>
   <button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
   popup.document.close();
 }
