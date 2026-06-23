@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260619-comisiones-reales-periodo";
+const APP_BUILD = "20260622-calendario-cliente";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1733,6 +1733,179 @@ function printCurrentAccountDueReport(options = {}) {
   <table><thead><tr><th>Vencimiento</th><th>Cliente</th><th>Vendedor</th><th>Comprador</th><th>Consignataria</th><th>Negocio / concepto</th><th>Comprobante</th><th>Factura</th><th>Efectivo</th><th>Comision</th></tr></thead><tbody>${dueRows.length ? dueRows.map((row) => `<tr class="${row.efectivo ? "movement-cash" : ""}"><td>${escapeHtml(row.vencimiento || "-")}</td><td>${escapeHtml(row.cliente || "-")}</td><td>${escapeHtml(row.vendedor || "-")}</td><td>${escapeHtml(row.comprador || "-")}</td><td>${escapeHtml(row.consignataria || "-")}</td><td>${escapeHtml(row.concepto || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount ${row.factura < 0 ? "negative" : "positive"}">${row.factura ? moneyValue(row.factura) : "-"}</td><td class="amount ${row.efectivo < 0 ? "negative" : "positive"}">${row.efectivo ? moneyValue(row.efectivo) : "-"}</td><td class="amount ${row.comision < 0 ? "negative" : "positive"}">${row.comision ? moneyValue(row.comision) : "-"}</td></tr>`).join("") : `<tr><td colspan="10">Sin vencimientos para el periodo.</td></tr>`}</tbody></table>
   <button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
   popup.document.close();
+}
+
+function calendarRangeDates() {
+  const mode = $("#cc-calendar-range").value;
+  const today = dateOnly(new Date());
+  if (mode === "TODAY") return { from: today, to: today, label: "hoy" };
+  if (mode === "NEXT_WEEK") {
+    const range = dueReportQuickRange("NEXT_WEEK");
+    return { from: range.dateFrom, to: range.dateTo, label: "semana_proxima" };
+  }
+  if (mode === "CUSTOM") {
+    const from = parseInputDate($("#cc-calendar-from").value);
+    const to = parseInputDate($("#cc-calendar-to").value);
+    return { from, to, label: `${$("#cc-calendar-from").value || "inicio"}_${$("#cc-calendar-to").value || "fin"}` };
+  }
+  return { from: today, to: addDateDays(today, 7), label: "proximos_7_dias" };
+}
+
+function currentAccountDueKind(movement) {
+  if (String(movement?.origen || "").toUpperCase() === "COMISION") return "COMISION";
+  if (isCashMovement(movement)) return "EFECTIVO";
+  return "FACTURA";
+}
+
+function calendarKindAllowed(kind) {
+  if (kind === "COMISION") return false;
+  if (kind === "EFECTIVO") return $("#cc-calendar-efectivo").checked;
+  return $("#cc-calendar-factura").checked;
+}
+
+function calendarStatusAllowed(movement) {
+  const selected = $("#cc-calendar-status").value;
+  const status = String(movement?.estado || "").toUpperCase();
+  if (selected === "PENDIENTE") return status === "PENDIENTE";
+  if (selected === "PARCIAL") return status === "PARCIAL";
+  return !["IMPUTADO", "ANULADO"].includes(status);
+}
+
+function calendarFilteredDueMovements() {
+  const range = calendarRangeDates();
+  const useFilters = $("#cc-calendar-use-filters").checked;
+  const currentFilters = getCurrentAccountReportFilters();
+  const filters = useFilters
+    ? { ...currentFilters, dateFrom: null, dateTo: null }
+    : {
+        ...currentFilters,
+        viewMode: "CLIENTE",
+        query: "",
+        words: [],
+        exactClient: "",
+        exactConsignee: "",
+        exactCommissionist: "",
+        statusFilter: "TODOS",
+        conceptFilter: "TODOS",
+        dateFrom: null,
+        dateTo: null,
+        dueFilter: "TODOS"
+      };
+  const movements = (state.cuenta.movimientos || [])
+    .filter((movement) => !movement.paymentId)
+    .filter(calendarStatusAllowed)
+    .filter((movement) => {
+      const kind = currentAccountDueKind(movement);
+      if (!calendarKindAllowed(kind)) return false;
+      if (!matchesCurrentAccountReportFilters(movement, filters, false, false)) return false;
+      return dueDateInRange(movement, range.from, range.to);
+    })
+    .sort((a, b) => {
+      const dateA = parseDisplayDate(a.vencimiento)?.getTime() || 0;
+      const dateB = parseDisplayDate(b.vencimiento)?.getTime() || 0;
+      return dateA - dateB || String(a.cliente || "").localeCompare(String(b.cliente || ""), "es");
+    });
+  return { movements, range };
+}
+
+function dateToIcsDate(date) {
+  const value = dateOnly(date);
+  return `${value.getFullYear()}${String(value.getMonth() + 1).padStart(2, "0")}${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function dateToInputValue(date) {
+  const value = dateOnly(date);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function escapeIcsText(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\r?\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function foldIcsLine(line) {
+  const text = String(line || "");
+  const chunks = [];
+  for (let index = 0; index < text.length; index += 72) {
+    chunks.push(`${index ? " " : ""}${text.slice(index, index + 72)}`);
+  }
+  return chunks.join("\r\n");
+}
+
+function calendarEventSummary(movement) {
+  const kind = currentAccountDueKind(movement);
+  const label = kind === "COMISION" ? "COMISION" : kind === "EFECTIVO" ? "EFECTIVO" : "VTO";
+  return `${label} - ${movement.cliente || "Sin cliente"} - ${moneyValue(signedPendingAmount(movement))}`;
+}
+
+function calendarEventDescription(movement) {
+  return [
+    `Cliente: ${movement.cliente || "-"}`,
+    `Concepto: ${currentAccountDueDetailText(movement)}`,
+    `Importe pendiente: ${moneyValue(signedPendingAmount(movement))}`,
+    `Comprobante: ${movement.comprobante || "-"}`,
+    `Operacion: ${movement.operacion || "-"}`,
+    `Vendedor: ${movement.vendedor || "-"}`,
+    `Comprador: ${movement.comprador || "-"}`,
+    `Consignataria: ${movement.consignataria || "-"}`,
+    `Estado: ${movement.estado || "-"}`
+  ].join("\n");
+}
+
+function downloadTextFile(filename, content, type = "text/plain;charset=utf-8") {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportCurrentAccountCalendar() {
+  if (!state.cuenta) return;
+  const { movements, range } = calendarFilteredDueMovements();
+  const message = $("#cc-calendar-message");
+  if (!movements.length) {
+    message.textContent = "No hay vencimientos para exportar con esas opciones.";
+    message.className = "form-message error";
+    return;
+  }
+  const now = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Gonzalo Espinosa Hacienda//Vencimientos//ES",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH"
+  ];
+  movements.forEach((movement, index) => {
+    const date = parseDisplayDate(movement.vencimiento);
+    if (!date) return;
+    const endDate = addDateDays(date, 1);
+    const uid = `${movement.id || index}-${dateToIcsDate(date)}@gonzalo-espinosa-hacienda`;
+    lines.push(
+      "BEGIN:VEVENT",
+      foldIcsLine(`UID:${escapeIcsText(uid)}`),
+      `DTSTAMP:${now}`,
+      `DTSTART;VALUE=DATE:${dateToIcsDate(date)}`,
+      `DTEND;VALUE=DATE:${dateToIcsDate(endDate)}`,
+      foldIcsLine(`SUMMARY:${escapeIcsText(calendarEventSummary(movement))}`),
+      foldIcsLine(`DESCRIPTION:${escapeIcsText(calendarEventDescription(movement))}`),
+      foldIcsLine(`CATEGORIES:${escapeIcsText(currentAccountDueKind(movement))}`),
+      "END:VEVENT"
+    );
+  });
+  lines.push("END:VCALENDAR");
+  const filename = `vencimientos_${String(range.label || "calendario").replace(/[^a-zA-Z0-9_-]/g, "_")}.ics`;
+  downloadTextFile(filename, `${lines.join("\r\n")}\r\n`, "text/calendar;charset=utf-8");
+  message.textContent = `Archivo generado con ${movements.length} vencimiento/s. Importalo en Google Calendar.`;
+  message.className = "form-message ok";
 }
 
 async function saveCurrentAccountPayment(printReceipt = false) {
@@ -4283,6 +4456,20 @@ async function init() {
   $("#cc-date-to").addEventListener("change", renderCuentaCorriente);
   $("#cc-print-report").addEventListener("click", () => printCurrentAccountReport());
   $("#cc-print-due-report").addEventListener("click", printCurrentAccountDueReport);
+  $("#cc-open-calendar-export").addEventListener("click", () => {
+    $("#cc-calendar-panel").hidden = false;
+    $("#cc-calendar-message").textContent = "";
+  });
+  $("#cc-close-calendar-export").addEventListener("click", () => { $("#cc-calendar-panel").hidden = true; });
+  $("#cc-export-calendar").addEventListener("click", exportCurrentAccountCalendar);
+  $("#cc-calendar-range").addEventListener("change", () => {
+    const mode = $("#cc-calendar-range").value;
+    const range = calendarRangeDates();
+    if (mode !== "CUSTOM") {
+      $("#cc-calendar-from").value = range.from ? dateToInputValue(range.from) : "";
+      $("#cc-calendar-to").value = range.to ? dateToInputValue(range.to) : "";
+    }
+  });
   $("#dashboard-print-next7").addEventListener("click", () => printCurrentAccountDueReport({ range: "NEXT_7", all: true }));
   $("#dashboard-print-next-week").addEventListener("click", () => printCurrentAccountDueReport({ range: "NEXT_WEEK", all: true }));
   $("#cash-form").addEventListener("submit", saveCashMovement);
@@ -4574,6 +4761,8 @@ async function init() {
   const today = new Date().toISOString().slice(0, 10);
   $("#dashboard-period-from").value = today.slice(0, 8) + "01";
   $("#dashboard-period-to").value = today;
+  $("#cc-calendar-from").value = dateToInputValue(new Date());
+  $("#cc-calendar-to").value = dateToInputValue(addDateDays(new Date(), 7));
   $("#real-commission-from").value = today.slice(0, 8) + "01";
   $("#real-commission-to").value = today;
   $("#commissionist-from").value = today.slice(0, 8) + "01";
