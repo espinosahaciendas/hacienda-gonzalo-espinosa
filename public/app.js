@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260623-recibo-descuentos";
+const APP_BUILD = "20260624-pdf-pago-comisionista";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -930,11 +930,21 @@ function movementCommissionistKey(movement) {
   return "";
 }
 
+function isCommissionistClientName(name) {
+  const key = normalizeSearch(name);
+  if (!key) return false;
+  return (state.clientes || []).some((client) => {
+    const type = normalizeSearch(client.tipo);
+    return normalizeSearch(client.nombre) === key && (type === "comisionista" || type === "consignataria");
+  });
+}
+
 function movementCommissionistAccountKey(movement) {
   const detail = commissionistDetailFromObservation(movement.observacion);
   const detailCommissionist = normalizeSearch(detail?.comisionista || "");
   if (detailCommissionist) return detailCommissionist;
   if (normalizeSearch(movement.concepto).includes("comisionista")) return normalizeSearch(movement.cliente);
+  if (movement.paymentId && isCommissionistClientName(movement.cliente)) return normalizeSearch(movement.cliente);
   return "";
 }
 
@@ -1081,7 +1091,7 @@ function renderCuentaCorriente() {
     ? movements.slice(0, 200).map((movement) => {
         const detail = commissionistDetailFromObservation(movement.observacion);
         const baseActions = movement.paymentId
-          ? `<button type="button" class="small-button" data-cc-payment-receipt="${escapeHtml(movement.paymentId)}">Ver comprobante</button>${movement.estado === "ANULADO" ? "" : ` <button type="button" class="small-button danger-button" data-cc-payment-cancel="${escapeHtml(movement.paymentId)}">Anular</button>`}`
+          ? `<button type="button" class="small-button" data-cc-payment-receipt="${escapeHtml(movement.paymentId)}">Ver comprobante</button> <button type="button" class="small-button" data-cc-payment-print="${escapeHtml(movement.paymentId)}">Imprimir/PDF</button>${movement.estado === "ANULADO" ? "" : ` <button type="button" class="small-button danger-button" data-cc-payment-cancel="${escapeHtml(movement.paymentId)}">Anular</button>`}`
           : movement.operacion
             ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>`
             : externalMovementActions(movement);
@@ -1428,7 +1438,7 @@ async function saveExternalCurrentAccountMovement() {
   }
 }
 
-function printCurrentAccountReceipt(payment) {
+function printCurrentAccountReceipt(payment, autoPrint = false) {
   const popup = window.open("", "_blank", "width=900,height=800");
   if (!popup) return;
   const instruments = payment.instrumentos?.length ? payment.instrumentos : [{ medio: payment.medio, fecha: payment.fecha, referencia: payment.referencia, importe: payment.importe }];
@@ -1463,7 +1473,7 @@ function printCurrentAccountReceipt(payment) {
   <table><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe aplicado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(paidImputations, "Sin vencimientos liquidados en este comprobante.")}</tbody></table>
   <h2>Descuentos aplicados</h2>
   <table class="discount"><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe descontado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(discountImputations, "Sin descuentos aplicados.")}<tr class="discount-total"><td colspan="3">Total descuentos / comisiones</td><td class="amount">${moneyValue(discountTotal)}</td><td></td></tr><tr class="net-total"><td colspan="3">Neto del comprobante</td><td class="amount">${moneyValue(instrumentTotal || payment.importe)}</td><td></td></tr></tbody></table>
-  <button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
+  <button onclick="window.print()">Imprimir / guardar PDF</button>${autoPrint ? `<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),250));</script>` : ""}</body></html>`);
   popup.document.close();
 }
 
@@ -4559,6 +4569,12 @@ async function init() {
     if (receiptButton) {
       const payment = (state.cuenta.pagos || []).find((item) => item.id === receiptButton.dataset.ccPaymentReceipt);
       if (payment) printCurrentAccountReceipt(payment);
+      return;
+    }
+    const printPaymentButton = event.target.closest("[data-cc-payment-print]");
+    if (printPaymentButton) {
+      const payment = (state.cuenta.pagos || []).find((item) => item.id === printPaymentButton.dataset.ccPaymentPrint);
+      if (payment) printCurrentAccountReceipt(payment, true);
       return;
     }
     const cancelButton = event.target.closest("[data-cc-payment-cancel]");
