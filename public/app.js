@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260625-recibo-comisionista-pago";
+const APP_BUILD = "20260625-subtotales-comisionista";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -983,13 +983,36 @@ function commissionistDetailFromObservation(observation) {
   }
 }
 
+function commissionistDetailSubtotals(rows) {
+  return rows.reduce((totals, row) => {
+    const bucket = isCashDetailRow(row) ? "efectivo" : "facturado";
+    totals[bucket].base += Number(row.base || 0);
+    totals[bucket].comision += Number(row.comision || 0);
+    totals[bucket].items += 1;
+    return totals;
+  }, {
+    facturado: { base: 0, comision: 0, items: 0 },
+    efectivo: { base: 0, comision: 0, items: 0 }
+  });
+}
+
+function commissionistDetailSubtotalHtml(subtotals) {
+  return `
+    <div class="commissionist-subtotals">
+      <div><span>A facturar</span><strong>${moneyValue(subtotals.facturado.comision)}</strong><small>Base ${moneyValue(subtotals.facturado.base)} - ${subtotals.facturado.items} item/s</small></div>
+      <div><span>A cobrar en efectivo</span><strong>${moneyValue(subtotals.efectivo.comision)}</strong><small>Base ${moneyValue(subtotals.efectivo.base)} - ${subtotals.efectivo.items} item/s</small></div>
+    </div>`;
+}
+
 function commissionistDetailHtml(detail) {
   const rows = Array.isArray(detail.items) ? detail.items : [];
   if (!rows.length) return "";
+  const subtotals = commissionistDetailSubtotals(rows);
   return `
     <div class="cc-commissionist-detail">
       <strong>Detalle comisionista: ${escapeHtml(detail.comisionista || "-")} - ${escapeHtml(detail.porcentaje || "0")}%</strong>
       <span>Importe bruto ${moneyValue(detail.base)} | Comision ${moneyValue(detail.comision)}</span>
+      ${commissionistDetailSubtotalHtml(subtotals)}
       <table>
         <thead><tr><th>Origen</th><th>Fecha</th><th>Operacion / mov.</th><th>Comprobante</th><th>Importe bruto</th><th>%</th><th>Comision</th></tr></thead>
         <tbody>${rows.map((row) => `<tr class="${isCashDetailRow(row) ? "movement-cash" : ""}"><td>${escapeHtml(row.origen || "-")}</td><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.id || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td>${moneyValue(row.base)}</td><td>${row.porcentaje ? escapeHtml(row.porcentaje) : "-"}</td><td>${moneyValue(row.comision)}</td></tr>`).join("")}</tbody>
@@ -1549,7 +1572,7 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
 }
 
 function currentAccountReportStyles() {
-  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
+  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-subtotals{display:grid;grid-template-columns:repeat(2,minmax(170px,1fr));gap:6px;margin:6px 0}.commissionist-subtotals div{border:1px solid #cbd7d4;background:#fff;padding:6px}.commissionist-subtotals span{font-size:8px;text-transform:uppercase}.commissionist-subtotals strong{display:block;font-size:11px}.commissionist-subtotals small{display:block;color:#52706b}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
 }
 
 function currentAccountImputationsByMovement() {
@@ -1575,11 +1598,13 @@ function currentAccountImputationsByMovement() {
 function commissionistDetailReportRow(detail) {
   const rows = Array.isArray(detail?.items) ? detail.items : [];
   if (!rows.length) return "";
+  const subtotals = commissionistDetailSubtotals(rows);
   return `<tr>
     <td colspan="10" class="commissionist-detail-cell">
       <div class="commissionist-detail-box">
         <strong>Detalle de ventas aplicadas - ${escapeHtml(detail.comisionista || "-")}</strong>
         <span>Importe bruto ${moneyValue(detail.base)} | Comision ${moneyValue(detail.comision)} | Periodo ${escapeHtml(detail.periodoDesde || "-")} a ${escapeHtml(detail.periodoHasta || "-")}</span>
+        ${commissionistDetailSubtotalHtml(subtotals)}
         <table>
           <thead><tr><th>Origen</th><th>Fecha</th><th>Operacion / mov.</th><th>Vendedor / cliente</th><th>Comprador / concepto</th><th>Comprobante</th><th>Importe bruto</th><th>%</th><th>Comision</th></tr></thead>
           <tbody>${rows.map((row) => `<tr class="${isCashDetailRow(row) ? "movement-cash" : ""}"><td>${escapeHtml(row.origen || "-")}</td><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.id || "-")}</td><td>${escapeHtml(row.vendedor || "-")}</td><td>${escapeHtml(row.comprador || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount">${moneyValue(row.base)}</td><td>${row.porcentaje ? escapeHtml(row.porcentaje) : "-"}</td><td class="amount">${moneyValue(row.comision)}</td></tr>`).join("")}</tbody>

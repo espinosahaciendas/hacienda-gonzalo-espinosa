@@ -1444,6 +1444,39 @@ label textarea {
   font-size: 12px;
 }
 
+.commissionist-subtotals {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+.commissionist-subtotals div {
+  background: #fff;
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+}
+
+.commissionist-subtotals span,
+.commissionist-subtotals small {
+  display: block;
+}
+
+.commissionist-subtotals span {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.commissionist-subtotals strong {
+  display: block;
+  font-size: 16px;
+}
+
+.commissionist-subtotals small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .cc-commissionist-detail table {
   border-collapse: collapse;
   font-size: 12px;
