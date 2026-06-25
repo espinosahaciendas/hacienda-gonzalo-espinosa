@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260625-saldo-pendiente-descuentos";
+const APP_BUILD = "20260625-recibo-comisionista-pago";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1471,6 +1471,9 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   const imputations = payment.imputaciones || [];
   const isDiscountImputation = (item) => {
     const text = normalizeSearch(`${item.concepto || ""} ${item.comprobante || ""}`);
+    const originalSigned = Number(item.importeOriginalFirmado ?? item.importeFirmadoOriginal ?? 0);
+    if (originalSigned) return originalSigned > 0;
+    if (text.includes("comisionista")) return false;
     return text.includes("comision") ||
       text.includes("descuento") ||
       text.includes("retencion") ||
