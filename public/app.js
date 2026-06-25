@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260625-descuento-gastos-recibo";
+const APP_BUILD = "20260625-saldo-pendiente-descuentos";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1376,6 +1376,10 @@ function refreshPrimaryImputationSummary() {
   const available = getPaymentPendingMovements().length;
   const selected = $all("[data-cc-impute]:checked");
   const signedTotal = selected.reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
+  const positiveTotal = selected
+    .filter((item) => Number(item.dataset.ccSignedPending || 0) > 0)
+    .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccPending || 0), 0);
+  const discountOnly = $("#cc-discount-only")?.checked;
   updateCurrentAccountImputationSummary({
     selector: "[data-cc-impute]:checked",
     summarySelector: "#cc-imputation-summary",
@@ -1383,8 +1387,13 @@ function refreshPrimaryImputationSummary() {
     updatePaymentAmount: true
   });
   if (selected.length && selected.some((item) => Number(item.dataset.ccSignedPending || 0) < 0) && selected.some((item) => Number(item.dataset.ccSignedPending || 0) > 0)) {
-    $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - neto a registrar ${moneyValue(Math.abs(signedTotal))}`;
-    if (!currentPaymentInstruments.length) setMoneyInput("#cc-payment-amount", Math.abs(signedTotal));
+    if (discountOnly) {
+      $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - descuentos a aplicar ${moneyValue(positiveTotal)}`;
+      if (!currentPaymentInstruments.length) setMoneyInput("#cc-payment-amount", positiveTotal);
+    } else {
+      $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - neto a registrar ${moneyValue(Math.abs(signedTotal))}`;
+      if (!currentPaymentInstruments.length) setMoneyInput("#cc-payment-amount", Math.abs(signedTotal));
+    }
   }
 }
 
@@ -2184,20 +2193,40 @@ async function generateCommissionistMovement() {
 
 function collectSelectedCurrentAccountImputations(selector, availableAmount, paymentType = "") {
   const selected = $all(selector);
-  const hasPositive = selected.some((checkbox) => Number(checkbox.dataset.ccSignedPending || 0) > 0);
-  const hasNegative = selected.some((checkbox) => Number(checkbox.dataset.ccSignedPending || 0) < 0);
+  const rows = selected.map((checkbox) => ({
+    movementId: checkbox.dataset.ccImpute || checkbox.dataset.ccCounterpartyImpute,
+    pending: Number(checkbox.dataset.ccPending || 0),
+    signedPending: Number(checkbox.dataset.ccSignedPending || 0)
+  })).filter((item) => item.movementId && item.pending > 0);
+  const hasPositive = rows.some((item) => item.signedPending > 0);
+  const hasNegative = rows.some((item) => item.signedPending < 0);
+  const discountOnly = selector.includes("data-cc-impute") && paymentType === "PAGO" && $("#cc-discount-only")?.checked;
   if (hasPositive && hasNegative) {
-    return selected.map((checkbox) => ({
-      movementId: checkbox.dataset.ccImpute || checkbox.dataset.ccCounterpartyImpute,
-      importe: Number(checkbox.dataset.ccPending || 0)
-    })).filter((item) => item.movementId && item.importe > 0);
+    if (discountOnly) {
+      let discountBudget = rows
+        .filter((item) => item.signedPending > 0)
+        .reduce((sum, item) => sum + item.pending, 0);
+      const positiveRows = rows
+        .filter((item) => item.signedPending > 0)
+        .map((item) => ({ movementId: item.movementId, importe: item.pending }));
+      const negativeRows = rows
+        .filter((item) => item.signedPending < 0)
+        .map((item) => {
+          const importe = Math.min(item.pending, discountBudget);
+          discountBudget -= importe;
+          return { movementId: item.movementId, importe };
+        })
+        .filter((item) => item.importe > 0);
+      return [...positiveRows, ...negativeRows];
+    }
+    return rows.map((item) => ({ movementId: item.movementId, importe: item.pending }));
   }
   let remaining = Math.abs(Number(availableAmount || 0));
-  return selected.map((checkbox) => {
-    const importe = Math.min(Number(checkbox.dataset.ccPending || 0), remaining);
+  return rows.map((item) => {
+    const importe = Math.min(item.pending, remaining);
     remaining -= importe;
-    return { movementId: checkbox.dataset.ccImpute || checkbox.dataset.ccCounterpartyImpute, importe };
-  }).filter((item) => item.movementId && item.importe > 0);
+    return { movementId: item.movementId, importe };
+  }).filter((item) => item.importe > 0);
 }
 
 function renderClientes() {
@@ -4577,6 +4606,7 @@ async function init() {
   $("#cc-imputation-body").addEventListener("change", (event) => {
     if (event.target.matches("[data-cc-impute]")) refreshPrimaryImputationSummary();
   });
+  $("#cc-discount-only").addEventListener("change", refreshPrimaryImputationSummary);
   $("#cc-counterparty-body").addEventListener("change", (event) => {
     if (event.target.matches("[data-cc-counterparty-impute]")) refreshCounterpartyImputationSummary();
   });
