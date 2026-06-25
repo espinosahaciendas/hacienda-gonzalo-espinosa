@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260625-subtotales-comisionista";
+const APP_BUILD = "20260625-comisionistas-sin-duplicados";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2036,11 +2036,15 @@ async function saveCurrentAccountPayment(printReceipt = false) {
 }
 
 function commissionistDateInRange(operation, from, to) {
-  const date = parseDisplayDate(operation.fecha || operation.vencimiento);
+  const date = parseFlexibleDate(operation.fecha || operation.vencimiento);
   if (!date) return false;
   if (from && date < from) return false;
   if (to && date > to) return false;
   return true;
+}
+
+function parseFlexibleDate(value) {
+  return parseInputDate(value) || parseDisplayDate(value);
 }
 
 function commissionistOperationBase(detail) {
@@ -2069,6 +2073,19 @@ function operationCommissionistKeys(detail) {
     operationCommissionistKey(detail),
     normalizeSearch(detail.consignataria || detail.draftData?.consignataria || "")
   ].filter(Boolean)));
+}
+
+function liquidatedCommissionistItemIds(commissionist) {
+  const key = normalizeSearch(commissionist);
+  const ids = new Set();
+  (state.cuenta?.movimientos || []).forEach((movement) => {
+    const detail = commissionistDetailFromObservation(movement.observacion);
+    if (!detail || normalizeSearch(detail.comisionista) !== key) return;
+    (Array.isArray(detail.items) ? detail.items : []).forEach((item) => {
+      if (item.id) ids.add(String(item.id));
+    });
+  });
+  return ids;
 }
 
 function renderCommissionistRows() {
@@ -2104,8 +2121,8 @@ function commissionistRowCommission(row, fallbackPercent) {
 }
 
 async function loadCommissionistOperations() {
-  const from = $("#commissionist-from").value ? parseDisplayDate($("#commissionist-from").value) : null;
-  const to = $("#commissionist-to").value ? parseDisplayDate($("#commissionist-to").value) : null;
+  const from = $("#commissionist-from").value ? parseInputDate($("#commissionist-from").value) : null;
+  const to = $("#commissionist-to").value ? parseInputDate($("#commissionist-to").value) : null;
   const selectedCommissionist = $("#commissionist-client").value.trim();
   if (!selectedCommissionist) {
     $("#commissionist-message").textContent = "Seleccione un comisionista.";
@@ -2114,6 +2131,7 @@ async function loadCommissionistOperations() {
   }
   $("#commissionist-message").textContent = "Buscando operaciones...";
   $("#commissionist-message").className = "form-message";
+  const alreadyLiquidatedIds = liquidatedCommissionistItemIds(selectedCommissionist);
   const candidates = state.operaciones
     .filter((operation) => operation.estado !== "ANULADA")
     .filter((operation) => commissionistDateInRange(operation, from, to));
@@ -2121,6 +2139,7 @@ async function loadCommissionistOperations() {
   state.commissionistRows = details
     .filter(Boolean)
     .filter((detail) => detail.liquidacion)
+    .filter((detail) => !alreadyLiquidatedIds.has(String(detail.id)))
     .filter((detail) => operationCommissionistKeys(detail).includes(normalizeSearch(selectedCommissionist)))
     .map((detail) => {
       const liq = detail.liquidacion || {};
@@ -2141,6 +2160,7 @@ async function loadCommissionistOperations() {
     .filter((movement) => !normalizeSearch(movement.concepto).includes("comisionista"))
     .filter((movement) => String(movement.tipoDesglose || "").toUpperCase() !== "IVA_FISCAL")
     .filter((movement) => normalizeSearch(movement.comisionista) === normalizeSearch(selectedCommissionist))
+    .filter((movement) => !alreadyLiquidatedIds.has(String(movement.id)))
     .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
     .map((movement) => ({
       id: movement.id,
@@ -2158,7 +2178,9 @@ async function loadCommissionistOperations() {
   state.commissionistRows = [...state.commissionistRows, ...externalRows]
     .sort((a, b) => (parseDisplayDate(a.fecha)?.getTime() || 0) - (parseDisplayDate(b.fecha)?.getTime() || 0));
   renderCommissionistRows();
-  $("#commissionist-message").textContent = state.commissionistRows.length ? "Operaciones listas para revisar." : "No se encontraron operaciones liquidadas en el periodo.";
+  $("#commissionist-message").textContent = state.commissionistRows.length
+    ? "Operaciones listas para revisar. Se excluyen las ya liquidadas al comisionista."
+    : "No se encontraron operaciones pendientes de liquidar en el periodo.";
   $("#commissionist-message").className = `form-message ${state.commissionistRows.length ? "ok" : ""}`.trim();
 }
 
