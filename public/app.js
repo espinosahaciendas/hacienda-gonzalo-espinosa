@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260624-pdf-pago-comisionista";
+const APP_BUILD = "20260625-descuento-gastos-recibo";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1315,9 +1315,26 @@ function getPaymentPendingMovements(clientSelector = "#cc-payment-client", typeS
     if (normalizeSearch(movement.cliente) !== client || String(movement.estado || "").toUpperCase() === "IMPUTADO") return false;
     const amount = Number(movement.importe || 0);
     const isCommission = String(movement.origen || "").toUpperCase() === "COMISION";
-    if (type === "PAGO") return amount < 0 || (isCommission && amount > 0);
+    const isExpenseDiscount = isExpenseOrDiscountMovement(movement);
+    if (type === "PAGO") return amount < 0 || ((isCommission || isExpenseDiscount) && amount > 0);
     return amount > 0;
   });
+}
+
+function isExpenseOrDiscountMovement(movement) {
+  const origin = String(movement?.origen || "").toUpperCase();
+  const text = normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.observacion || ""}`);
+  return origin === "EXTERNO" && (
+    text.includes("gasto") ||
+    text.includes("guia") ||
+    text.includes("dte") ||
+    text.includes("flete") ||
+    text.includes("pesada") ||
+    text.includes("vacunacion") ||
+    text.includes("veterinario") ||
+    text.includes("descuento") ||
+    text.includes("retencion")
+  );
 }
 
 function renderCurrentAccountCounterpartyImputations() {
@@ -1445,7 +1462,16 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   const imputations = payment.imputaciones || [];
   const isDiscountImputation = (item) => {
     const text = normalizeSearch(`${item.concepto || ""} ${item.comprobante || ""}`);
-    return text.includes("comision") || text.includes("descuento") || text.includes("retencion");
+    return text.includes("comision") ||
+      text.includes("descuento") ||
+      text.includes("retencion") ||
+      text.includes("gasto") ||
+      text.includes("guia") ||
+      text.includes("dte") ||
+      text.includes("flete") ||
+      text.includes("pesada") ||
+      text.includes("vacunacion") ||
+      text.includes("veterinario");
   };
   const paidImputations = imputations.filter((item) => !isDiscountImputation(item));
   const discountImputations = imputations.filter(isDiscountImputation);
