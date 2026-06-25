@@ -775,6 +775,8 @@ function buildAccountData(data) {
         comprobante: movement ? movement.comprobante : "",
         concepto: movement ? movement.concepto : "",
         importeOriginal: movement ? Math.abs(movement.importe) : item.importe,
+        importeOriginalFirmado: movement ? movement.importe : item.importe,
+        origen: movement ? movement.origen : "",
         saldoPendiente: movement ? movement.importePendiente : 0
       };
     })
