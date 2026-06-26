@@ -42,7 +42,7 @@
         <button data-view="clientes">Clientes</button>
         <button data-view="operaciones">Operaciones</button>
         <button data-view="cuenta">Cuenta corriente</button>
-        <button data-view="caja">Caja diaria</button>
+        <button data-view="caja">Caja</button>
         <button data-view="archivo">Archivo documental</button>
         <button data-view="comisionistas">Comisionistas</button>
       </nav>
@@ -1379,6 +1379,14 @@
       </section>
 
       <section id="caja" class="view">
+        <div class="operation-screen-toolbar">
+          <div class="segmented">
+            <button type="button" class="active" data-cash-tab="diaria">Caja diaria</button>
+            <button type="button" data-cash-tab="conciliaciones">Conciliaciones efectivos</button>
+          </div>
+        </div>
+
+        <div id="cash-daily-view">
         <div class="metrics">
           <article>
             <span>Hoy</span>
@@ -1401,7 +1409,7 @@
         <div class="panel">
           <div class="panel-head">
             <div>
-              <h2>Movimiento de caja</h2>
+              <h2>Movimiento de caja diaria</h2>
               <p class="subtle">Registro interno de gastos de oficina. No impacta cuenta corriente de clientes.</p>
             </div>
             <button type="button" class="ghost-button" id="cash-clear">Nuevo gasto</button>
@@ -1434,8 +1442,8 @@
                   <option>Otro</option>
                 </select>
               </label>
-              <label>Salio de<input id="cash-source" placeholder="Ej.: Gonzalo, caja oficina, cuenta bancaria"></label>
-              <label>Pagado por<input id="cash-paid-by" placeholder="Quien adelanto el dinero"></label>
+              <label>Cuenta / caja de origen<input id="cash-source" placeholder="Ej.: caja oficina, cuenta bancaria, efectivo de cliente"></label>
+              <label>Adelantado por<input id="cash-paid-by" placeholder="Ej.: yo, Gonzalo, oficina"></label>
               <label>Comprobante<input id="cash-receipt" placeholder="Ticket / factura / referencia"></label>
               <label class="checkbox-line"><input id="cash-recovered" type="checkbox"> Recuperado / rendido</label>
             </div>
@@ -1463,14 +1471,107 @@
                   <th>Concepto</th>
                   <th>Categoria</th>
                   <th>Importe</th>
-                  <th>Salio de</th>
-                  <th>Pagado por</th>
+                  <th>Origen</th>
+                  <th>Adelantado por</th>
                   <th>Estado</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
               <tbody id="cash-body"></tbody>
             </table>
+          </div>
+        </div>
+        </div>
+
+        <div id="cash-reconciliation-view" hidden>
+          <div class="metrics">
+            <article>
+              <span>Efectivo recibido</span>
+              <strong id="cash-rec-total-in">$ 0,00</strong>
+            </article>
+            <article>
+              <span>Aplicado / pagado</span>
+              <strong id="cash-rec-total-out">$ 0,00</strong>
+            </article>
+            <article>
+              <span>Saldo en control</span>
+              <strong id="cash-rec-balance">$ 0,00</strong>
+            </article>
+            <article>
+              <span>Conciliaciones abiertas</span>
+              <strong id="cash-rec-open-count">0</strong>
+            </article>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Conciliacion de efectivo</h2>
+                <p class="subtle">Control interno del efectivo recibido de clientes y pagos hechos con ese efectivo. No impacta cuenta corriente.</p>
+              </div>
+              <button type="button" class="ghost-button" id="cash-rec-clear">Nueva conciliacion</button>
+            </div>
+            <form id="cash-rec-form">
+              <input type="hidden" id="cash-rec-id">
+              <div class="form-grid">
+                <label>Fecha recibido<input id="cash-rec-date" type="date" required></label>
+                <label>Recibido de<input id="cash-rec-client" list="cc-client-list" placeholder="Cliente / persona" required></label>
+                <label>Referencia<input id="cash-rec-reference" placeholder="Ej.: efectivo venta, sobre, operación"></label>
+                <label>Importe recibido<input id="cash-rec-amount" inputmode="decimal" placeholder="$ 0,00" required></label>
+              </div>
+              <label>Observaciones<textarea id="cash-rec-notes" rows="2" placeholder="Detalle interno"></textarea></label>
+              <div class="cc-subpanel">
+                <div class="panel-head">
+                  <h3>Aplicaciones / pagos con este efectivo</h3>
+                  <span class="subtle" id="cash-rec-app-summary">Sin aplicaciones cargadas</span>
+                </div>
+                <div class="form-grid">
+                  <label>Fecha<input id="cash-rec-app-date" type="date"></label>
+                  <label>Concepto<input id="cash-rec-app-concept" placeholder="Ej.: pago guias, adelanto, gasto"></label>
+                  <label>Destino / pagado a<input id="cash-rec-app-to" placeholder="Opcional"></label>
+                  <label>Importe aplicado<input id="cash-rec-app-amount" inputmode="decimal" placeholder="$ 0,00"></label>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" id="cash-rec-app-add">Agregar aplicacion</button>
+                </div>
+                <div class="table-wrap compact-table">
+                  <table>
+                    <thead><tr><th>Fecha</th><th>Concepto</th><th>Destino</th><th>Importe</th><th></th></tr></thead>
+                    <tbody id="cash-rec-app-body"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="primary-button">Guardar conciliacion</button>
+                <p class="form-message" id="cash-rec-message"></p>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Detalle de conciliaciones</h2>
+                <p class="subtle">Saldo disponible por cada efectivo recibido.</p>
+              </div>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Recibido de</th>
+                    <th>Referencia</th>
+                    <th>Recibido</th>
+                    <th>Aplicado</th>
+                    <th>Saldo</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="cash-rec-body"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>
@@ -1606,6 +1707,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260626-externos-vtos-doc-preview"></script>
+    <script src="/app.js?v=20260626-caja-conciliaciones"></script>
   </body>
 </html>

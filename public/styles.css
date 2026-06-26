@@ -129,6 +129,34 @@ nav button:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.segmented {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: white;
+}
+
+.segmented button {
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  padding: 9px 12px;
+}
+
+.segmented button:last-child {
+  border-right: 0;
+}
+
+.segmented button.active {
+  background: var(--brand);
+  color: white;
+}
+
 main {
   min-width: 0;
   padding: 26px 32px;

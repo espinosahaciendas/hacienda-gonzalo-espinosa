@@ -3,6 +3,7 @@ const state = {
   operaciones: [],
   cuenta: null,
   caja: { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 },
+  cajaConciliaciones: { items: [], totalRecibido: 0, totalAplicado: 0, saldo: 0, abiertas: 0 },
   documentos: [],
   vista: "tablero",
   selectedClientId: "",
@@ -27,7 +28,8 @@ const state = {
 let currentPaymentInstruments = [];
 let documentFilterIds = [];
 let selectedDocumentId = "";
-const APP_BUILD = "20260626-externos-vtos-doc-preview";
+let cashReconciliationApplications = [];
+const APP_BUILD = "20260626-caja-conciliaciones";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -115,7 +117,7 @@ function setView(view) {
     operaciones: "Operaciones",
     cuenta: "Cuenta corriente",
     calendario: "Calendario",
-    caja: "Caja diaria",
+    caja: "Caja",
     archivo: "Archivo documental",
     resumenes: "Resumenes",
     comisionistas: "Comisionistas"
@@ -146,6 +148,8 @@ function applyUserRole(user) {
     "#download-backup",
     "#cash-form",
     "#cash-clear",
+    "#cash-rec-form",
+    "#cash-rec-clear",
     "#document-form",
     "#commissionist-load",
     "#commissionist-generate"
@@ -180,13 +184,14 @@ async function logout() {
 }
 
 async function reloadAppData() {
-  const [clientes, operaciones, cuenta, categorias, tabs, caja, documentos] = await Promise.all([
+  const [clientes, operaciones, cuenta, categorias, tabs, caja, cajaConciliaciones, documentos] = await Promise.all([
     fetchJson("/api/clientes"),
     fetchJson("/api/operaciones"),
     fetchJson("/api/cuenta-corriente/resumen"),
     fetchJson("/api/categorias"),
     fetchJson("/api/tabs"),
     fetchJson("/api/caja-diaria"),
+    fetchJson("/api/caja-conciliaciones"),
     fetchJson("/api/documentos")
   ]);
 
@@ -196,10 +201,12 @@ async function reloadAppData() {
   state.categorias = categorias.items || [];
   state.tabRules = tabs.items || [];
   state.caja = caja || { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 };
+  state.cajaConciliaciones = cajaConciliaciones || { items: [], totalRecibido: 0, totalAplicado: 0, saldo: 0, abiertas: 0 };
   state.documentos = documentos.items || [];
 
   renderMetrics();
   renderCajaDiaria();
+  renderCashReconciliations();
   renderDocumentos();
   renderClientes();
   renderOperaciones();
@@ -394,6 +401,22 @@ function setCashMessage(message, type = "") {
   node.className = `form-message ${type}`.trim();
 }
 
+function setCashReconciliationMessage(message, type = "") {
+  const node = $("#cash-rec-message");
+  if (!node) return;
+  node.textContent = message || "";
+  node.className = `form-message ${type}`.trim();
+}
+
+function setCashTab(tab) {
+  const isDaily = tab !== "conciliaciones";
+  $("#cash-daily-view").hidden = !isDaily;
+  $("#cash-reconciliation-view").hidden = isDaily;
+  $all("[data-cash-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.cashTab === (isDaily ? "diaria" : "conciliaciones"));
+  });
+}
+
 function resetCashForm() {
   $("#cash-id").value = "";
   $("#cash-date").value = new Date().toISOString().slice(0, 10);
@@ -408,6 +431,23 @@ function resetCashForm() {
   $("#cash-recovered").checked = false;
   $("#cash-notes").value = "";
   setCashMessage("");
+}
+
+function resetCashReconciliationForm() {
+  const today = new Date().toISOString().slice(0, 10);
+  $("#cash-rec-id").value = "";
+  $("#cash-rec-date").value = today;
+  $("#cash-rec-client").value = "";
+  $("#cash-rec-reference").value = "";
+  $("#cash-rec-amount").value = "";
+  $("#cash-rec-notes").value = "";
+  $("#cash-rec-app-date").value = today;
+  $("#cash-rec-app-concept").value = "";
+  $("#cash-rec-app-to").value = "";
+  $("#cash-rec-app-amount").value = "";
+  cashReconciliationApplications = [];
+  setCashReconciliationMessage("");
+  renderCashReconciliationApplications();
 }
 
 function renderCajaDiaria() {
@@ -437,6 +477,75 @@ function renderCajaDiaria() {
     : `<tr><td colspan="8">Sin movimientos de caja cargados.</td></tr>`;
 }
 
+function renderCashReconciliationApplications() {
+  const total = cashReconciliationApplications.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const recibido = parseMoneyInput($("#cash-rec-amount")?.value || 0);
+  const saldo = recibido - total;
+  $("#cash-rec-app-summary").textContent = cashReconciliationApplications.length
+    ? `${cashReconciliationApplications.length} aplicacion/es - aplicado ${moneyValue(total)} - saldo ${moneyValue(saldo)}`
+    : recibido ? `Sin aplicaciones - saldo ${moneyValue(recibido)}` : "Sin aplicaciones cargadas";
+  $("#cash-rec-app-body").innerHTML = cashReconciliationApplications.length
+    ? cashReconciliationApplications.map((item) => `
+        <tr>
+          <td>${escapeHtml(formatDate(item.fecha))}</td>
+          <td>${escapeHtml(item.concepto || "-")}</td>
+          <td>${escapeHtml(item.destino || "-")}</td>
+          <td class="amount negative">${moneyValue(item.importe)}</td>
+          <td><button type="button" class="small-button danger-button" data-cash-rec-app-remove="${escapeHtml(item.id)}">Quitar</button></td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="5">Sin aplicaciones cargadas.</td></tr>`;
+}
+
+function addCashReconciliationApplication() {
+  const importe = parseMoneyInput($("#cash-rec-app-amount").value);
+  const concepto = $("#cash-rec-app-concept").value.trim();
+  if (!concepto || importe <= 0) {
+    setCashReconciliationMessage("Para agregar una aplicacion carga concepto e importe mayor a cero.", "error");
+    return;
+  }
+  cashReconciliationApplications.push({
+    id: `APP-${Date.now()}-${cashReconciliationApplications.length}`,
+    fecha: $("#cash-rec-app-date").value || $("#cash-rec-date").value,
+    concepto,
+    destino: $("#cash-rec-app-to").value,
+    importe
+  });
+  $("#cash-rec-app-concept").value = "";
+  $("#cash-rec-app-to").value = "";
+  $("#cash-rec-app-amount").value = "";
+  setCashReconciliationMessage("");
+  renderCashReconciliationApplications();
+}
+
+function renderCashReconciliations() {
+  if (!$("#cash-rec-body")) return;
+  const data = state.cajaConciliaciones || {};
+  const items = data.items || [];
+  $("#cash-rec-total-in").textContent = moneyValue(data.totalRecibido || 0);
+  $("#cash-rec-total-out").textContent = moneyValue(data.totalAplicado || 0);
+  $("#cash-rec-balance").textContent = moneyValue(data.saldo || 0);
+  $("#cash-rec-open-count").textContent = data.abiertas || 0;
+  $("#cash-rec-body").innerHTML = items.length
+    ? items.map((item) => `
+        <tr>
+          <td>${escapeHtml(item.fecha || "-")}</td>
+          <td><strong>${escapeHtml(item.recibidoDe || "-")}</strong>${item.observacion ? `<small>${escapeHtml(item.observacion)}</small>` : ""}</td>
+          <td>${escapeHtml(item.referencia || "-")}</td>
+          <td class="amount positive">${moneyValue(item.importeRecibido)}</td>
+          <td class="amount negative">${moneyValue(item.totalAplicado)}</td>
+          <td class="${amountClass(item.saldo)}">${moneyValue(item.saldo)}</td>
+          <td>${Math.abs(Number(item.saldo || 0)) <= 0.01 ? "Cerrada" : "Abierta"}</td>
+          <td>
+            ${state.usuario?.rol === "CONSULTA" ? "-" : `<button type="button" class="small-button" data-cash-rec-edit="${escapeHtml(item.id)}">Editar</button>
+            <button type="button" class="small-button danger-button" data-cash-rec-delete="${escapeHtml(item.id)}">Eliminar</button>`}
+          </td>
+        </tr>
+        ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} · ${escapeHtml(app.concepto || "-")} · ${moneyValue(app.importe)}`).join(" | ")}</td></tr>` : ""}
+      `).join("")
+    : `<tr><td colspan="8">Sin conciliaciones de efectivo cargadas.</td></tr>`;
+}
+
 function fillCashForm(item) {
   $("#cash-id").value = item.id || "";
   $("#cash-date").value = dateToInput(item.fecha);
@@ -451,6 +560,25 @@ function fillCashForm(item) {
   $("#cash-recovered").checked = Boolean(item.recuperado);
   $("#cash-notes").value = item.observacion || "";
   setCashMessage("Movimiento listo para editar.", "ok");
+}
+
+function fillCashReconciliationForm(item) {
+  $("#cash-rec-id").value = item.id || "";
+  $("#cash-rec-date").value = dateToInput(item.fecha);
+  $("#cash-rec-client").value = item.recibidoDe || "";
+  $("#cash-rec-reference").value = item.referencia || "";
+  $("#cash-rec-amount").value = moneyValue(item.importeRecibido);
+  $("#cash-rec-notes").value = item.observacion || "";
+  cashReconciliationApplications = (item.aplicaciones || []).map((app, index) => ({
+    id: app.id || `EDIT-${index}`,
+    fecha: dateToInput(app.fecha),
+    concepto: app.concepto || "",
+    destino: app.destino || "",
+    importe: Number(app.importe || 0)
+  }));
+  setCashTab("conciliaciones");
+  renderCashReconciliationApplications();
+  setCashReconciliationMessage("Conciliacion lista para editar.", "ok");
 }
 
 async function saveCashMovement(event) {
@@ -482,11 +610,44 @@ async function saveCashMovement(event) {
   }
 }
 
+async function saveCashReconciliation(event) {
+  event.preventDefault();
+  setCashReconciliationMessage("Guardando conciliacion...");
+  const payload = {
+    id: $("#cash-rec-id").value,
+    fecha: $("#cash-rec-date").value,
+    recibidoDe: $("#cash-rec-client").value,
+    referencia: $("#cash-rec-reference").value,
+    importeRecibido: parseMoneyInput($("#cash-rec-amount").value),
+    observacion: $("#cash-rec-notes").value,
+    aplicaciones: cashReconciliationApplications
+  };
+  try {
+    const path = payload.id ? `/api/caja-conciliaciones/${encodeURIComponent(payload.id)}` : "/api/caja-conciliaciones";
+    await fetchJson(path, { method: payload.id ? "PUT" : "POST", body: JSON.stringify(payload) });
+    setCashReconciliationMessage("Conciliacion guardada.", "ok");
+    resetCashReconciliationForm();
+    await reloadAppData();
+    setView("caja");
+    setCashTab("conciliaciones");
+  } catch (error) {
+    setCashReconciliationMessage(error.message, "error");
+  }
+}
+
 async function deleteCashMovement(id) {
   if (!window.confirm("Se eliminara este movimiento de caja. ¿Continuar?")) return;
   await fetchJson(`/api/caja-diaria/${encodeURIComponent(id)}`, { method: "DELETE" });
   await reloadAppData();
   setView("caja");
+}
+
+async function deleteCashReconciliation(id) {
+  if (!window.confirm("Se eliminara esta conciliacion de efectivo. ¿Continuar?")) return;
+  await fetchJson(`/api/caja-conciliaciones/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await reloadAppData();
+  setView("caja");
+  setCashTab("conciliaciones");
 }
 
 function printCashReport() {
@@ -4798,6 +4959,34 @@ async function init() {
   $("#cash-print").addEventListener("click", printCashReport);
   $("#cash-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
   $("#cash-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
+  $all("[data-cash-tab]").forEach((button) => {
+    button.addEventListener("click", () => setCashTab(button.dataset.cashTab));
+  });
+  $("#cash-rec-form").addEventListener("submit", saveCashReconciliation);
+  $("#cash-rec-clear").addEventListener("click", resetCashReconciliationForm);
+  $("#cash-rec-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
+  $("#cash-rec-amount").addEventListener("blur", (event) => {
+    formatMoneyInput(event.target);
+    renderCashReconciliationApplications();
+  });
+  $("#cash-rec-app-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
+  $("#cash-rec-app-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
+  $("#cash-rec-app-add").addEventListener("click", addCashReconciliationApplication);
+  $("#cash-rec-app-body").addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-cash-rec-app-remove]");
+    if (!removeButton) return;
+    cashReconciliationApplications = cashReconciliationApplications.filter((item) => item.id !== removeButton.dataset.cashRecAppRemove);
+    renderCashReconciliationApplications();
+  });
+  $("#cash-rec-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-cash-rec-edit]");
+    const deleteButton = event.target.closest("[data-cash-rec-delete]");
+    if (editButton) {
+      const item = (state.cajaConciliaciones.items || []).find((row) => row.id === editButton.dataset.cashRecEdit);
+      if (item) fillCashReconciliationForm(item);
+    }
+    if (deleteButton) deleteCashReconciliation(deleteButton.dataset.cashRecDelete);
+  });
   $("#cash-body").addEventListener("click", (event) => {
     const editButton = event.target.closest("[data-cash-edit]");
     const deleteButton = event.target.closest("[data-cash-delete]");
@@ -5129,6 +5318,8 @@ async function init() {
   $("#commissionist-due").value = today;
   renderRealCommissionSummary();
   resetCashForm();
+  resetCashReconciliationForm();
+  setCashTab("diaria");
   syncOperationType();
   setOperationModeNew();
   showOperationWorkspace();
