@@ -29,7 +29,7 @@ let currentPaymentInstruments = [];
 let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260626-caja-conciliaciones";
+const APP_BUILD = "20260626-frigo-total-kilos";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2849,9 +2849,11 @@ function renderCategorySuggestions() {
 
 function renderSaleLines(lines) {
   const totalCabezas = lines.reduce((sum, line) => sum + Number(line.cabezas || 0), 0);
+  const totalKgBruto = lines.reduce((sum, line) => sum + Number(line.kgBruto || 0), 0);
   const totalImporte = lines.reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
+  const faena = isFaenaSaleOperation();
   $("#sale-lines-summary").textContent = lines.length
-    ? `${lines.length} linea${lines.length === 1 ? "" : "s"} - ${totalCabezas} cab. - ${currency.format(totalImporte)}`
+    ? `${lines.length} linea${lines.length === 1 ? "" : "s"} - ${totalCabezas} cab.${faena ? ` - ${kgValue(totalKgBruto)}` : ""} - ${currency.format(totalImporte)}`
     : "Sin lineas";
   $("#sale-lines-body").innerHTML = lines.length
     ? lines.map((line) => `
@@ -2866,7 +2868,7 @@ function renderSaleLines(lines) {
             <button type="button" class="small-button danger-button" data-delete-sale-line="${escapeHtml(line.id)}">Quitar</button>
           </td>
         </tr>
-      `).join("")
+      `).join("") + (faena ? `<tr class="report-total"><td colspan="2">Total kilos</td><td>${kgValue(totalKgBruto)}</td><td colspan="3"></td></tr>` : "")
     : `<tr><td colspan="6">Sin lineas cargadas todavia.</td></tr>`;
   renderPartialBilling();
 }
@@ -3093,6 +3095,11 @@ function isFaenaSaleOperation() {
   const draft = operation.draftData || {};
   const formDestination = $("#operation-destination") ? $("#operation-destination").value : "";
   return normalizeSearch(formDestination || operation.destino || draft.destino).includes("faena");
+}
+
+function isFaenaReportOperation(operation = state.currentOperation) {
+  const draft = operation && operation.draftData ? operation.draftData : {};
+  return normalizeSearch(operation?.destino || draft.destino || "").includes("faena") || isFrigorificoIvaOperation(operation);
 }
 
 function syncFaenaSaleInputs() {
@@ -4506,6 +4513,9 @@ function renderReport() {
   const sellerLinesTotal = (operation.saleLines || []).reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
   const buyerLines = saleControlRows(operation.saleLines || [], "comp");
   const buyerLinesTotal = (operation.saleLines || []).reduce((sum, line) => sum + Number(line.importeComp || line.importeVend || 0), 0);
+  const showKgTotal = isFaenaReportOperation(operation);
+  const totalKgBruto = (operation.saleLines || []).reduce((sum, line) => sum + Number(line.kgBruto || 0), 0);
+  const kgTotalReportRow = showKgTotal ? `<tr class="report-total"><td colspan="2">Total kilos</td><td>${kgValue(totalKgBruto)}</td><td colspan="7"></td></tr>` : "";
   const loadTableHead = `<thead><tr><th>Categoria</th><th>Cant.</th><th>Kg bruto</th><th>Desb.</th><th>Kg neto</th><th>Kg calculo</th><th>Prom.</th><th>TAB</th><th>Precio final</th><th>Importe</th></tr></thead>`;
   const operationData = (party, name, cuit, counterpartName, counterpartCuit) => `
     <div class="report-kv">
@@ -4649,7 +4659,7 @@ function renderReport() {
         ${operationData("Productor", operation.vendedor, sellerCuit, operation.comprador, buyerCuit)}
         ${operationNote}
         ${partyNote("Observaciones productor", sellerObservation)}
-        <div class="report-section"><h3>Detalle de carga vendedor</h3><table class="report-table control-table">${loadTableHead}<tbody>${sellerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
+        <div class="report-section"><h3>Detalle de carga vendedor</h3><table class="report-table control-table">${loadTableHead}<tbody>${sellerLines}${kgTotalReportRow}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
         ${partialReport}
         ${reportExportButton("seller")}
       </section>
@@ -4658,7 +4668,7 @@ function renderReport() {
         ${operationData("Comprador", operation.comprador, buyerCuit, operation.vendedor, sellerCuit)}
         ${operationNote}
         ${partyNote("Observaciones comprador", buyerObservation)}
-        <div class="report-section"><h3>Detalle de carga comprador</h3><table class="report-table control-table">${loadTableHead}<tbody>${buyerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
+        <div class="report-section"><h3>Detalle de carga comprador</h3><table class="report-table control-table">${loadTableHead}<tbody>${buyerLines}${kgTotalReportRow}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
         ${reportExportButton("buyer")}
       </section>
     </div>
@@ -4677,7 +4687,7 @@ function renderReport() {
         ${operationData("Productor", operation.vendedor, sellerCuit, operation.comprador, buyerCuit)}
         ${operationNote}
         ${partyNote("Observaciones productor", sellerObservation)}
-        <div class="report-section"><h3>Carga real vendedor</h3><table class="report-table control-table">${loadTableHead}<tbody>${sellerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
+        <div class="report-section"><h3>Carga real vendedor</h3><table class="report-table control-table">${loadTableHead}<tbody>${sellerLines}${kgTotalReportRow}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(sellerLinesTotal)}</td></tr></tbody></table></div>
         ${isDirectOperation(operation) ? detailReport : ""}
         ${frigoReport}
         ${hasPartialBilling ? "" : dueReport(sellerDueRows)}
@@ -4695,7 +4705,7 @@ function renderReport() {
         ${operationData("Comprador", operation.comprador, buyerCuit, operation.vendedor, sellerCuit)}
         ${operationNote}
         ${partyNote("Observaciones comprador", buyerObservation)}
-        <div class="report-section"><h3>Carga real comprador</h3><table class="report-table control-table">${loadTableHead}<tbody>${buyerLines}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
+        <div class="report-section"><h3>Carga real comprador</h3><table class="report-table control-table">${loadTableHead}<tbody>${buyerLines}${kgTotalReportRow}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
         ${detailReport}
         ${hasPartialBilling ? "" : dueReport(buyerDueRows)}
         ${buyerLiquidationSummary}
