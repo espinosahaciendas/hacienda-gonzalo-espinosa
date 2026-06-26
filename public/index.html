@@ -1217,6 +1217,21 @@
               <label id="cc-external-amount-wrap">Importe<input id="cc-external-amount" class="money-input" inputmode="decimal"></label>
               <label>Observacion<input id="cc-external-notes"></label>
             </div>
+            <div class="cc-subpanel">
+              <label class="check-field"><input type="checkbox" id="cc-external-multiple-due"> Cargar varios vencimientos para esta liquidacion</label>
+              <div id="cc-external-due-panel" hidden>
+                <div class="panel-head">
+                  <h3>Vencimientos asociados</h3>
+                  <span class="subtle" id="cc-external-due-summary">Sin vencimientos cargados</span>
+                </div>
+                <div class="form-grid">
+                  <label>Fecha vencimiento<input id="cc-external-due-date" type="date"></label>
+                  <label>Importe neto a cuenta corriente<input id="cc-external-due-amount" class="money-input" inputmode="decimal"></label>
+                </div>
+                <div class="form-actions"><button type="button" class="ghost-button" id="cc-external-due-add">Agregar vencimiento</button></div>
+                <div class="table-wrap compact-table"><table><thead><tr><th>Vencimiento</th><th>Importe</th><th></th></tr></thead><tbody id="cc-external-due-body"></tbody></table></div>
+              </div>
+            </div>
             <div class="cc-subpanel" id="cc-external-mag-panel" hidden>
               <div class="panel-head">
                 <h3>Venta MAG</h3>
@@ -1579,6 +1594,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260626-liquidacion-facturado-iva-sync"></script>
+    <script src="/app.js?v=20260626-externos-varios-vencimientos"></script>
   </body>
 </html>

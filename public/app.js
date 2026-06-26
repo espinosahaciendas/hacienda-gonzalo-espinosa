@@ -18,13 +18,14 @@ const state = {
   liquidationFacturadoTouched: false,
   liquidationIvaProdTouched: false,
   liquidationIvaCompTouched: false,
+  externalDueRows: [],
   commissionistRows: [],
   usuario: null,
   weightTickets: [],
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260626-liquidacion-facturado-iva-sync";
+const APP_BUILD = "20260626-externos-varios-vencimientos";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1257,11 +1258,17 @@ function openCurrentAccountPanel(panelId) {
     setMoneyInput("#cc-external-amount", 0);
     setMoneyInput("#cc-external-mag-net", 0);
     setMoneyInput("#cc-external-mag-iva", 0);
+    $("#cc-external-multiple-due").checked = false;
+    $("#cc-external-due-panel").hidden = true;
+    $("#cc-external-due-date").value = today;
+    setMoneyInput("#cc-external-due-amount", 0);
+    state.externalDueRows = [];
     $("#cc-external-commissionist").value = "";
     setMoneyInput("#cc-external-commission-base", 0);
     $("#cc-external-commission-percent").value = "";
     setMoneyInput("#cc-external-commission-amount", 0);
     syncExternalConceptFields();
+    renderExternalDueRows();
   } else {
     $("#cc-payment-client").value = $("#cc-client-search").value;
     $("#cc-payment-date").value = today;
@@ -1280,7 +1287,7 @@ function openCurrentAccountPanel(panelId) {
 }
 
 function externalMovementBaseId(id) {
-  return String(id || "").replace(/-(NETO|IVA)$/i, "");
+  return String(id || "").replace(/-(NETO(?:-\d+)?|IVA|VTO-\d+)$/i, "");
 }
 
 function isExternalMagSale() {
@@ -1291,6 +1298,78 @@ function syncExternalConceptFields() {
   const isMag = isExternalMagSale();
   $("#cc-external-mag-panel").hidden = !isMag;
   $("#cc-external-amount-wrap").hidden = isMag;
+  renderExternalDueRows();
+}
+
+function externalDueTargetAmount() {
+  if (isExternalMagSale()) {
+    return Math.max(numberValue("#cc-external-mag-net") - numberValue("#cc-external-mag-iva"), 0);
+  }
+  return numberValue("#cc-external-amount");
+}
+
+function toggleExternalDuePanel() {
+  const enabled = $("#cc-external-multiple-due").checked;
+  $("#cc-external-due-panel").hidden = !enabled;
+  renderExternalDueRows();
+}
+
+function renderExternalDueRows() {
+  const body = $("#cc-external-due-body");
+  if (!body) return;
+  const total = state.externalDueRows.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const target = externalDueTargetAmount();
+  $("#cc-external-due-summary").textContent = state.externalDueRows.length
+    ? `${state.externalDueRows.length} vencimiento/s - total ${moneyValue(total)}${target ? ` / esperado ${moneyValue(target)}` : ""}`
+    : `Sin vencimientos cargados${target ? ` - esperado ${moneyValue(target)}` : ""}`;
+  body.innerHTML = state.externalDueRows.length
+    ? state.externalDueRows.map((item) => `<tr><td>${escapeHtml(formatDate(item.vencimiento))}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button danger-button" data-cc-remove-external-due="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
+    : `<tr><td colspan="3">Sin vencimientos cargados.</td></tr>`;
+}
+
+function addExternalDueRow() {
+  const vencimiento = $("#cc-external-due-date").value || $("#cc-external-due").value;
+  const importe = numberValue("#cc-external-due-amount");
+  if (!vencimiento || importe <= 0) {
+    $("#cc-external-message").textContent = "Para agregar un vencimiento cargá fecha e importe mayor a cero.";
+    $("#cc-external-message").className = "form-message error";
+    return;
+  }
+  state.externalDueRows.push({
+    id: `VTO-${Date.now()}-${state.externalDueRows.length}`,
+    vencimiento,
+    importe
+  });
+  $("#cc-external-message").textContent = "";
+  $("#cc-external-message").className = "form-message";
+  $("#cc-external-due-date").value = vencimiento;
+  setMoneyInput("#cc-external-due-amount", 0);
+  renderExternalDueRows();
+}
+
+function collectExternalDueRows() {
+  if (!$("#cc-external-multiple-due").checked) return [];
+  return state.externalDueRows.map((item) => ({
+    vencimiento: item.vencimiento,
+    importe: Number(item.importe || 0)
+  }));
+}
+
+function validateExternalDueRows() {
+  if (!$("#cc-external-multiple-due").checked) return true;
+  const total = state.externalDueRows.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const target = externalDueTargetAmount();
+  if (!state.externalDueRows.length) {
+    $("#cc-external-message").textContent = "Marcaste varios vencimientos, pero todavia no agregaste ninguno.";
+    $("#cc-external-message").className = "form-message error";
+    return false;
+  }
+  if (Math.abs(total - target) > 0.02) {
+    $("#cc-external-message").textContent = `La suma de vencimientos (${moneyValue(total)}) debe coincidir con el neto que impacta en cuenta corriente (${moneyValue(target)}).`;
+    $("#cc-external-message").className = "form-message error";
+    return false;
+  }
+  return true;
 }
 
 function syncExternalCommissionAmount() {
@@ -1308,6 +1387,7 @@ function openExternalMovementEdit(movementId) {
   const group = (state.cuenta?.movimientos || []).filter((item) => canEditExternalMovement(item) && externalMovementBaseId(item.id) === baseId);
   const netRow = group.find((item) => item.tipoDesglose === "NETO") || movement;
   const ivaRow = group.find((item) => item.tipoDesglose === "IVA_FISCAL");
+  const accountRows = group.filter((item) => item.tipoDesglose !== "IVA_FISCAL");
   const isMag = group.some((item) => String(item.concepto || "").toUpperCase().includes("VENTA MAG"));
   const signSource = netRow || ivaRow || movement;
   state.editingExternalMovementId = movement.id;
@@ -1323,15 +1403,27 @@ function openExternalMovementEdit(movementId) {
   $("#cc-external-receipt").value = signSource.comprobante || "";
   $("#cc-external-date").value = dateToInput(signSource.fecha || "");
   $("#cc-external-due").value = dateToInput(signSource.vencimiento || "");
-  setMoneyInput("#cc-external-amount", Math.abs(Number(movement.importe || 0)));
-  setMoneyInput("#cc-external-mag-net", Math.abs(Number(netRow?.importe || 0)) + Math.abs(Number(ivaRow?.importe || 0)));
+  const accountTotal = accountRows.reduce((sum, item) => sum + Math.abs(Number(item.importe || 0)), 0);
+  setMoneyInput("#cc-external-amount", accountTotal || Math.abs(Number(movement.importe || 0)));
+  setMoneyInput("#cc-external-mag-net", accountTotal + Math.abs(Number(ivaRow?.importe || 0)));
   setMoneyInput("#cc-external-mag-iva", Math.abs(Number(ivaRow?.importe || 0)));
   $("#cc-external-notes").value = signSource.observacion || "";
-  $("#cc-external-commissionist").value = netRow?.comisionista || "";
-  setMoneyInput("#cc-external-commission-base", Number(netRow?.baseComision || 0));
-  $("#cc-external-commission-percent").value = netRow?.porcComision || "";
-  setMoneyInput("#cc-external-commission-amount", Number(netRow?.importeComision || 0));
+  const commissionRow = accountRows.find((item) => item.comisionista || Number(item.baseComision || 0) || Number(item.importeComision || 0)) || netRow;
+  $("#cc-external-commissionist").value = commissionRow?.comisionista || "";
+  setMoneyInput("#cc-external-commission-base", Number(commissionRow?.baseComision || 0));
+  $("#cc-external-commission-percent").value = commissionRow?.porcComision || "";
+  setMoneyInput("#cc-external-commission-amount", Number(commissionRow?.importeComision || 0));
+  state.externalDueRows = accountRows.length > 1
+    ? accountRows.map((item, index) => ({
+        id: `EDIT-${index}`,
+        vencimiento: dateToInput(item.vencimiento || signSource.vencimiento || ""),
+        importe: Math.abs(Number(item.importe || 0))
+      }))
+    : [];
+  $("#cc-external-multiple-due").checked = accountRows.length > 1;
+  $("#cc-external-due-panel").hidden = accountRows.length <= 1;
   syncExternalConceptFields();
+  renderExternalDueRows();
 }
 
 function getPaymentPendingMovements(clientSelector = "#cc-payment-client", typeSelector = "#cc-payment-type") {
@@ -1459,6 +1551,7 @@ function renderCurrentAccountInstruments() {
 async function saveExternalCurrentAccountMovement() {
   try {
     const isMag = isExternalMagSale();
+    if (!validateExternalDueRows()) return;
     const editingId = state.editingExternalMovementId;
     const path = editingId
       ? `/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(editingId)}`
@@ -1474,6 +1567,7 @@ async function saveExternalCurrentAccountMovement() {
         vencimiento: $("#cc-external-due").value,
         importe: isMag ? numberValue("#cc-external-mag-net") : numberValue("#cc-external-amount"),
         ivaFiscal: isMag ? numberValue("#cc-external-mag-iva") : 0,
+        vencimientos: collectExternalDueRows(),
         comisionista: $("#cc-external-commissionist").value,
         baseComision: numberValue("#cc-external-commission-base"),
         porcComision: percentValue("#cc-external-commission-percent"),
@@ -4669,6 +4763,17 @@ async function init() {
   });
   $("#cc-save-external").addEventListener("click", saveExternalCurrentAccountMovement);
   $("#cc-external-concept").addEventListener("change", syncExternalConceptFields);
+  $("#cc-external-multiple-due").addEventListener("change", toggleExternalDuePanel);
+  $("#cc-external-due-add").addEventListener("click", addExternalDueRow);
+  $("#cc-external-due-body").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cc-remove-external-due]");
+    if (!button) return;
+    state.externalDueRows = state.externalDueRows.filter((item) => item.id !== button.dataset.ccRemoveExternalDue);
+    renderExternalDueRows();
+  });
+  $("#cc-external-amount").addEventListener("input", renderExternalDueRows);
+  $("#cc-external-mag-net").addEventListener("input", renderExternalDueRows);
+  $("#cc-external-mag-iva").addEventListener("input", renderExternalDueRows);
   $("#cc-external-commission-base").addEventListener("input", syncExternalCommissionAmount);
   $("#cc-external-commission-percent").addEventListener("input", syncExternalCommissionAmount);
   $("#cc-open-payment").addEventListener("click", () => openCurrentAccountPanel("#cc-payment-panel"));
