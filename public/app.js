@@ -30,7 +30,7 @@ let currentPaymentInstruments = [];
 let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260626-frigo-comprador-auto";
+const APP_BUILD = "20260626-frigo-comprador-iva-control";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -3392,13 +3392,14 @@ function calculateLiquidationPreview() {
   const facturado = numberValue("#liq-facturado");
   const ivaProd = numberValue("#liq-iva-prod");
   const ivaComp = numberValue("#liq-iva-comp");
+  const frigo = isFrigorificoIvaOperation();
+  const frigoCalc = frigo ? getFrigorificoCalc() : null;
   const efectivoProd = normalizeFrigorificoCashInput(numberValue("#liq-efectivo-prod"));
-  const efectivoComp = numberValue("#liq-efectivo-comp");
+  const efectivoComp = frigoCalc ? frigoCalc.efectivoComp : numberValue("#liq-efectivo-comp");
   const cashExpenseProd = numberValue("#liq-cash-exp-prod");
   const expenses = getSellerExpenses();
   const buyerExpenses = getBuyerExpenses();
   const consigned = isConsignedOperation();
-  const frigo = isFrigorificoIvaOperation();
   const comFactProd = facturado * commissionPercent("#liq-comision-fact-prod-enabled", "#liq-comision-fact-prod-pct") / 100;
   const comFactComp = facturado * commissionPercent("#liq-comision-fact-comp-enabled", "#liq-comision-fact-comp-pct") / 100;
   const consigneeCommission = facturado * percentValue("#liq-consignee-commission-pct") / 100;
@@ -3502,6 +3503,9 @@ function renderLiquidationTotals() {
   const calc = calculateLiquidationPreview();
   if (isFrigorificoIvaOperation() && document.activeElement !== $("#liq-efectivo-prod")) {
     setMoneyInput("#liq-efectivo-prod", calc.efectivoProd);
+  }
+  if (isFrigorificoIvaOperation()) {
+    setMoneyInput("#liq-efectivo-comp", calc.efectivoComp);
   }
   setMoneyInput("#liq-comision-fact-prod", calc.comFactProd);
   setMoneyInput("#liq-comision-fact-comp", calc.comFactComp);
@@ -3653,7 +3657,7 @@ function getFrigorificoCalc(operation = state.currentOperation) {
     : (storedBrutoSinIva || brutoSinIvaAuto);
   const efectivoSinIva = Math.max(brutoSinIva - facturado, 0);
   const ivaLiquidacion = facturado * 0.105;
-  const ivaComprador = numberValue("#liq-iva-comp") || Number(liquidation.ivaComp || ivaLiquidacion);
+  const ivaComprador = ivaLiquidacion;
   const ivaEfectivo = efectivoSinIva * 0.105;
   const efectivoConIva = efectivoSinIva + ivaEfectivo;
   const facturadoConIvaComp = facturado + ivaComprador;
