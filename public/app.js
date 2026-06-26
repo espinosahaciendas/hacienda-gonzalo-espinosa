@@ -25,7 +25,9 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260626-externos-varios-vencimientos";
+let documentFilterIds = [];
+let selectedDocumentId = "";
+const APP_BUILD = "20260626-externos-vtos-doc-preview";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -232,6 +234,10 @@ function resetDocumentForm() {
   setDocumentMessage("");
 }
 
+function documentDownloadUrl(documentId) {
+  return `/api/documentos/${encodeURIComponent(documentId)}/descargar`;
+}
+
 function documentReferenceText(documento) {
   const type = documento.entidadTipo || "GENERAL";
   const id = documento.entidadId || documento.operacion || documento.movimientoId || documento.pagoId || "-";
@@ -264,24 +270,53 @@ function documentActionButtons(movement) {
 
 function renderDocumentos() {
   if (!$("#document-body")) return;
-  const docs = state.documentos || [];
-  $("#document-summary").textContent = docs.length ? `${docs.length} documento/s cargado/s.` : "Sin documentos cargados.";
+  const allDocs = state.documentos || [];
+  const docs = documentFilterIds.length
+    ? allDocs.filter((documento) => documentFilterIds.includes(String(documento.id)))
+    : allDocs;
+  $("#document-show-all").hidden = !documentFilterIds.length;
+  $("#document-summary").textContent = documentFilterIds.length
+    ? docs.length
+      ? `${docs.length} PDF relacionado/s con el movimiento seleccionado.`
+      : "No hay PDF adjunto para este movimiento."
+    : docs.length ? `${docs.length} documento/s cargado/s.` : "Sin documentos cargados.";
   $("#document-body").innerHTML = docs.length
     ? docs.map((documento) => `
-        <tr>
+        <tr class="${String(documento.id) === selectedDocumentId ? "selected-row" : ""}">
           <td>${escapeHtml(documento.creadoEn ? new Date(documento.creadoEn).toLocaleDateString("es-AR") : "-")}</td>
           <td>${escapeHtml(documento.cliente || "-")}</td>
           <td>${escapeHtml(documento.tipo || "-")}</td>
           <td><strong>${escapeHtml(documento.titulo || "-")}</strong>${documento.observacion ? `<small>${escapeHtml(documento.observacion)}</small>` : ""}</td>
           <td>${escapeHtml(documentReferenceText(documento))}</td>
           <td>${escapeHtml(documento.nombreOriginal || "-")}<small>${escapeHtml(`${documento.storageProvider || "-"} / ${documento.storageBucket || "-"} / ${documento.storagePath || "-"}`)}</small></td>
-          <td><a class="small-button" href="/api/documentos/${encodeURIComponent(documento.id)}/descargar" target="_blank" rel="noopener">Ver PDF</a>${state.usuario?.rol === "CONSULTA" ? "" : ` <button type="button" class="small-button danger-button" data-document-delete="${escapeHtml(documento.id)}">Eliminar</button>`}</td>
+          <td><button type="button" class="small-button" data-document-view="${escapeHtml(documento.id)}">Ver en pantalla</button> <a class="small-button" href="${documentDownloadUrl(documento.id)}" target="_blank" rel="noopener">Abrir PDF</a>${state.usuario?.rol === "CONSULTA" ? "" : ` <button type="button" class="small-button danger-button" data-document-delete="${escapeHtml(documento.id)}">Eliminar</button>`}</td>
         </tr>
       `).join("")
     : `<tr><td colspan="7">Sin documentos cargados.</td></tr>`;
 }
 
+function showDocumentPreview(documentId) {
+  const documento = (state.documentos || []).find((item) => String(item.id) === String(documentId));
+  if (!documento) return;
+  selectedDocumentId = String(documento.id);
+  const url = documentDownloadUrl(documento.id);
+  $("#document-preview-panel").hidden = false;
+  $("#document-preview-title").textContent = documento.titulo || documento.nombreOriginal || "Vista del comprobante";
+  $("#document-preview-subtitle").textContent = `${documento.cliente || "-"} · ${documentReferenceText(documento)}`;
+  $("#document-preview-open").href = url;
+  $("#document-preview-frame").src = url;
+  renderDocumentos();
+}
+
+function clearDocumentPreview() {
+  selectedDocumentId = "";
+  $("#document-preview-panel").hidden = true;
+  $("#document-preview-frame").src = "about:blank";
+}
+
 function fillDocumentFormFromMovement(movement) {
+  documentFilterIds = [];
+  clearDocumentPreview();
   const isPayment = Boolean(movement.pagoId);
   $("#document-entity-type").value = isPayment ? "PAGO" : movement.operacion ? "OPERACION" : "MOVIMIENTO";
   $("#document-entity-id").value = isPayment ? movement.pagoId : movement.operacion || movement.id || "";
@@ -291,6 +326,21 @@ function fillDocumentFormFromMovement(movement) {
   $("#document-notes").value = movement.concepto || "";
   setView("archivo");
   setDocumentMessage("Referencia cargada. Selecciona el PDF y guarda.", "ok");
+}
+
+function openDocumentsForMovement(movement) {
+  const docs = relatedDocumentsForMovement(movement);
+  documentFilterIds = docs.map((documento) => String(documento.id));
+  setView("archivo");
+  if (docs.length) {
+    showDocumentPreview(docs[0].id);
+    setDocumentMessage(`${docs.length} PDF relacionado/s.`, "ok");
+  } else {
+    clearDocumentPreview();
+    fillDocumentFormFromMovement(movement);
+    setDocumentMessage("Este movimiento todavia no tiene PDF adjunto. Queda cargada la referencia por si queres adjuntarlo.", "error");
+  }
+  renderDocumentos();
 }
 
 async function saveDocument(event) {
@@ -334,6 +384,7 @@ async function deleteDocument(documentId) {
   await fetchJson(`/api/documentos/${encodeURIComponent(documentId)}`, { method: "DELETE" });
   await reloadAppData();
   setView("archivo");
+  if (String(selectedDocumentId) === String(documentId)) clearDocumentPreview();
 }
 
 function setCashMessage(message, type = "") {
@@ -1298,6 +1349,12 @@ function syncExternalConceptFields() {
   const isMag = isExternalMagSale();
   $("#cc-external-mag-panel").hidden = !isMag;
   $("#cc-external-amount-wrap").hidden = isMag;
+  $("#cc-external-multiple-due").closest(".cc-subpanel").hidden = isMag;
+  if (isMag) {
+    $("#cc-external-multiple-due").checked = false;
+    $("#cc-external-due-panel").hidden = true;
+    state.externalDueRows = [];
+  }
   renderExternalDueRows();
 }
 
@@ -4752,7 +4809,18 @@ async function init() {
   });
   $("#document-form").addEventListener("submit", saveDocument);
   $("#document-clear").addEventListener("click", resetDocumentForm);
+  $("#document-show-all").addEventListener("click", () => {
+    documentFilterIds = [];
+    clearDocumentPreview();
+    renderDocumentos();
+    setDocumentMessage("");
+  });
   $("#document-body").addEventListener("click", (event) => {
+    const viewButton = event.target.closest("[data-document-view]");
+    if (viewButton) {
+      showDocumentPreview(viewButton.dataset.documentView);
+      return;
+    }
     const deleteButton = event.target.closest("[data-document-delete]");
     if (deleteButton) deleteDocument(deleteButton.dataset.documentDelete);
   });
@@ -4814,7 +4882,7 @@ async function init() {
     }
     const listDocumentButton = event.target.closest("[data-document-list]");
     if (listDocumentButton) {
-      fillDocumentFormFromMovement(JSON.parse(decodeURIComponent(listDocumentButton.dataset.documentList)));
+      openDocumentsForMovement(JSON.parse(decodeURIComponent(listDocumentButton.dataset.documentList)));
       return;
     }
     const receiptButton = event.target.closest("[data-cc-payment-receipt]");

@@ -813,6 +813,18 @@ label textarea {
   padding: 8px 10px;
 }
 
+.selected-row {
+  background: var(--accent-soft);
+}
+
+.document-preview-frame {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: block;
+  height: min(72vh, 760px);
+  width: 100%;
+}
+
 .liquidation-panel {
   display: grid;
   gap: 14px;

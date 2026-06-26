@@ -1519,12 +1519,24 @@
           </form>
         </div>
 
+        <div class="panel" id="document-preview-panel" hidden>
+          <div class="panel-head">
+            <div>
+              <h2 id="document-preview-title">Vista del comprobante</h2>
+              <p class="subtle" id="document-preview-subtitle">Selecciona un PDF para verlo en pantalla.</p>
+            </div>
+            <a class="ghost-button" id="document-preview-open" href="#" target="_blank" rel="noopener">Abrir en otra pestaña</a>
+          </div>
+          <iframe id="document-preview-frame" class="document-preview-frame" title="Vista previa PDF"></iframe>
+        </div>
+
         <div class="panel">
           <div class="panel-head">
             <div>
               <h2>Documentos cargados</h2>
               <p class="subtle" id="document-summary">Sin documentos cargados.</p>
             </div>
+            <button type="button" class="ghost-button" id="document-show-all" hidden>Ver todos</button>
           </div>
           <div class="table-wrap compact-table">
             <table>
@@ -1594,6 +1606,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260626-externos-varios-vencimientos"></script>
+    <script src="/app.js?v=20260626-externos-vtos-doc-preview"></script>
   </body>
 </html>
