@@ -931,7 +931,7 @@
                   </div>
                   <div class="economic-box">
                     <div><span>Imp. neto final con IVA</span><input id="frigo-neto-final" class="money-input" inputmode="decimal"></div>
-                    <div><span>Imp. bruto OP sin IVA</span><strong id="frigo-bruto-sin-iva">$ 0,00</strong></div>
+                    <div><span>Imp. bruto OP sin IVA</span><input id="frigo-bruto-sin-iva" class="money-input" inputmode="decimal"></div>
                     <div><span>Imp. bruto liquidado</span><strong id="frigo-bruto-liquidado">$ 0,00</strong></div>
                     <div><span>IVA s/bruto 10,5%</span><strong id="frigo-iva-liquidacion">$ 0,00</strong></div>
                     <div><span>Efectivo sin IVA</span><strong id="frigo-efectivo-sin-iva">$ 0,00</strong></div>
@@ -1061,6 +1061,12 @@
                     <div class="advanced-subpanel cash-block">
                       <h3>Efectivo</h3>
                       <label>Importe efectivo<input id="liq-efectivo-comp" class="money-input" inputmode="decimal"></label>
+                      <div class="economic-box frigo-only" id="frigo-buyer-calc-box" hidden>
+                        <div><span>Total comprador con IVA</span><strong id="frigo-comp-total">$ 0,00</strong></div>
+                        <div><span>Facturado + IVA liquidacion</span><strong id="frigo-comp-facturado-iva">$ 0,00</strong></div>
+                        <div><span>Efectivo comprador</span><strong id="frigo-comp-efectivo">$ 0,00</strong></div>
+                        <div><span>Control comprador</span><strong id="frigo-comp-control">$ 0,00</strong></div>
+                      </div>
                       <label class="check-line"><input id="liq-comision-efect-comp-enabled" type="checkbox"> Cobrar comision propia al comprador sobre efectivo</label>
                       <label>% comision propia al comprador sobre efectivo<input id="liq-comision-efect-comp-pct" inputmode="decimal" value="0"></label>
                       <label>Comision propia al comprador sobre efectivo<input id="liq-comision-efect-comp" class="money-input" inputmode="decimal" value="0" readonly></label>
@@ -1506,6 +1512,31 @@
           <div class="panel">
             <div class="panel-head">
               <div>
+                <h2>Aplicar pago con efectivo conciliado</h2>
+                <p class="subtle">Seleccione uno o varios ingresos abiertos y registre un pago usando esos saldos. Es control interno, no impacta cuenta corriente.</p>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label>Fecha pago<input id="cash-rec-pay-date" type="date"></label>
+              <label>Concepto pago<input id="cash-rec-pay-concept" placeholder="Ej.: pago efectivo, guias, adelanto"></label>
+              <label>Pagado a / destino<input id="cash-rec-pay-to" placeholder="Opcional"></label>
+              <label>Importe a aplicar<input id="cash-rec-pay-amount" inputmode="decimal" placeholder="$ 0,00"></label>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead><tr><th></th><th>Fecha</th><th>Ingreso</th><th>Referencia</th><th>Saldo</th></tr></thead>
+                <tbody id="cash-rec-open-body"></tbody>
+              </table>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="primary-button" id="cash-rec-pay-save">Aplicar pago</button>
+              <p class="form-message" id="cash-rec-pay-message"></p>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <div>
                 <h2>Conciliacion de efectivo</h2>
                 <p class="subtle">Control interno del efectivo recibido de clientes y pagos hechos con ese efectivo. No impacta cuenta corriente.</p>
               </div>
@@ -1707,6 +1738,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260626-frigo-total-kilos"></script>
+    <script src="/app.js?v=20260626-frigo-comprador-visible"></script>
   </body>
 </html>

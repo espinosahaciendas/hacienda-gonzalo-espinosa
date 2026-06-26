@@ -19,6 +19,7 @@ const state = {
   liquidationFacturadoTouched: false,
   liquidationIvaProdTouched: false,
   liquidationIvaCompTouched: false,
+  frigoBrutoSinIvaTouched: false,
   externalDueRows: [],
   commissionistRows: [],
   usuario: null,
@@ -29,7 +30,7 @@ let currentPaymentInstruments = [];
 let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260626-frigo-total-kilos";
+const APP_BUILD = "20260626-frigo-comprador-visible";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -408,6 +409,13 @@ function setCashReconciliationMessage(message, type = "") {
   node.className = `form-message ${type}`.trim();
 }
 
+function setCashReconciliationPayMessage(message, type = "") {
+  const node = $("#cash-rec-pay-message");
+  if (!node) return;
+  node.textContent = message || "";
+  node.className = `form-message ${type}`.trim();
+}
+
 function setCashTab(tab) {
   const isDaily = tab !== "conciliaciones";
   $("#cash-daily-view").hidden = !isDaily;
@@ -445,8 +453,13 @@ function resetCashReconciliationForm() {
   $("#cash-rec-app-concept").value = "";
   $("#cash-rec-app-to").value = "";
   $("#cash-rec-app-amount").value = "";
+  if ($("#cash-rec-pay-date")) $("#cash-rec-pay-date").value = today;
+  if ($("#cash-rec-pay-concept")) $("#cash-rec-pay-concept").value = "";
+  if ($("#cash-rec-pay-to")) $("#cash-rec-pay-to").value = "";
+  if ($("#cash-rec-pay-amount")) $("#cash-rec-pay-amount").value = "";
   cashReconciliationApplications = [];
   setCashReconciliationMessage("");
+  setCashReconciliationPayMessage("");
   renderCashReconciliationApplications();
 }
 
@@ -544,6 +557,23 @@ function renderCashReconciliations() {
         ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} · ${escapeHtml(app.concepto || "-")} · ${moneyValue(app.importe)}`).join(" | ")}</td></tr>` : ""}
       `).join("")
     : `<tr><td colspan="8">Sin conciliaciones de efectivo cargadas.</td></tr>`;
+  renderCashReconciliationOpenBalances(items);
+}
+
+function renderCashReconciliationOpenBalances(items = state.cajaConciliaciones.items || []) {
+  if (!$("#cash-rec-open-body")) return;
+  const openItems = items.filter((item) => Math.abs(Number(item.saldo || 0)) > 0.01);
+  $("#cash-rec-open-body").innerHTML = openItems.length
+    ? openItems.map((item) => `
+        <tr>
+          <td><input type="checkbox" data-cash-rec-open="${escapeHtml(item.id)}" data-cash-rec-balance="${Number(item.saldo || 0)}"></td>
+          <td>${escapeHtml(item.fecha || "-")}</td>
+          <td>${escapeHtml(item.recibidoDe || "-")}</td>
+          <td>${escapeHtml(item.referencia || "-")}</td>
+          <td class="${amountClass(item.saldo)}">${moneyValue(item.saldo)}</td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="5">Sin ingresos con saldo disponible.</td></tr>`;
 }
 
 function fillCashForm(item) {
@@ -632,6 +662,33 @@ async function saveCashReconciliation(event) {
     setCashTab("conciliaciones");
   } catch (error) {
     setCashReconciliationMessage(error.message, "error");
+  }
+}
+
+async function applyCashReconciliationPayment() {
+  const selected = $all("[data-cash-rec-open]:checked");
+  const payload = {
+    conciliacionIds: selected.map((item) => item.dataset.cashRecOpen),
+    fecha: $("#cash-rec-pay-date").value,
+    concepto: $("#cash-rec-pay-concept").value,
+    destino: $("#cash-rec-pay-to").value,
+    importe: parseMoneyInput($("#cash-rec-pay-amount").value)
+  };
+  try {
+    setCashReconciliationPayMessage("Aplicando pago...");
+    await fetchJson("/api/caja-conciliaciones/aplicar-pago", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    $("#cash-rec-pay-concept").value = "";
+    $("#cash-rec-pay-to").value = "";
+    $("#cash-rec-pay-amount").value = "";
+    setCashReconciliationPayMessage("Pago aplicado a los ingresos seleccionados.", "ok");
+    await reloadAppData();
+    setView("caja");
+    setCashTab("conciliaciones");
+  } catch (error) {
+    setCashReconciliationPayMessage(error.message, "error");
   }
 }
 
@@ -2851,9 +2908,9 @@ function renderSaleLines(lines) {
   const totalCabezas = lines.reduce((sum, line) => sum + Number(line.cabezas || 0), 0);
   const totalKgBruto = lines.reduce((sum, line) => sum + Number(line.kgBruto || 0), 0);
   const totalImporte = lines.reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
-  const faena = isFaenaSaleOperation();
+  const showKgTotal = isFaenaSaleOperation() || lines.length > 1;
   $("#sale-lines-summary").textContent = lines.length
-    ? `${lines.length} linea${lines.length === 1 ? "" : "s"} - ${totalCabezas} cab.${faena ? ` - ${kgValue(totalKgBruto)}` : ""} - ${currency.format(totalImporte)}`
+    ? `${lines.length} linea${lines.length === 1 ? "" : "s"} - ${totalCabezas} cab.${showKgTotal ? ` - ${kgValue(totalKgBruto)}` : ""} - ${currency.format(totalImporte)}`
     : "Sin lineas";
   $("#sale-lines-body").innerHTML = lines.length
     ? lines.map((line) => `
@@ -2868,7 +2925,7 @@ function renderSaleLines(lines) {
             <button type="button" class="small-button danger-button" data-delete-sale-line="${escapeHtml(line.id)}">Quitar</button>
           </td>
         </tr>
-      `).join("") + (faena ? `<tr class="report-total"><td colspan="2">Total kilos</td><td>${kgValue(totalKgBruto)}</td><td colspan="3"></td></tr>` : "")
+      `).join("") + (showKgTotal ? `<tr class="report-total"><td colspan="2">Total kilos</td><td>${kgValue(totalKgBruto)}</td><td colspan="3"></td></tr>` : "")
     : `<tr><td colspan="6">Sin lineas cargadas todavia.</td></tr>`;
   renderPartialBilling();
 }
@@ -3394,9 +3451,10 @@ function syncLiquidationCashFromFacturado() {
   const facturado = numberValue("#liq-facturado");
   const brutoVend = numberValue("#liq-bruto-vend");
   const brutoComp = numberValue("#liq-bruto-comp");
-  const brutoBaseProd = isFrigorificoIvaOperation() ? getFrigorificoCalc().brutoSinIva : brutoVend;
+  const frigoCalc = isFrigorificoIvaOperation() ? getFrigorificoCalc() : null;
+  const brutoBaseProd = frigoCalc ? frigoCalc.brutoSinIva : brutoVend;
   setMoneyInput("#liq-efectivo-prod", Math.max(brutoBaseProd - facturado, 0));
-  setMoneyInput("#liq-efectivo-comp", Math.max(brutoComp - facturado, 0));
+  setMoneyInput("#liq-efectivo-comp", frigoCalc ? frigoCalc.efectivoComp : Math.max(brutoComp - facturado, 0));
 }
 
 function currentAutomaticFacturado(operation = state.currentOperation) {
@@ -3405,7 +3463,8 @@ function currentAutomaticFacturado(operation = state.currentOperation) {
   const draft = operation?.draftData || {};
   const liquidation = operation?.liquidacion || {};
   const netoFinal = Number(liquidation.netoFinalFrigorificoComp || draft.netoFinalFrigorificoComp || brutoVend || 0);
-  return netoFinal ? netoFinal / 1.105 : brutoVend;
+  const brutoSinIva = Number(liquidation.brutoSinIvaFrigorificoComp || draft.brutoSinIvaFrigorificoComp || 0);
+  return netoFinal ? (brutoSinIva || netoFinal / 1.105) : brutoVend;
 }
 
 function automaticLiquidationIvaValues() {
@@ -3478,6 +3537,8 @@ function fillLiquidationForm(liquidacion) {
   setMoneyInput("#liq-iva-prod", liquidacion.ivaProdManual ? liquidacion.ivaProd : autoIva.prod);
   setMoneyInput("#liq-iva-comp", liquidacion.ivaCompManual ? liquidacion.ivaComp : autoIva.comp);
   setMoneyInput("#frigo-neto-final", liquidacion.netoFinalFrigorificoComp || draft.netoFinalFrigorificoComp || liquidacion.brutoVend);
+  state.frigoBrutoSinIvaTouched = Boolean(liquidacion.brutoSinIvaFrigorificoComp || draft.brutoSinIvaFrigorificoComp);
+  setMoneyInput("#frigo-bruto-sin-iva", liquidacion.brutoSinIvaFrigorificoComp || draft.brutoSinIvaFrigorificoComp || "");
   setMoneyInput("#liq-efectivo-prod", normalizeFrigorificoCashInput(liquidacion.efectivoProd));
   setMoneyInput("#liq-efectivo-comp", liquidacion.efectivoComp);
   setMoneyInput("#liq-comision-fact-prod", liquidacion.comisionFacturadoProd);
@@ -3576,22 +3637,33 @@ function getFrigorificoCalc(operation = state.currentOperation) {
   const draft = operation && operation.draftData ? operation.draftData : {};
   const liquidation = operation && operation.liquidacion ? operation.liquidacion : {};
   const brutoVend = Number(liquidation.brutoVend || sumSaleLines(operation && operation.saleLines, "importeVend"));
+  const brutoComp = numberValue("#liq-bruto-comp") || Number(liquidation.brutoComp || sumSaleLines(operation && operation.saleLines, "importeComp") || brutoVend);
   const facturado = numberValue("#liq-facturado") || Number(liquidation.importeFacturado || 0);
   const netoFinal = optionalInputNumber("#frigo-neto-final", parseMoneyInput(draft.netoFinalFrigorificoComp || liquidation.netoFinalFrigorifico || brutoVend));
-  const brutoSinIva = netoFinal > 0 ? netoFinal / 1.105 : 0;
+  const brutoSinIvaAuto = netoFinal > 0 ? netoFinal / 1.105 : 0;
+  const brutoSinIva = optionalInputNumber("#frigo-bruto-sin-iva", parseMoneyInput(liquidation.brutoSinIvaFrigorificoComp || draft.brutoSinIvaFrigorificoComp || brutoSinIvaAuto));
   const efectivoSinIva = Math.max(brutoSinIva - facturado, 0);
   const ivaLiquidacion = facturado * 0.105;
+  const ivaComprador = numberValue("#liq-iva-comp") || Number(liquidation.ivaComp || ivaLiquidacion);
   const ivaEfectivo = efectivoSinIva * 0.105;
   const efectivoConIva = efectivoSinIva + ivaEfectivo;
+  const facturadoConIvaComp = facturado + ivaComprador;
+  const efectivoComp = Math.max(brutoComp - facturadoConIvaComp, 0);
 
   return {
     netoFinal,
     brutoSinIva,
+    brutoSinIvaAuto,
+    brutoComp,
     facturado,
     ivaLiquidacion,
+    ivaComprador,
     efectivoSinIva,
     ivaEfectivo,
     efectivoConIva,
+    facturadoConIvaComp,
+    efectivoComp,
+    totalControlComp: facturadoConIvaComp + efectivoComp,
     totalControl: netoFinal
   };
 }
@@ -3611,14 +3683,22 @@ function renderSpecialOperationPanels() {
   if (isFrigo) {
     const calc = getFrigorificoCalc(operation);
     if (document.activeElement !== $("#frigo-neto-final")) setMoneyInput("#frigo-neto-final", calc.netoFinal);
-    $("#frigo-bruto-sin-iva").textContent = moneyValue(calc.brutoSinIva);
+    if (document.activeElement !== $("#frigo-bruto-sin-iva")) setMoneyInput("#frigo-bruto-sin-iva", calc.brutoSinIva);
     $("#frigo-bruto-liquidado").textContent = moneyValue(calc.facturado);
     $("#frigo-iva-liquidacion").textContent = moneyValue(calc.ivaLiquidacion);
     $("#frigo-efectivo-sin-iva").textContent = moneyValue(calc.efectivoSinIva);
     $("#frigo-iva-efectivo").textContent = moneyValue(calc.ivaEfectivo);
     $("#frigo-efectivo-con-iva").textContent = moneyValue(calc.efectivoConIva);
     $("#frigo-total-control").textContent = moneyValue(calc.totalControl);
+    if ($("#frigo-buyer-calc-box")) {
+      $("#frigo-buyer-calc-box").hidden = false;
+      $("#frigo-comp-total").textContent = moneyValue(calc.brutoComp);
+      $("#frigo-comp-facturado-iva").textContent = moneyValue(calc.facturadoConIvaComp);
+      $("#frigo-comp-efectivo").textContent = moneyValue(calc.efectivoComp);
+      $("#frigo-comp-control").textContent = moneyValue(calc.totalControlComp);
+    }
   }
+  if (!isFrigo && $("#frigo-buyer-calc-box")) $("#frigo-buyer-calc-box").hidden = true;
 
   anticipatedBox.hidden = !isAnticipatedOperation(operation);
 }
@@ -4248,6 +4328,7 @@ async function saveLiquidation(event) {
     detalleLiquidacionDirectaProd: $("#liq-direct-notes").value,
     comprobanteCompDiferente: $("#liq-different-buyer-receipt").checked,
     netoFinalFrigorificoComp: parseMoneyInput($("#frigo-neto-final").value),
+    brutoSinIvaFrigorificoComp: parseMoneyInput($("#frigo-bruto-sin-iva").value),
     observaciones: $("#liq-observaciones").value,
     observacionesProd: $("#liq-observaciones-prod").value,
     observacionesComp: $("#liq-observaciones-comp").value,
@@ -4513,7 +4594,7 @@ function renderReport() {
   const sellerLinesTotal = (operation.saleLines || []).reduce((sum, line) => sum + Number(line.importeVend || 0), 0);
   const buyerLines = saleControlRows(operation.saleLines || [], "comp");
   const buyerLinesTotal = (operation.saleLines || []).reduce((sum, line) => sum + Number(line.importeComp || line.importeVend || 0), 0);
-  const showKgTotal = isFaenaReportOperation(operation);
+  const showKgTotal = isFaenaReportOperation(operation) || (operation.saleLines || []).length > 1;
   const totalKgBruto = (operation.saleLines || []).reduce((sum, line) => sum + Number(line.kgBruto || 0), 0);
   const kgTotalReportRow = showKgTotal ? `<tr class="report-total"><td colspan="2">Total kilos</td><td>${kgValue(totalKgBruto)}</td><td colspan="7"></td></tr>` : "";
   const loadTableHead = `<thead><tr><th>Categoria</th><th>Cant.</th><th>Kg bruto</th><th>Desb.</th><th>Kg neto</th><th>Kg calculo</th><th>Prom.</th><th>TAB</th><th>Precio final</th><th>Importe</th></tr></thead>`;
@@ -4982,6 +5063,9 @@ async function init() {
   $("#cash-rec-app-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
   $("#cash-rec-app-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
   $("#cash-rec-app-add").addEventListener("click", addCashReconciliationApplication);
+  $("#cash-rec-pay-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
+  $("#cash-rec-pay-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
+  $("#cash-rec-pay-save").addEventListener("click", applyCashReconciliationPayment);
   $("#cash-rec-app-body").addEventListener("click", (event) => {
     const removeButton = event.target.closest("[data-cash-rec-app-remove]");
     if (!removeButton) return;
@@ -5211,6 +5295,19 @@ async function init() {
     renderLiquidationDetail(buildDetailFromSaleLines());
     renderLiquidationTotals();
   });
+  $("#frigo-neto-final").addEventListener("input", () => {
+    if (!state.frigoBrutoSinIvaTouched && document.activeElement !== $("#frigo-bruto-sin-iva")) {
+      const netoFinal = numberValue("#frigo-neto-final");
+      setMoneyInput("#frigo-bruto-sin-iva", netoFinal ? netoFinal / 1.105 : 0);
+    }
+    syncLiquidationCashFromFacturado();
+    renderLiquidationTotals();
+  });
+  $("#frigo-bruto-sin-iva").addEventListener("input", () => {
+    state.frigoBrutoSinIvaTouched = String($("#frigo-bruto-sin-iva").value || "").trim() !== "";
+    syncLiquidationCashFromFacturado();
+    renderLiquidationTotals();
+  });
   $all("#liquidation-form select").forEach((select) => {
     select.addEventListener("change", renderLiquidationTotals);
   });
@@ -5238,6 +5335,7 @@ async function init() {
   });
   $("#liq-iva-comp").addEventListener("input", () => {
     state.liquidationIvaCompTouched = true;
+    if (isFrigorificoIvaOperation()) syncLiquidationCashFromFacturado();
   });
   document.addEventListener("focusin", (event) => {
     if (!event.target.classList || !event.target.classList.contains("money-input")) return;
