@@ -258,7 +258,43 @@ function signedPayment(item) {
 }
 
 function externalMovementBaseId(id) {
-  return normalizeText(id).replace(/-(NETO|IVA)$/i, "");
+  return normalizeText(id).replace(/-(NETO(?:-\d+)?|IVA|VTO-\d+)$/i, "");
+}
+
+function parseExternalDueRows(input) {
+  return asArray(input.vencimientos)
+    .map((item) => ({
+      vencimiento: formatDateForDisplay(item.vencimiento),
+      importe: Math.abs(parseMoney(item.importe))
+    }))
+    .filter((item) => item.vencimiento && item.importe > 0);
+}
+
+function assertExternalDueTotal(rows, expectedAmount) {
+  if (!rows.length) return;
+  const total = rows.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  if (!approxMoney(total, expectedAmount)) {
+    const error = new Error(`La suma de los vencimientos (${formatMoney(total)}) debe coincidir con el neto que impacta en cuenta corriente (${formatMoney(expectedAmount)}).`);
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+function commissionFieldsForSplit(common, index) {
+  if (index === 0) {
+    return {
+      comisionista: common.comisionista,
+      baseComision: common.baseComision,
+      porcComision: common.porcComision,
+      importeComision: common.importeComision
+    };
+  }
+  return {
+    comisionista: "",
+    baseComision: 0,
+    porcComision: 0,
+    importeComision: 0
+  };
 }
 
 function buildExternalMovementItems(input, baseId) {
@@ -267,6 +303,7 @@ function buildExternalMovementItems(input, baseId) {
   const ivaFiscal = Math.abs(parseMoney(input.ivaFiscal));
   const concepto = normalizeText(input.concepto || "Movimiento externo");
   const isVentaMag = normalizeKey(concepto) === "VENTA MAG";
+  const vencimientos = parseExternalDueRows(input);
   if (!cliente || (!importe && !ivaFiscal)) {
     const error = new Error("Falta seleccionar cliente o cargar un importe mayor a cero.");
     error.statusCode = 400;
@@ -291,14 +328,26 @@ function buildExternalMovementItems(input, baseId) {
   };
   if (isVentaMag) {
     const netoACobrar = Math.max(importe - ivaFiscal, 0);
-    return [
-      netoACobrar ? {
+    assertExternalDueTotal(vencimientos, netoACobrar);
+    const netRows = vencimientos.length
+      ? vencimientos.map((row, index) => ({
+        id: `${baseId}-NETO-${index + 1}`,
+        ...common,
+        ...commissionFieldsForSplit(common, index),
+        vencimiento: row.vencimiento,
+        concepto: "Venta MAG - Neto a cobrar",
+        importe: row.importe,
+        tipoDesglose: "NETO"
+      }))
+      : [netoACobrar ? {
         id: `${baseId}-NETO`,
         ...common,
         concepto: "Venta MAG - Neto a cobrar",
         importe: netoACobrar,
         tipoDesglose: "NETO"
-      } : null,
+      } : null].filter(Boolean);
+    return [
+      ...netRows,
       ivaFiscal ? {
         id: `${baseId}-IVA`,
         ...common,
@@ -311,6 +360,18 @@ function buildExternalMovementItems(input, baseId) {
         importeComision: 0
       } : null
     ].filter(Boolean);
+  }
+  assertExternalDueTotal(vencimientos, importe);
+  if (vencimientos.length) {
+    return vencimientos.map((row, index) => ({
+      id: `${baseId}-VTO-${index + 1}`,
+      ...common,
+      ...commissionFieldsForSplit(common, index),
+      vencimiento: row.vencimiento,
+      concepto,
+      importe: row.importe,
+      tipoDesglose: "VENCIMIENTO"
+    }));
   }
   return [{
     id: baseId,
