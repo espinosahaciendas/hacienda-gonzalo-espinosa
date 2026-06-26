@@ -458,9 +458,10 @@ function buildOperationAccountMovements(operation) {
   const settledByConsignee = normalizeKey(liq.liquidacionConsignatariaA || draft.liquidacionConsignatariaA || "VENDEDOR");
   const frigo = normalizeKey(draft.calculoFrigorificoComp || liq.calculoFrigorificoComp) === "SI";
   const frigoNetoFinal = parseMoney(liq.netoFinalFrigorificoComp || draft.netoFinalFrigorificoComp || liq.brutoVend || operationTotal(operation));
+  const frigoBrutoSinIva = parseMoney(liq.brutoSinIvaFrigorificoComp || draft.brutoSinIvaFrigorificoComp);
   const frigoFacturado = parseMoney(liq.importeFacturado);
   const frigoEfectivoBase = frigo && frigoNetoFinal
-    ? Math.max((frigoNetoFinal / 1.105) - frigoFacturado, 0)
+    ? Math.max((frigoBrutoSinIva || frigoNetoFinal / 1.105) - frigoFacturado, 0)
     : 0;
   const efectivoProdSinIva = normalizeFrigorificoEfectivoSinIva(liq.efectivoProd, frigoEfectivoBase, frigo);
   const efectivoProdCuenta = frigo ? efectivoProdSinIva * 1.105 : efectivoProdSinIva;
@@ -987,7 +988,8 @@ function automaticFacturadoForOperation(operation, fallbackTotal = null) {
   const total = fallbackTotal !== null ? parseMoney(fallbackTotal) : operationTotal(operation);
   const frigo = String(draft.calculoFrigorificoComp || "").toUpperCase() === "SI";
   const netoFinalFrigorifico = parseMoney(draft.netoFinalFrigorificoComp || total);
-  return frigo && netoFinalFrigorifico ? netoFinalFrigorifico / 1.105 : total;
+  const brutoSinIvaFrigorifico = parseMoney(draft.brutoSinIvaFrigorificoComp);
+  return frigo && netoFinalFrigorifico ? (brutoSinIvaFrigorifico || netoFinalFrigorifico / 1.105) : total;
 }
 
 function shouldRefreshAutoFacturado(liq, previousAutoFacturado) {
@@ -1060,7 +1062,10 @@ function calculateLiquidacion(operation, input = {}) {
   const consignada = operationType === "CONSIGNADA"
     || (operationType.includes("ANTICIPADA") && Boolean(operation.consignataria || draft.consignataria));
   const netoFinalFrigorifico = parseMoney(source.netoFinalFrigorificoComp || brutoVend);
-  const brutoBaseProd = frigo && netoFinalFrigorifico ? netoFinalFrigorifico / 1.105 : brutoVend;
+  const brutoSinIvaFrigorifico = parseMoney(source.brutoSinIvaFrigorificoComp);
+  const brutoBaseProd = frigo && netoFinalFrigorifico
+    ? (brutoSinIvaFrigorifico || netoFinalFrigorifico / 1.105)
+    : brutoVend;
   const facturado = source.importeFacturado !== undefined && source.importeFacturado !== ""
     ? parseMoney(source.importeFacturado)
     : brutoBaseProd;
@@ -1095,9 +1100,12 @@ function calculateLiquidacion(operation, input = {}) {
   const efectivoProd = source.efectivoProd !== undefined && source.efectivoProd !== ""
     ? normalizeFrigorificoEfectivoSinIva(source.efectivoProd, efectivoProdBase, frigo)
     : efectivoProdBase;
+  const efectivoCompBase = frigo
+    ? Math.max(brutoComp - (facturado + ivaComp), 0)
+    : Math.max(brutoComp - facturado, 0);
   const efectivoComp = source.efectivoComp !== undefined && source.efectivoComp !== ""
     ? parseMoney(source.efectivoComp)
-    : Math.max(brutoComp - facturado, 0);
+    : efectivoCompBase;
   const hasInput = (key) => Object.prototype.hasOwnProperty.call(input, key);
   const hasSource = (key) => Object.prototype.hasOwnProperty.call(source, key);
   const commissionApplies = (flagKey, percentKey, legacyPercentKey, amountKey) => {
@@ -1179,6 +1187,7 @@ function calculateLiquidacion(operation, input = {}) {
     liquidacionConsignatariaA,
     comprobanteCompDiferente: Boolean(source.comprobanteCompDiferente),
     netoFinalFrigorificoComp: netoFinalFrigorifico,
+    brutoSinIvaFrigorificoComp: frigo ? brutoBaseProd : 0,
     efectivoModo: normalizeText(source.efectivoModo || "MONTO"),
     efectivoPorc: normalizeText(source.efectivoPorc),
     planFacturadoProd: normalizeText(source.planFacturadoProd || "30"),
@@ -2208,6 +2217,51 @@ class BackupDataSource {
     return { id };
   }
 
+  async applyCajaConciliacionPago(input) {
+    const data = this.readData();
+    const items = asArray(data.cajaConciliaciones);
+    const selectedIds = asArray(input.conciliacionIds).map((id) => normalizeText(id)).filter(Boolean);
+    const importeTotal = Math.abs(parseMoney(input.importe));
+    const concepto = normalizeText(input.concepto);
+    if (!selectedIds.length || !importeTotal || !concepto) {
+      const error = new Error("Seleccione ingresos de efectivo y cargue concepto e importe del pago.");
+      error.statusCode = 400;
+      throw error;
+    }
+    let remaining = importeTotal;
+    const applied = [];
+    const now = new Date().toISOString();
+    for (const id of selectedIds) {
+      if (remaining <= 0.01) break;
+      const item = items.find((row) => String(row.id) === id);
+      if (!item) continue;
+      const aplicaciones = asArray(item.aplicaciones);
+      const usado = aplicaciones.reduce((sum, app) => sum + parseMoney(app.importe), 0);
+      const saldo = Math.max(parseMoney(item.importeRecibido) - usado, 0);
+      if (saldo <= 0.01) continue;
+      const importe = Math.min(saldo, remaining);
+      aplicaciones.push({
+        id: `APP-${Date.now()}-${applied.length}`,
+        fecha: input.fecha ? formatDateForDisplay(input.fecha) : formatDateLocal(new Date()),
+        concepto,
+        destino: normalizeText(input.destino),
+        importe
+      });
+      item.aplicaciones = aplicaciones;
+      item.actualizadoEn = now;
+      remaining = Math.round((remaining - importe) * 100) / 100;
+      applied.push({ id, importe });
+    }
+    if (remaining > 0.01) {
+      const error = new Error("El importe supera el saldo disponible en los ingresos seleccionados.");
+      error.statusCode = 400;
+      throw error;
+    }
+    data.cajaConciliaciones = items;
+    this.saveData(data);
+    return { aplicado: applied, total: importeTotal };
+  }
+
   async getDocumentos(filters = {}) {
     const data = this.readData();
     const entidadTipo = normalizeText(filters.entidadTipo);
@@ -2563,6 +2617,7 @@ class PostgresJsonDataSource extends BackupDataSource {
   async getCajaConciliaciones() { return this.withRemoteData(() => super.getCajaConciliaciones()); }
   async saveCajaConciliacion(input) { return this.withRemoteData(() => super.saveCajaConciliacion(input), true); }
   async deleteCajaConciliacion(itemId) { return this.withRemoteData(() => super.deleteCajaConciliacion(itemId), true); }
+  async applyCajaConciliacionPago(input) { return this.withRemoteData(() => super.applyCajaConciliacionPago(input), true); }
   async getDocumentos(filters) { return this.withRemoteData(() => super.getDocumentos(filters)); }
   async getDocumento(documentId) { return this.withRemoteData(() => super.getDocumento(documentId)); }
   async saveDocumento(input) { return this.withRemoteData(() => super.saveDocumento(input), true); }

@@ -541,6 +541,12 @@ async function handleApi(req, res) {
     }
   }
 
+  if (parsed.pathname === "/api/caja-conciliaciones/aplicar-pago" && req.method === "POST") {
+    const body = await readBody(req);
+    sendJson(res, 200, { item: await dataSource.applyCajaConciliacionPago(body) });
+    return;
+  }
+
   const cajaConciliacionMatch = parsed.pathname.match(/^\/api\/caja-conciliaciones\/([^/]+)$/);
   if (cajaConciliacionMatch) {
     if (req.method === "PUT") {
