@@ -1102,10 +1102,11 @@ function calculateLiquidacion(operation, input = {}) {
   const efectivoProd = source.efectivoProd !== undefined && source.efectivoProd !== ""
     ? normalizeFrigorificoEfectivoSinIva(source.efectivoProd, efectivoProdBase, frigo)
     : efectivoProdBase;
+  const ivaCompFrigorificoControl = facturado * 0.105;
   const efectivoCompBase = frigo
-    ? Math.max(brutoComp - (facturado + ivaComp), 0)
+    ? Math.max(brutoComp - (facturado + ivaCompFrigorificoControl), 0)
     : Math.max(brutoComp - facturado, 0);
-  const efectivoComp = source.efectivoComp !== undefined && source.efectivoComp !== ""
+  const efectivoComp = !frigo && source.efectivoComp !== undefined && source.efectivoComp !== ""
     ? parseMoney(source.efectivoComp)
     : efectivoCompBase;
   const hasInput = (key) => Object.prototype.hasOwnProperty.call(input, key);
