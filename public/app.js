@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260626-tablero-vencidos-saldo-abierto";
+const APP_BUILD = "20260626-liquidacion-facturado-sync";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -713,7 +713,7 @@ function renderDashboardPendingList() {
   $("#dashboard-pending-net").textContent = moneyValue(net);
   $("#dashboard-pending-net").className = amountClass(net);
   $("#dashboard-pending-body").innerHTML = pending.length
-    ? pending.slice(0, 12).map((movement) => `
+    ? pending.map((movement) => `
         <tr class="${isCashMovement(movement) ? "movement-cash" : ""}">
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
