@@ -30,7 +30,7 @@ let currentPaymentInstruments = [];
 let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260626-frigo-bruto-auto";
+const APP_BUILD = "20260626-frigo-comprador-auto";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -3543,7 +3543,7 @@ function fillLiquidationForm(liquidacion) {
   state.frigoBrutoSinIvaTouched = Boolean(liquidacion.brutoSinIvaFrigorificoManual || draft.brutoSinIvaFrigorificoManual);
   setMoneyInput("#frigo-bruto-sin-iva", storedBrutoSinIvaFrigo || (netoFinalFrigo ? netoFinalFrigo / 1.105 : 0));
   setMoneyInput("#liq-efectivo-prod", normalizeFrigorificoCashInput(liquidacion.efectivoProd));
-  setMoneyInput("#liq-efectivo-comp", liquidacion.efectivoComp);
+  setMoneyInput("#liq-efectivo-comp", isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : liquidacion.efectivoComp);
   setMoneyInput("#liq-comision-fact-prod", liquidacion.comisionFacturadoProd);
   setMoneyInput("#liq-comision-fact-comp", liquidacion.comisionFacturadoComp);
   setMoneyInput("#liq-comision-efect-prod", liquidacion.comisionEfectivoProd);
@@ -4295,7 +4295,7 @@ async function saveLiquidation(event) {
     ivaComp: parseMoneyInput($("#liq-iva-comp").value),
     ivaCompManual: Boolean(state.liquidationIvaCompTouched),
     efectivoProd: normalizeFrigorificoCashInput(parseMoneyInput($("#liq-efectivo-prod").value)),
-    efectivoComp: parseMoneyInput($("#liq-efectivo-comp").value),
+    efectivoComp: isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : parseMoneyInput($("#liq-efectivo-comp").value),
     comisionFacturadoProd: parseMoneyInput($("#liq-comision-fact-prod").value),
     comisionFacturadoComp: parseMoneyInput($("#liq-comision-fact-comp").value),
     comisionEfectivoProd: parseMoneyInput($("#liq-comision-efect-prod").value),
