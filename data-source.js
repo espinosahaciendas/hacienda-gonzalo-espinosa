@@ -928,10 +928,48 @@ function saleInputForOperation(operation, input) {
   };
 }
 
-function touchOperationSale(operation) {
+function approxMoney(a, b, tolerance = 0.02) {
+  return Math.abs(parseMoney(a) - parseMoney(b)) <= tolerance;
+}
+
+function automaticFacturadoForOperation(operation, fallbackTotal = null) {
+  const draft = operation.draftData || {};
+  const total = fallbackTotal !== null ? parseMoney(fallbackTotal) : operationTotal(operation);
+  const frigo = String(draft.calculoFrigorificoComp || "").toUpperCase() === "SI";
+  const netoFinalFrigorifico = parseMoney(draft.netoFinalFrigorificoComp || total);
+  return frigo && netoFinalFrigorifico ? netoFinalFrigorifico / 1.105 : total;
+}
+
+function shouldRefreshAutoFacturado(liq, previousAutoFacturado) {
+  const currentFacturado = parseMoney(liq && liq.importeFacturado);
+  if (!currentFacturado) return true;
+  const oldAuto = parseMoney(previousAutoFacturado);
+  const oldBruto = parseMoney(liq && liq.brutoVend);
+  return (oldAuto && approxMoney(currentFacturado, oldAuto)) || (oldBruto && approxMoney(currentFacturado, oldBruto));
+}
+
+function touchOperationSale(operation, previousAutoFacturado = null) {
   const total = operationTotal(operation);
   operation.total = formatMoney(total);
   operation.estado = "BORRADOR";
+  if (!operation.draftData) operation.draftData = {};
+  const liq = operation.draftData.liquidacion;
+  const totalComp = operationBuyerTotal(operation);
+  if (liq) {
+    const refreshFacturado = shouldRefreshAutoFacturado(liq, previousAutoFacturado);
+    const newFacturado = automaticFacturadoForOperation(operation, total);
+    const detailWasAuto = !asArray(liq.detalleLiquidar).length
+      || approxMoney(
+        asArray(liq.detalleLiquidar).reduce((sum, item) => sum + parseMoney(item.importeNeto), 0),
+        parseMoney(liq.importeFacturado)
+      );
+    liq.brutoVend = total;
+    liq.brutoComp = totalComp || total;
+    if (refreshFacturado) {
+      liq.importeFacturado = newFacturado;
+      if (detailWasAuto) liq.detalleLiquidar = buildDetalleLiquidar(asArray(operation.draftData.saleLines), newFacturado);
+    }
+  }
   if (operation.draftData) operation.draftData.liquidacionConfirmada = false;
   operation.draftData.totalVentaVend = total;
   operation.liquidacionEstado = "BORRADOR";
@@ -1653,6 +1691,7 @@ class BackupDataSource {
     }
     if (!operation.draftData) operation.draftData = {};
     if (!Array.isArray(operation.draftData.saleLines)) operation.draftData.saleLines = [];
+    const previousAutoFacturado = automaticFacturadoForOperation(operation);
 
     const line = calculateSaleLine(saleInputForOperation(operation, input), data.tabRules);
     if (!line.categoria) {
@@ -1668,7 +1707,7 @@ class BackupDataSource {
       data.categories = categories.sort((a, b) => String(a).localeCompare(String(b), "es"));
     }
 
-    touchOperationSale(operation);
+    touchOperationSale(operation, previousAutoFacturado);
     data.operations = operations;
     this.saveData(data);
     return { operation, line };
@@ -1685,6 +1724,7 @@ class BackupDataSource {
     }
     if (!operation.draftData) operation.draftData = {};
     if (!Array.isArray(operation.draftData.saleLines)) operation.draftData.saleLines = [];
+    const previousAutoFacturado = automaticFacturadoForOperation(operation);
 
     const index = operation.draftData.saleLines.findIndex((line) => String(line.id) === String(lineId));
     if (index < 0) {
@@ -1707,7 +1747,7 @@ class BackupDataSource {
       data.categories = categories.sort((a, b) => String(a).localeCompare(String(b), "es"));
     }
 
-    touchOperationSale(operation);
+    touchOperationSale(operation, previousAutoFacturado);
     data.operations = operations;
     this.saveData(data);
     return { operation, line };
@@ -1724,6 +1764,7 @@ class BackupDataSource {
     }
     if (!operation.draftData) operation.draftData = {};
     if (!Array.isArray(operation.draftData.saleLines)) operation.draftData.saleLines = [];
+    const previousAutoFacturado = automaticFacturadoForOperation(operation);
     const originalLength = operation.draftData.saleLines.length;
     operation.draftData.saleLines = operation.draftData.saleLines.filter((line) => String(line.id) !== String(lineId));
     if (operation.draftData.saleLines.length === originalLength) {
@@ -1731,7 +1772,7 @@ class BackupDataSource {
       error.statusCode = 404;
       throw error;
     }
-    touchOperationSale(operation);
+    touchOperationSale(operation, previousAutoFacturado);
     data.operations = operations;
     this.saveData(data);
     return { operation };
