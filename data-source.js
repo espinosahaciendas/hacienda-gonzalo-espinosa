@@ -941,11 +941,32 @@ function automaticFacturadoForOperation(operation, fallbackTotal = null) {
 }
 
 function shouldRefreshAutoFacturado(liq, previousAutoFacturado) {
+  if (liq && liq.importeFacturadoManual) return false;
   const currentFacturado = parseMoney(liq && liq.importeFacturado);
   if (!currentFacturado) return true;
+  if (liq && liq.importeFacturadoManual === undefined) return true;
   const oldAuto = parseMoney(previousAutoFacturado);
   const oldBruto = parseMoney(liq && liq.brutoVend);
   return (oldAuto && approxMoney(currentFacturado, oldAuto)) || (oldBruto && approxMoney(currentFacturado, oldBruto));
+}
+
+function automaticIvaForLiquidacion(operation, liq) {
+  const draft = operation.draftData || {};
+  const operationType = normalizeKey(operation.tipo || draft.tipo);
+  const consignada = operationType === "CONSIGNADA"
+    || (operationType.includes("ANTICIPADA") && Boolean(operation.consignataria || draft.consignataria));
+  const facturado = parseMoney(liq && liq.importeFacturado);
+  const ivaDirectaSinIva = Boolean(liq && liq.ivaDirectaSinIva);
+  const gastosBaseProd = parseMoney(liq && liq.comisionDetalleProd)
+    + parseMoney(liq && liq.fondoGarantiaProd)
+    + parseMoney(liq && liq.controlEntregaProd)
+    + parseMoney(liq && liq.fondoCompGastosProd)
+    + parseMoney(liq && liq.otrosGastosProd);
+  const netoGravadoProd = consignada ? Math.max(facturado - gastosBaseProd, 0) : facturado;
+  return {
+    prod: ivaDirectaSinIva ? 0 : netoGravadoProd * 0.105,
+    comp: ivaDirectaSinIva ? 0 : facturado * 0.105
+  };
 }
 
 function touchOperationSale(operation, previousAutoFacturado = null) {
@@ -969,6 +990,9 @@ function touchOperationSale(operation, previousAutoFacturado = null) {
       liq.importeFacturado = newFacturado;
       if (detailWasAuto) liq.detalleLiquidar = buildDetalleLiquidar(asArray(operation.draftData.saleLines), newFacturado);
     }
+    const autoIva = automaticIvaForLiquidacion(operation, liq);
+    if (!liq.ivaProdManual) liq.ivaProd = autoIva.prod;
+    if (!liq.ivaCompManual) liq.ivaComp = autoIva.comp;
   }
   if (operation.draftData) operation.draftData.liquidacionConfirmada = false;
   operation.draftData.totalVentaVend = total;
@@ -1082,8 +1106,11 @@ function calculateLiquidacion(operation, input = {}) {
     brutoVend,
     brutoComp,
     importeFacturado: facturado,
+    importeFacturadoManual: Boolean(source.importeFacturadoManual),
     ivaProd,
+    ivaProdManual: Boolean(source.ivaProdManual),
     ivaComp,
+    ivaCompManual: Boolean(source.ivaCompManual),
     efectivoProd,
     efectivoConIvaProd,
     efectivoComp,
