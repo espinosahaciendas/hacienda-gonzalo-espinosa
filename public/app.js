@@ -21,7 +21,7 @@ const state = {
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260625-comisionistas-sin-duplicados";
+const APP_BUILD = "20260626-tablero-vencidos-saldo-abierto";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -647,7 +647,7 @@ function amountClass(value) {
 }
 
 function dayDiffFromToday(value) {
-  const due = parseDisplayDate(value);
+  const due = parseFlexibleDate(value);
   if (!due) return null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -690,7 +690,7 @@ function renderDashboardPendingList() {
   const pending = (state.cuenta.movimientos || [])
     .filter((movement) => !movement.paymentId)
     .filter((movement) => !["IMPUTADO", "ANULADO"].includes(String(movement.estado || "").toUpperCase()))
-    .map((movement) => ({ ...movement, pendienteFirmado: signedPendingAmount(movement), dueDate: parseDisplayDate(movement.vencimiento) }))
+    .map((movement) => ({ ...movement, pendienteFirmado: signedPendingAmount(movement), dueDate: parseFlexibleDate(movement.vencimiento) }))
     .filter((movement) => movement.dueDate && dateOnly(movement.dueDate).getTime() < today)
     .filter((movement) => Math.abs(movement.pendienteFirmado) > 0.01)
     .sort((a, b) => {
