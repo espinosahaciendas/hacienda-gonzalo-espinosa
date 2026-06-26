@@ -988,7 +988,8 @@ function automaticFacturadoForOperation(operation, fallbackTotal = null) {
   const total = fallbackTotal !== null ? parseMoney(fallbackTotal) : operationTotal(operation);
   const frigo = String(draft.calculoFrigorificoComp || "").toUpperCase() === "SI";
   const netoFinalFrigorifico = parseMoney(draft.netoFinalFrigorificoComp || total);
-  const brutoSinIvaFrigorifico = parseMoney(draft.brutoSinIvaFrigorificoComp);
+  const brutoSinIvaManual = Boolean(draft.brutoSinIvaFrigorificoManual);
+  const brutoSinIvaFrigorifico = brutoSinIvaManual ? parseMoney(draft.brutoSinIvaFrigorificoComp) : 0;
   return frigo && netoFinalFrigorifico ? (brutoSinIvaFrigorifico || netoFinalFrigorifico / 1.105) : total;
 }
 
@@ -1062,7 +1063,8 @@ function calculateLiquidacion(operation, input = {}) {
   const consignada = operationType === "CONSIGNADA"
     || (operationType.includes("ANTICIPADA") && Boolean(operation.consignataria || draft.consignataria));
   const netoFinalFrigorifico = parseMoney(source.netoFinalFrigorificoComp || brutoVend);
-  const brutoSinIvaFrigorifico = parseMoney(source.brutoSinIvaFrigorificoComp);
+  const brutoSinIvaFrigorificoManual = Boolean(source.brutoSinIvaFrigorificoManual);
+  const brutoSinIvaFrigorifico = brutoSinIvaFrigorificoManual ? parseMoney(source.brutoSinIvaFrigorificoComp) : 0;
   const brutoBaseProd = frigo && netoFinalFrigorifico
     ? (brutoSinIvaFrigorifico || netoFinalFrigorifico / 1.105)
     : brutoVend;
@@ -1188,6 +1190,7 @@ function calculateLiquidacion(operation, input = {}) {
     comprobanteCompDiferente: Boolean(source.comprobanteCompDiferente),
     netoFinalFrigorificoComp: netoFinalFrigorifico,
     brutoSinIvaFrigorificoComp: frigo ? brutoBaseProd : 0,
+    brutoSinIvaFrigorificoManual,
     efectivoModo: normalizeText(source.efectivoModo || "MONTO"),
     efectivoPorc: normalizeText(source.efectivoPorc),
     planFacturadoProd: normalizeText(source.planFacturadoProd || "30"),
@@ -1939,6 +1942,8 @@ class BackupDataSource {
       liquidacionConsignatariaA: liquidacion.liquidacionConsignatariaA,
       comprobanteCompDiferente: liquidacion.comprobanteCompDiferente,
       netoFinalFrigorificoComp: liquidacion.netoFinalFrigorificoComp,
+      brutoSinIvaFrigorificoComp: liquidacion.brutoSinIvaFrigorificoComp,
+      brutoSinIvaFrigorificoManual: liquidacion.brutoSinIvaFrigorificoManual,
       efectivoModo: liquidacion.efectivoModo,
       efectivoPorc: liquidacion.efectivoPorc,
       planFacturadoProd: liquidacion.planFacturadoProd,
