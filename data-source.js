@@ -1292,6 +1292,7 @@ class BackupDataSource {
       currentAccountPayments: asArray(backup.currentAccountPayments),
       currentAccountManualMovements: asArray(backup.currentAccountManualMovements),
       cajaDiaria: asArray(backup.cajaDiaria),
+      cajaConciliaciones: asArray(backup.cajaConciliaciones),
       documentos: asArray(backup.documentos)
     });
   }
@@ -2108,6 +2109,105 @@ class BackupDataSource {
     return { id };
   }
 
+  async getCajaConciliaciones() {
+    const data = this.readData();
+    const items = asArray(data.cajaConciliaciones)
+      .map((item) => {
+        const aplicaciones = asArray(item.aplicaciones)
+          .map((app) => ({
+            id: app.id || `APP-${Date.now()}`,
+            fecha: app.fecha || "",
+            concepto: app.concepto || "",
+            destino: app.destino || "",
+            importe: parseMoney(app.importe)
+          }))
+          .filter((app) => app.concepto && app.importe);
+        const importeRecibido = parseMoney(item.importeRecibido);
+        const totalAplicado = aplicaciones.reduce((sum, app) => sum + parseMoney(app.importe), 0);
+        return {
+          id: item.id,
+          fecha: item.fecha,
+          recibidoDe: item.recibidoDe || "",
+          referencia: item.referencia || "",
+          importeRecibido,
+          aplicaciones,
+          totalAplicado,
+          saldo: Math.round((importeRecibido - totalAplicado) * 100) / 100,
+          observacion: item.observacion || "",
+          creadoEn: item.creadoEn || "",
+          actualizadoEn: item.actualizadoEn || ""
+        };
+      })
+      .filter((item) => item.id)
+      .sort((a, b) => (parseDateLoose(b.fecha)?.getTime() || 0) - (parseDateLoose(a.fecha)?.getTime() || 0));
+    const totalRecibido = items.reduce((sum, item) => sum + parseMoney(item.importeRecibido), 0);
+    const totalAplicado = items.reduce((sum, item) => sum + parseMoney(item.totalAplicado), 0);
+    const saldo = Math.round((totalRecibido - totalAplicado) * 100) / 100;
+    const abiertas = items.filter((item) => Math.abs(parseMoney(item.saldo)) > 0.01).length;
+    return { items, totalRecibido, totalAplicado, saldo, abiertas };
+  }
+
+  async saveCajaConciliacion(input) {
+    const data = this.readData();
+    const items = asArray(data.cajaConciliaciones);
+    const id = normalizeText(input.id) || `CONC-${Date.now()}`;
+    const recibidoDe = normalizeText(input.recibidoDe);
+    const importeRecibido = Math.abs(parseMoney(input.importeRecibido));
+    if (!recibidoDe || !importeRecibido) {
+      const error = new Error("Falta cargar quien dejo el efectivo y el importe recibido.");
+      error.statusCode = 400;
+      throw error;
+    }
+    const aplicaciones = asArray(input.aplicaciones)
+      .map((app, index) => ({
+        id: normalizeText(app.id) || `APP-${Date.now()}-${index}`,
+        fecha: app.fecha ? formatDateForDisplay(app.fecha) : formatDateForDisplay(input.fecha),
+        concepto: normalizeText(app.concepto),
+        destino: normalizeText(app.destino),
+        importe: Math.abs(parseMoney(app.importe))
+      }))
+      .filter((app) => app.concepto && app.importe);
+    const totalAplicado = aplicaciones.reduce((sum, app) => sum + parseMoney(app.importe), 0);
+    if (totalAplicado - importeRecibido > 0.02) {
+      const error = new Error("Las aplicaciones no pueden superar el efectivo recibido.");
+      error.statusCode = 400;
+      throw error;
+    }
+    const now = new Date().toISOString();
+    const index = items.findIndex((item) => String(item.id) === String(id));
+    const saved = {
+      id,
+      fecha: input.fecha ? formatDateForDisplay(input.fecha) : formatDateLocal(new Date()),
+      recibidoDe,
+      referencia: normalizeText(input.referencia),
+      importeRecibido,
+      aplicaciones,
+      observacion: normalizeText(input.observacion),
+      creadoEn: index >= 0 ? items[index].creadoEn || now : now,
+      actualizadoEn: now
+    };
+    if (index >= 0) items[index] = { ...items[index], ...saved };
+    else items.push(saved);
+    data.cajaConciliaciones = items;
+    this.saveData(data);
+    return saved;
+  }
+
+  async deleteCajaConciliacion(itemId) {
+    const data = this.readData();
+    const items = asArray(data.cajaConciliaciones);
+    const id = normalizeText(itemId);
+    const next = items.filter((item) => String(item.id) !== id);
+    if (next.length === items.length) {
+      const error = new Error("No se encontro la conciliacion de efectivo.");
+      error.statusCode = 404;
+      throw error;
+    }
+    data.cajaConciliaciones = next;
+    this.saveData(data);
+    return { id };
+  }
+
   async getDocumentos(filters = {}) {
     const data = this.readData();
     const entidadTipo = normalizeText(filters.entidadTipo);
@@ -2460,6 +2560,9 @@ class PostgresJsonDataSource extends BackupDataSource {
   async getCajaDiaria() { return this.withRemoteData(() => super.getCajaDiaria()); }
   async saveCajaDiaria(input) { return this.withRemoteData(() => super.saveCajaDiaria(input), true); }
   async deleteCajaDiaria(itemId) { return this.withRemoteData(() => super.deleteCajaDiaria(itemId), true); }
+  async getCajaConciliaciones() { return this.withRemoteData(() => super.getCajaConciliaciones()); }
+  async saveCajaConciliacion(input) { return this.withRemoteData(() => super.saveCajaConciliacion(input), true); }
+  async deleteCajaConciliacion(itemId) { return this.withRemoteData(() => super.deleteCajaConciliacion(itemId), true); }
   async getDocumentos(filters) { return this.withRemoteData(() => super.getDocumentos(filters)); }
   async getDocumento(documentId) { return this.withRemoteData(() => super.getDocumento(documentId)); }
   async saveDocumento(input) { return this.withRemoteData(() => super.saveDocumento(input), true); }

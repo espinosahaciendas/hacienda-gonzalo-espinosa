@@ -279,6 +279,7 @@ async function handleApi(req, res) {
         "/api/tabs",
         "/api/cuenta-corriente/resumen",
         "/api/caja-diaria",
+        "/api/caja-conciliaciones",
         "/api/documentos"
       ]
     });
@@ -524,6 +525,31 @@ async function handleApi(req, res) {
     }
     if (req.method === "DELETE") {
       sendJson(res, 200, { item: await dataSource.deleteCajaDiaria(decodeURIComponent(cajaDiariaMatch[1])) });
+      return;
+    }
+  }
+
+  if (parsed.pathname === "/api/caja-conciliaciones") {
+    if (req.method === "GET") {
+      sendJson(res, 200, await dataSource.getCajaConciliaciones());
+      return;
+    }
+    if (req.method === "POST") {
+      const body = await readBody(req);
+      sendJson(res, 200, { item: await dataSource.saveCajaConciliacion(body) });
+      return;
+    }
+  }
+
+  const cajaConciliacionMatch = parsed.pathname.match(/^\/api\/caja-conciliaciones\/([^/]+)$/);
+  if (cajaConciliacionMatch) {
+    if (req.method === "PUT") {
+      const body = await readBody(req);
+      sendJson(res, 200, { item: await dataSource.saveCajaConciliacion({ ...body, id: decodeURIComponent(cajaConciliacionMatch[1]) }) });
+      return;
+    }
+    if (req.method === "DELETE") {
+      sendJson(res, 200, { item: await dataSource.deleteCajaConciliacion(decodeURIComponent(cajaConciliacionMatch[1])) });
       return;
     }
   }
