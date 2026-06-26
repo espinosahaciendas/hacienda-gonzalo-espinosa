@@ -328,18 +328,7 @@ function buildExternalMovementItems(input, baseId) {
   };
   if (isVentaMag) {
     const netoACobrar = Math.max(importe - ivaFiscal, 0);
-    assertExternalDueTotal(vencimientos, netoACobrar);
-    const netRows = vencimientos.length
-      ? vencimientos.map((row, index) => ({
-        id: `${baseId}-NETO-${index + 1}`,
-        ...common,
-        ...commissionFieldsForSplit(common, index),
-        vencimiento: row.vencimiento,
-        concepto: "Venta MAG - Neto a cobrar",
-        importe: row.importe,
-        tipoDesglose: "NETO"
-      }))
-      : [netoACobrar ? {
+    const netRows = [netoACobrar ? {
         id: `${baseId}-NETO`,
         ...common,
         concepto: "Venta MAG - Neto a cobrar",
