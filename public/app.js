@@ -15,13 +15,16 @@ const state = {
   reportMode: "auto",
   editingSaleLineId: "",
   editingExternalMovementId: "",
+  liquidationFacturadoTouched: false,
+  liquidationIvaProdTouched: false,
+  liquidationIvaCompTouched: false,
   commissionistRows: [],
   usuario: null,
   weightTickets: [],
   reportRefreshInFlight: false
 };
 let currentPaymentInstruments = [];
-const APP_BUILD = "20260626-liquidacion-facturado-sync";
+const APP_BUILD = "20260626-liquidacion-facturado-iva-sync";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -3077,6 +3080,34 @@ function syncLiquidationCashFromFacturado() {
   setMoneyInput("#liq-efectivo-comp", Math.max(brutoComp - facturado, 0));
 }
 
+function currentAutomaticFacturado(operation = state.currentOperation) {
+  const brutoVend = sumSaleLines(operation?.saleLines || [], "importeVend");
+  if (!isFrigorificoIvaOperation(operation)) return brutoVend;
+  const draft = operation?.draftData || {};
+  const liquidation = operation?.liquidacion || {};
+  const netoFinal = Number(liquidation.netoFinalFrigorificoComp || draft.netoFinalFrigorificoComp || brutoVend || 0);
+  return netoFinal ? netoFinal / 1.105 : brutoVend;
+}
+
+function automaticLiquidationIvaValues() {
+  const facturado = numberValue("#liq-facturado");
+  if ($("#liq-direct-no-iva").checked) return { prod: 0, comp: 0 };
+  const consigned = isConsignedOperation();
+  const expenses = getSellerExpenses();
+  const expenseBase = expenses.comision + expenses.fondoGarantia + expenses.controlEntrega + expenses.fondoCompGastos + expenses.otrosGastos;
+  const netoGravadoProd = consigned ? Math.max(facturado - expenseBase, 0) : facturado;
+  return {
+    prod: netoGravadoProd * 0.105,
+    comp: facturado * 0.105
+  };
+}
+
+function syncAutomaticLiquidationIva() {
+  const iva = automaticLiquidationIvaValues();
+  if (!state.liquidationIvaProdTouched) setMoneyInput("#liq-iva-prod", iva.prod);
+  if (!state.liquidationIvaCompTouched) setMoneyInput("#liq-iva-comp", iva.comp);
+}
+
 function normalizeFrigorificoCashInput(value, operation = state.currentOperation) {
   const parsed = Number(value || 0);
   if (!isFrigorificoIvaOperation(operation) || !parsed) return parsed;
@@ -3115,11 +3146,18 @@ function fillLiquidationForm(liquidacion) {
   const draft = state.currentOperation && state.currentOperation.draftData ? state.currentOperation.draftData : {};
   $("#liq-bruto-vend").value = moneyValue(liquidacion.brutoVend);
   $("#liq-bruto-comp").value = moneyValue(liquidacion.brutoComp);
-  setMoneyInput("#liq-facturado", liquidacion.importeFacturado);
+  state.liquidationFacturadoTouched = Boolean(liquidacion.importeFacturadoManual);
+  const facturadoValue = liquidacion.importeFacturadoManual
+    ? liquidacion.importeFacturado
+    : currentAutomaticFacturado();
+  setMoneyInput("#liq-facturado", facturadoValue);
   $("#liq-comprobante-prod").value = liquidacion.comprobanteProd || "";
   $("#liq-comprobante-comp").value = liquidacion.comprobanteComp || "";
-  setMoneyInput("#liq-iva-prod", liquidacion.ivaProd);
-  setMoneyInput("#liq-iva-comp", liquidacion.ivaComp);
+  state.liquidationIvaProdTouched = Boolean(liquidacion.ivaProdManual);
+  state.liquidationIvaCompTouched = Boolean(liquidacion.ivaCompManual);
+  const autoIva = automaticLiquidationIvaValues();
+  setMoneyInput("#liq-iva-prod", liquidacion.ivaProdManual ? liquidacion.ivaProd : autoIva.prod);
+  setMoneyInput("#liq-iva-comp", liquidacion.ivaCompManual ? liquidacion.ivaComp : autoIva.comp);
   setMoneyInput("#frigo-neto-final", liquidacion.netoFinalFrigorificoComp || draft.netoFinalFrigorificoComp || liquidacion.brutoVend);
   setMoneyInput("#liq-efectivo-prod", normalizeFrigorificoCashInput(liquidacion.efectivoProd));
   setMoneyInput("#liq-efectivo-comp", liquidacion.efectivoComp);
@@ -3841,10 +3879,13 @@ async function saveLiquidation(event) {
   setLiquidationMessage("Guardando liquidacion...");
   const payload = {
     importeFacturado: parseMoneyInput($("#liq-facturado").value),
+    importeFacturadoManual: Boolean(state.liquidationFacturadoTouched),
     comprobanteProd: $("#liq-comprobante-prod").value,
     comprobanteComp: $("#liq-comprobante-comp").value,
     ivaProd: parseMoneyInput($("#liq-iva-prod").value),
+    ivaProdManual: Boolean(state.liquidationIvaProdTouched),
     ivaComp: parseMoneyInput($("#liq-iva-comp").value),
+    ivaCompManual: Boolean(state.liquidationIvaCompTouched),
     efectivoProd: normalizeFrigorificoCashInput(parseMoneyInput($("#liq-efectivo-prod").value)),
     efectivoComp: parseMoneyInput($("#liq-efectivo-comp").value),
     comisionFacturadoProd: parseMoneyInput($("#liq-comision-fact-prod").value),
@@ -4792,6 +4833,8 @@ async function init() {
     input.addEventListener("input", renderLiquidationTotals);
   });
   $("#liq-facturado").addEventListener("input", () => {
+    state.liquidationFacturadoTouched = true;
+    syncAutomaticLiquidationIva();
     syncLiquidationCashFromFacturado();
     renderLiquidationDetail(buildDetailFromSaleLines());
     renderLiquidationTotals();
@@ -4800,9 +4843,9 @@ async function init() {
     select.addEventListener("change", renderLiquidationTotals);
   });
   $("#liq-direct-no-iva").addEventListener("change", () => {
-    const iva = $("#liq-direct-no-iva").checked ? 0 : numberValue("#liq-facturado") * 0.105;
-    setMoneyInput("#liq-iva-prod", iva);
-    setMoneyInput("#liq-iva-comp", iva);
+    state.liquidationIvaProdTouched = false;
+    state.liquidationIvaCompTouched = false;
+    syncAutomaticLiquidationIva();
     renderLiquidationDetail(buildDetailFromSaleLines());
     renderLiquidationTotals();
   });
@@ -4815,7 +4858,14 @@ async function init() {
   $("#liq-comprobante-comp").addEventListener("input", () => syncLiquidationReceipts("comp"));
   $("#liq-consignee-settled-party").addEventListener("change", () => syncLiquidationReceipts());
   $("#liq-iva-prod").addEventListener("input", () => {
-    if (isDirectOperation()) setMoneyInput("#liq-iva-comp", numberValue("#liq-iva-prod"));
+    state.liquidationIvaProdTouched = true;
+    if (isDirectOperation()) {
+      state.liquidationIvaCompTouched = true;
+      setMoneyInput("#liq-iva-comp", numberValue("#liq-iva-prod"));
+    }
+  });
+  $("#liq-iva-comp").addEventListener("input", () => {
+    state.liquidationIvaCompTouched = true;
   });
   document.addEventListener("focusin", (event) => {
     if (!event.target.classList || !event.target.classList.contains("money-input")) return;
