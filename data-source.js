@@ -2130,6 +2130,14 @@ class BackupDataSource {
     const data = this.readData();
     const items = asArray(data.cajaConciliaciones)
       .map((item) => {
+        const detalleRecibido = asArray(item.detalleRecibido)
+          .map((detail, index) => ({
+            id: detail.id || `DET-${index}`,
+            concepto: detail.concepto || "",
+            detalle: detail.detalle || "",
+            importe: parseMoney(detail.importe)
+          }))
+          .filter((detail) => detail.concepto && detail.importe);
         const aplicaciones = asArray(item.aplicaciones)
           .map((app) => ({
             id: app.id || `APP-${Date.now()}`,
@@ -2147,6 +2155,7 @@ class BackupDataSource {
           recibidoDe: item.recibidoDe || "",
           referencia: item.referencia || "",
           importeRecibido,
+          detalleRecibido,
           aplicaciones,
           totalAplicado,
           saldo: Math.round((importeRecibido - totalAplicado) * 100) / 100,
@@ -2184,7 +2193,21 @@ class BackupDataSource {
         importe: Math.abs(parseMoney(app.importe))
       }))
       .filter((app) => app.concepto && app.importe);
+    const detalleRecibido = asArray(input.detalleRecibido)
+      .map((detail, index) => ({
+        id: normalizeText(detail.id) || `DET-${Date.now()}-${index}`,
+        concepto: normalizeText(detail.concepto),
+        detalle: normalizeText(detail.detalle),
+        importe: Math.abs(parseMoney(detail.importe))
+      }))
+      .filter((detail) => detail.concepto && detail.importe);
     const totalAplicado = aplicaciones.reduce((sum, app) => sum + parseMoney(app.importe), 0);
+    const totalDetalle = detalleRecibido.reduce((sum, detail) => sum + parseMoney(detail.importe), 0);
+    if (totalDetalle - importeRecibido > 0.02) {
+      const error = new Error("La discriminacion del efectivo no puede superar el importe recibido.");
+      error.statusCode = 400;
+      throw error;
+    }
     if (totalAplicado - importeRecibido > 0.02) {
       const error = new Error("Las aplicaciones no pueden superar el efectivo recibido.");
       error.statusCode = 400;
@@ -2198,6 +2221,7 @@ class BackupDataSource {
       recibidoDe,
       referencia: normalizeText(input.referencia),
       importeRecibido,
+      detalleRecibido,
       aplicaciones,
       observacion: normalizeText(input.observacion),
       creadoEn: index >= 0 ? items[index].creadoEn || now : now,
