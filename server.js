@@ -220,6 +220,42 @@ async function downloadDocumentFile(documento) {
   return fs.readFileSync(path.join(LOCAL_DOCUMENTS_DIR, documento.storagePath));
 }
 
+async function exportBackupWithDocumentFiles() {
+  const backup = await dataSource.exportBackup();
+  const documentos = Array.isArray(backup.documentos) ? backup.documentos : [];
+  const archivos = [];
+  for (const documento of documentos) {
+    try {
+      const content = await downloadDocumentFile(documento);
+      archivos.push({
+        id: documento.id,
+        nombreOriginal: documento.nombreOriginal,
+        mimeType: documento.mimeType,
+        storageProvider: documento.storageProvider,
+        storageBucket: documento.storageBucket,
+        storagePath: documento.storagePath,
+        base64: content.toString("base64")
+      });
+    } catch (error) {
+      archivos.push({
+        id: documento.id,
+        nombreOriginal: documento.nombreOriginal,
+        storageProvider: documento.storageProvider,
+        storageBucket: documento.storageBucket,
+        storagePath: documento.storagePath,
+        error: error.message
+      });
+    }
+  }
+  return {
+    ...backup,
+    documentosIncluidos: true,
+    documentosArchivos: archivos,
+    documentosCantidad: documentos.length,
+    documentosArchivosIncluidos: archivos.filter((item) => item.base64).length
+  };
+}
+
 async function deleteDocumentFile(documento) {
   if (!documento) return;
   if (documento.storageProvider === "SUPABASE") {
@@ -344,7 +380,7 @@ async function handleApi(req, res) {
       return;
     }
     const stamp = new Date().toISOString().slice(0, 10);
-    sendJsonDownload(res, `backup-hacienda-gonzalo-espinosa-${stamp}.json`, await dataSource.exportBackup());
+    sendJsonDownload(res, `backup-completo-hacienda-gonzalo-espinosa-${stamp}.json`, await exportBackupWithDocumentFiles());
     return;
   }
 

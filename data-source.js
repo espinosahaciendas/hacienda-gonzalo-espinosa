@@ -451,6 +451,8 @@ function repairPaymentPairImputations(payments, movements) {
 function buildOperationAccountMovements(operation) {
   const draft = operation.draftData || {};
   const liq = draft.liquidacion || {};
+  const liquidationConfirmed = Boolean(draft.liquidacionConfirmada) || normalizeKey(operation.liquidacionEstado) === "CONFIRMADA";
+  if (!liquidationConfirmed) return [];
   const operationDate = operation.fecha || draft.fecha || "";
   const dueBaseDate = draft.fechaCarga || operationDate;
   const typeText = `${operation.tipo || draft.tipo || "Operacion"} ${operation.destino || draft.destino || ""}`.trim();
