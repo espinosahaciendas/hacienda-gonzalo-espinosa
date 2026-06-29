@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260629-reporte-conciliaciones";
+const APP_BUILD = "20260629-resumen-conciliaciones";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -863,6 +863,84 @@ function printCashReconciliationReport(itemId = "") {
       <div><span>Movimientos</span><strong>${items.length}</strong></div>
     </div>
     <table><thead><tr><th>Fecha</th><th>Recibido de</th><th>Referencia</th><th>Ingreso</th><th>Egreso</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>${cashReconciliationRowsHtml(items)}</tbody></table>
+    <button onclick="window.print()">Imprimir / guardar PDF</button>
+  </body></html>`);
+  popup.document.close();
+}
+
+function cashReconciliationSummaryEntries(items) {
+  const incomes = [];
+  const outcomes = [];
+  items.forEach((item) => {
+    incomes.push({
+      fecha: item.fecha,
+      concepto: item.recibidoDe || "-",
+      detalle: item.referencia || item.observacion || "-",
+      importe: Number(item.importeRecibido || 0)
+    });
+    (item.aplicaciones || []).forEach((app) => {
+      outcomes.push({
+        fecha: app.fecha || item.fecha,
+        concepto: app.concepto || "-",
+        detalle: app.destino || item.recibidoDe || "-",
+        importe: Number(app.importe || 0)
+      });
+    });
+  });
+  return { incomes, outcomes };
+}
+
+function summaryColumnRows(rows, type) {
+  if (!rows.length) return `<tr><td colspan="4">Sin ${type === "income" ? "ingresos" : "egresos"}.</td></tr>`;
+  return rows.map((row) => `<tr>
+    <td>${escapeHtml(row.fecha || "-")}</td>
+    <td>${escapeHtml(row.concepto || "-")}</td>
+    <td>${escapeHtml(row.detalle || "-")}</td>
+    <td class="amount ${type === "income" ? "positive" : "negative"}">${moneyValue(row.importe)}</td>
+  </tr>`).join("");
+}
+
+function printCashReconciliationSummaryReport() {
+  const items = cashReconciliationReportItems();
+  const { incomes, outcomes } = cashReconciliationSummaryEntries(items);
+  const totalIn = incomes.reduce((sum, row) => sum + Number(row.importe || 0), 0);
+  const totalOut = outcomes.reduce((sum, row) => sum + Number(row.importe || 0), 0);
+  const balance = totalIn - totalOut;
+  const fromLabel = $("#cash-rec-report-from").value || "inicio";
+  const toLabel = $("#cash-rec-report-to").value || "fin";
+  const title = safePdfTitle("Resumen_conciliaciones", fromLabel, toLabel);
+  const popup = window.open("", "_blank", "width=1100,height=850");
+  if (!popup) return;
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
+    body{font-family:Arial,sans-serif;margin:10mm;color:#173632}
+    header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px;margin-bottom:10px}
+    img{width:72px;height:72px;object-fit:contain;background:#173632;padding:6px}
+    h1{font-size:18px;margin:0} h2{font-size:13px;margin:12px 0 5px} p{margin:3px 0;font-size:11px}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}
+    .summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}
+    .columns{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
+    table{width:100%;border-collapse:collapse;font-size:9px;margin-top:5px}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}
+    th{background:#edf3f1}.income-title{background:#eaf5ef}.out-title{background:#f8ebe5}.amount{text-align:right;font-weight:700;white-space:nowrap}.positive{color:#0f6b43}.negative{color:#9b1c1c}
+    tfoot td{font-weight:700;background:#fff3e8}.balance{background:#eaf2ff!important}
+    button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 landscape;margin:8mm}body{margin:0}button{display:none}}
+  </style></head><body>
+    <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>Resumen de conciliaciones de efectivo</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Periodo: ${escapeHtml(fromLabel)} a ${escapeHtml(toLabel)}</p></div></header>
+    <div class="summary">
+      <div><span>Total ingresos</span><strong>${moneyValue(totalIn)}</strong></div>
+      <div><span>Total egresos</span><strong>${moneyValue(totalOut)}</strong></div>
+      <div><span>Saldo</span><strong>${moneyValue(balance)}</strong></div>
+      <div><span>Ingresos considerados</span><strong>${items.length}</strong></div>
+    </div>
+    <div class="columns">
+      <section>
+        <h2>Ingresos</h2>
+        <table><thead><tr class="income-title"><th>Fecha</th><th>Recibido de</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${summaryColumnRows(incomes, "income")}</tbody><tfoot><tr><td colspan="3">Total ingresos</td><td class="amount positive">${moneyValue(totalIn)}</td></tr></tfoot></table>
+      </section>
+      <section>
+        <h2>Egresos / aplicaciones</h2>
+        <table><thead><tr class="out-title"><th>Fecha</th><th>Concepto</th><th>Destino</th><th>Importe</th></tr></thead><tbody>${summaryColumnRows(outcomes, "out")}</tbody><tfoot><tr><td colspan="3">Total egresos</td><td class="amount negative">${moneyValue(totalOut)}</td></tr><tr><td colspan="3" class="balance">Saldo del periodo</td><td class="amount balance">${moneyValue(balance)}</td></tr></tfoot></table>
+      </section>
+    </div>
     <button onclick="window.print()">Imprimir / guardar PDF</button>
   </body></html>`);
   popup.document.close();
@@ -5485,6 +5563,7 @@ async function init() {
   $("#cash-rec-pay-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
   $("#cash-rec-pay-save").addEventListener("click", applyCashReconciliationPayment);
   $("#cash-rec-print").addEventListener("click", () => printCashReconciliationReport());
+  $("#cash-rec-summary-print").addEventListener("click", printCashReconciliationSummaryReport);
   $("#cash-rec-app-body").addEventListener("click", (event) => {
     const removeButton = event.target.closest("[data-cash-rec-app-remove]");
     if (!removeButton) return;
