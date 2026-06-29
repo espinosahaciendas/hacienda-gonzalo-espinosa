@@ -1674,6 +1674,15 @@ label textarea {
     border-radius: 8px;
   }
 
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-wrap table {
+    min-width: 760px;
+  }
+
   .operation-screen-toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -1730,7 +1739,7 @@ label textarea {
   }
 
   .panel {
-    padding: 14px;
+    padding: 12px;
   }
 
   table {
@@ -1752,7 +1761,7 @@ label textarea {
 
   th,
   td {
-    padding: 9px 10px;
+    padding: 8px 9px;
   }
 
   input,
@@ -1764,6 +1773,14 @@ label textarea {
 }
 
 @media (max-width: 560px) {
+  main {
+    padding: 10px 8px 18px;
+  }
+
+  .sidebar {
+    padding: 8px;
+  }
+
   .brand div {
     min-width: 0;
   }
@@ -1777,6 +1794,19 @@ label textarea {
 
   nav button {
     font-size: 13px;
+    padding: 8px 9px;
+  }
+
+  .panel {
+    padding: 10px;
+  }
+
+  .table-wrap table {
+    min-width: 680px;
+  }
+
+  .topbar h1 {
+    font-size: 20px;
   }
 
   .mobile-list-item {
