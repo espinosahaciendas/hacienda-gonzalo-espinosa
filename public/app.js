@@ -30,7 +30,7 @@ let currentPaymentInstruments = [];
 let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260629-ajustes-operativos";
+const APP_BUILD = "20260629-buscador-operaciones";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -762,7 +762,10 @@ function periodDestinationLabel(operation) {
 async function renderPeriodStats() {
   const from = parseInputDate($("#dashboard-period-from").value);
   const to = parseInputDate($("#dashboard-period-to").value);
-  const commissionRate = parseMoneyInput($("#period-commission-rate").value);
+  const typeFilter = normalizeSearch($("#period-type-filter").value);
+  const destinationFilter = normalizeSearch($("#period-destination-filter").value);
+  const categoryFilter = normalizeSearch($("#period-category-filter").value);
+  const clientFilter = normalizeSearch($("#period-client-filter").value);
   const message = $("#period-message");
   message.textContent = "Calculando periodo...";
   message.className = "form-message";
@@ -777,50 +780,197 @@ async function renderPeriodStats() {
     date.setHours(0, 0, 0, 0);
     if (from && date < dateOnly(from)) return false;
     if (to && date > dateOnly(to)) return false;
+    const typeText = normalizeSearch(operation.tipo || operation.draftData?.tipo || "");
+    const destinationText = normalizeSearch(`${operation.destino || operation.draftData?.destino || ""} ${periodDestinationLabel(operation)}`);
+    const clientText = normalizeSearch([
+      operation.vendedor,
+      operation.comprador,
+      operation.consignataria,
+      operation.draftData?.vendedor,
+      operation.draftData?.comprador,
+      operation.draftData?.consignataria
+    ].filter(Boolean).join(" "));
+    const lineText = normalizeSearch((operation.saleLines || []).map((line) => line.categoria).join(" "));
+    if (typeFilter && !typeText.includes(typeFilter)) return false;
+    if (destinationFilter && !destinationText.includes(destinationFilter)) return false;
+    if (clientFilter && !clientText.includes(clientFilter)) return false;
+    if (categoryFilter && !lineText.includes(categoryFilter)) return false;
     return true;
   });
   const categories = new Map();
   const destinations = new Map();
+  const clients = new Map();
   let heads = 0;
+  let kilos = 0;
   let sellerTotal = 0;
   operations.forEach((operation) => {
     const destination = periodDestinationLabel(operation);
-    const destinationCurrent = destinations.get(destination) || { heads: 0, amount: 0, operations: new Set() };
+    const client = operation.vendedor || operation.draftData?.vendedor || "Sin cliente";
+    const lines = (operation.saleLines || []).filter((line) => !categoryFilter || normalizeSearch(line.categoria).includes(categoryFilter));
+    const destinationCurrent = destinations.get(destination) || { heads: 0, kilos: 0, amount: 0, operations: new Set() };
+    const clientCurrent = clients.get(client) || { heads: 0, kilos: 0, amount: 0, operations: new Set() };
     destinationCurrent.operations.add(operation.id);
-    (operation.saleLines || []).forEach((line) => {
+    clientCurrent.operations.add(operation.id);
+    lines.forEach((line) => {
       const category = line.categoria || "Sin categoria";
       const count = Number(line.cabezas || 0);
+      const kg = Number(line.kgNetoVend || line.kgCalculoVend || line.kgBruto || 0);
       const amount = Number(line.importeVend || 0);
       heads += count;
+      kilos += kg;
       sellerTotal += amount;
       destinationCurrent.heads += count;
+      destinationCurrent.kilos += kg;
       destinationCurrent.amount += amount;
-      const current = categories.get(category) || { heads: 0, amount: 0, operations: new Set() };
+      clientCurrent.heads += count;
+      clientCurrent.kilos += kg;
+      clientCurrent.amount += amount;
+      const current = categories.get(category) || { heads: 0, kilos: 0, amount: 0, operations: new Set() };
       current.heads += count;
+      current.kilos += kg;
       current.amount += amount;
       current.operations.add(operation.id);
       categories.set(category, current);
     });
     destinations.set(destination, destinationCurrent);
+    clients.set(client, clientCurrent);
   });
   const categoryRows = Array.from(categories.entries())
-    .map(([categoria, item]) => ({ categoria, heads: item.heads, amount: item.amount, operations: item.operations.size }))
+    .map(([categoria, item]) => ({ categoria, heads: item.heads, kilos: item.kilos, amount: item.amount, operations: item.operations.size }))
     .sort((a, b) => b.heads - a.heads || a.categoria.localeCompare(b.categoria, "es"));
   const destinationRows = Array.from(destinations.entries())
-    .map(([destino, item]) => ({ destino, heads: item.heads, amount: item.amount, operations: item.operations.size }))
+    .map(([destino, item]) => ({ destino, heads: item.heads, kilos: item.kilos, amount: item.amount, operations: item.operations.size }))
     .sort((a, b) => b.heads - a.heads || a.destino.localeCompare(b.destino, "es"));
+  const clientRows = Array.from(clients.entries())
+    .map(([cliente, item]) => ({ cliente, heads: item.heads, kilos: item.kilos, amount: item.amount, operations: item.operations.size }))
+    .filter((row) => row.heads || row.kilos || row.amount)
+    .sort((a, b) => b.heads - a.heads || a.cliente.localeCompare(b.cliente, "es"));
   $("#period-operations").textContent = operations.length;
   $("#period-heads").textContent = plainNumberValue(heads);
+  $("#period-kilos").textContent = `${plainNumberValue(kilos)} kgs`;
   $("#period-seller-total").textContent = moneyValue(sellerTotal);
-  $("#period-commission-total").textContent = moneyValue(sellerTotal * commissionRate / 100);
   $("#period-destination-body").innerHTML = destinationRows.length
-    ? destinationRows.map((row) => `<tr><td>${escapeHtml(row.destino)}</td><td>${row.operations}</td><td>${plainNumberValue(row.heads)}</td><td>${moneyValue(row.amount)}</td></tr>`).join("")
-    : `<tr><td colspan="4">Sin destinos para el periodo.</td></tr>`;
+    ? destinationRows.map((row) => `<tr><td>${escapeHtml(row.destino)}</td><td>${row.operations}</td><td>${plainNumberValue(row.heads)}</td><td>${plainNumberValue(row.kilos)} kgs</td><td>${moneyValue(row.amount)}</td></tr>`).join("")
+    : `<tr><td colspan="5">Sin destinos para el periodo.</td></tr>`;
   $("#period-category-body").innerHTML = categoryRows.length
-    ? categoryRows.map((row) => `<tr><td>${escapeHtml(row.categoria)}</td><td>${plainNumberValue(row.heads)}</td><td>${row.operations}</td><td>${moneyValue(row.amount)}</td></tr>`).join("")
-    : `<tr><td colspan="4">Sin categorias para el periodo.</td></tr>`;
+    ? categoryRows.map((row) => `<tr><td>${escapeHtml(row.categoria)}</td><td>${plainNumberValue(row.heads)}</td><td>${plainNumberValue(row.kilos)} kgs</td><td>${row.operations}</td><td>${moneyValue(row.amount)}</td></tr>`).join("")
+    : `<tr><td colspan="5">Sin categorias para el periodo.</td></tr>`;
+  $("#period-client-body").innerHTML = clientRows.length
+    ? clientRows.map((row) => `<tr><td>${escapeHtml(row.cliente)}</td><td>${row.operations}</td><td>${plainNumberValue(row.heads)}</td><td>${plainNumberValue(row.kilos)} kgs</td><td>${moneyValue(row.amount)}</td></tr>`).join("")
+    : `<tr><td colspan="5">Sin clientes para el periodo.</td></tr>`;
   message.textContent = operations.length ? "Periodo calculado." : "No hay operaciones en ese periodo.";
   message.className = `form-message ${operations.length ? "ok" : ""}`.trim();
+}
+
+function operationLineKilos(line) {
+  return Number(line.kgNetoVend || line.kgCalculoVend || line.kgComp || line.kgBruto || 0);
+}
+
+function operationSearchDate(operation) {
+  return parseDisplayDate(operation.fechaCarga || operation.draftData?.fechaCarga || operation.fecha || operation.draftData?.fecha);
+}
+
+function operationSearchBasicMatches(operation, filters) {
+  const date = operationSearchDate(operation);
+  if (!date) return false;
+  date.setHours(0, 0, 0, 0);
+  if (filters.from && date < dateOnly(filters.from)) return false;
+  if (filters.to && date > dateOnly(filters.to)) return false;
+  const clientText = normalizeSearch([
+    operation.vendedor,
+    operation.comprador,
+    operation.consignataria,
+    operation.draftData?.vendedor,
+    operation.draftData?.comprador,
+    operation.draftData?.consignataria
+  ].filter(Boolean).join(" "));
+  const typeText = normalizeSearch(`${operation.tipo || operation.draftData?.tipo || ""} ${operation.destino || operation.draftData?.destino || ""} ${periodDestinationLabel(operation)}`);
+  const generalText = normalizeSearch([
+    operation.id,
+    operation.vendedor,
+    operation.comprador,
+    operation.consignataria,
+    operation.tipo,
+    operation.destino,
+    operation.draftData?.minuta,
+    operation.draftData?.condiciones
+  ].filter(Boolean).join(" "));
+  if (filters.client && !clientText.includes(filters.client)) return false;
+  if (filters.type && !typeText.includes(filters.type)) return false;
+  if (filters.text && !generalText.includes(filters.text)) return false;
+  return true;
+}
+
+function operationSearchLineSummary(operation, categoryFilter = "") {
+  const lines = (operation.saleLines || []).filter((line) => !categoryFilter || normalizeSearch(line.categoria).includes(categoryFilter));
+  return lines.reduce((acc, line) => {
+    const category = line.categoria || "Sin categoria";
+    const heads = Number(line.cabezas || 0);
+    acc.heads += heads;
+    acc.kilos += operationLineKilos(line);
+    acc.amount += Number(line.importeVend || 0);
+    acc.categories.set(category, (acc.categories.get(category) || 0) + heads);
+    return acc;
+  }, { heads: 0, kilos: 0, amount: 0, categories: new Map() });
+}
+
+async function renderOperationSearch() {
+  const filters = {
+    from: parseInputDate($("#operation-search-from").value),
+    to: parseInputDate($("#operation-search-to").value),
+    client: normalizeSearch($("#operation-search-client").value),
+    type: normalizeSearch($("#operation-search-type").value),
+    category: normalizeSearch($("#operation-search-category").value),
+    text: normalizeSearch($("#operation-search-text").value)
+  };
+  const message = $("#operation-search-message");
+  message.textContent = "Buscando operaciones...";
+  message.className = "form-message";
+  const candidates = state.operaciones.filter((operation) => operationSearchBasicMatches(operation, filters));
+  const details = await Promise.all(candidates.map((operation) =>
+    fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`)
+      .then((response) => ({ ...operation, ...(response.item || {}) }))
+      .catch(() => operation)
+  ));
+  const rows = details
+    .map((operation) => ({ operation, summary: operationSearchLineSummary(operation, filters.category) }))
+    .filter((item) => !filters.category || item.summary.heads || item.summary.kilos || item.summary.amount)
+    .sort((a, b) => {
+      const dateA = operationSearchDate(a.operation)?.getTime() || 0;
+      const dateB = operationSearchDate(b.operation)?.getTime() || 0;
+      return dateB - dateA || String(b.operation.id || "").localeCompare(String(a.operation.id || ""), "es");
+    });
+  const totals = rows.reduce((acc, item) => {
+    acc.heads += item.summary.heads;
+    acc.kilos += item.summary.kilos;
+    acc.amount += item.summary.amount;
+    return acc;
+  }, { heads: 0, kilos: 0, amount: 0 });
+  $("#operation-search-count").textContent = rows.length;
+  $("#operation-search-heads").textContent = plainNumberValue(totals.heads);
+  $("#operation-search-kilos").textContent = `${plainNumberValue(totals.kilos)} kgs`;
+  $("#operation-search-amount").textContent = moneyValue(totals.amount);
+  $("#operation-search-body").innerHTML = rows.length
+    ? rows.map(({ operation, summary }) => {
+        const categories = Array.from(summary.categories.entries())
+          .map(([name, heads]) => `${name}${heads ? ` (${plainNumberValue(heads)})` : ""}`)
+          .join(", ");
+        return `<tr>
+          <td>${escapeHtml(operation.id || "-")}</td>
+          <td>${escapeHtml(operation.fechaCarga || operation.draftData?.fechaCarga || operation.fecha || "-")}</td>
+          <td>${escapeHtml(`${operationTypeLabel(operation)} ${operation.destino || operation.draftData?.destino || ""}`.trim())}</td>
+          <td>${escapeHtml(operation.vendedor || operation.draftData?.vendedor || "-")}</td>
+          <td>${escapeHtml(operation.comprador || operation.consignataria || operation.draftData?.comprador || operation.draftData?.consignataria || "-")}</td>
+          <td>${escapeHtml(categories || "-")}</td>
+          <td>${plainNumberValue(summary.heads)}</td>
+          <td>${plainNumberValue(summary.kilos)} kgs</td>
+          <td>${moneyValue(summary.amount)}</td>
+          <td><button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button></td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="10">No hay operaciones para los filtros aplicados.</td></tr>`;
+  message.textContent = rows.length ? "Busqueda lista." : "No se encontraron operaciones.";
+  message.className = `form-message ${rows.length ? "ok" : ""}`.trim();
 }
 
 function movementDateForRealCommission(movement) {
@@ -5034,6 +5184,7 @@ async function init() {
   $("#mobile-refresh").addEventListener("click", reloadAppData);
   $("#download-backup").addEventListener("click", downloadBackup);
   $("#dashboard-period-run").addEventListener("click", renderPeriodStats);
+  $("#operation-search-run").addEventListener("click", renderOperationSearch);
   $("#real-commission-run").addEventListener("click", renderRealCommissionSummary);
   ["#real-commission-from", "#real-commission-to", "#real-commission-client", "#real-commission-status", "#real-commission-kind"].forEach((selector) => {
     $(selector).addEventListener("input", renderRealCommissionSummary);
@@ -5059,7 +5210,13 @@ async function init() {
     state.weightTickets = state.weightTickets.filter((ticket) => String(ticket.id) !== String(button.dataset.calcTicketRemove));
     renderWeightCalculator();
   });
-  $("#period-commission-rate").addEventListener("input", renderPeriodStats);
+  ["#period-type-filter", "#period-destination-filter", "#period-category-filter", "#period-client-filter"].forEach((selector) => {
+    $(selector).addEventListener("input", renderPeriodStats);
+    $(selector).addEventListener("change", renderPeriodStats);
+  });
+  ["#operation-search-from", "#operation-search-to", "#operation-search-client", "#operation-search-type", "#operation-search-category", "#operation-search-text"].forEach((selector) => {
+    $(selector).addEventListener("change", renderOperationSearch);
+  });
   $("#commissionist-load").addEventListener("click", loadCommissionistOperations);
   $("#commissionist-generate").addEventListener("click", generateCommissionistMovement);
   $("#commissionist-percent").addEventListener("input", renderCommissionistRows);
@@ -5426,6 +5583,12 @@ async function init() {
     if (!button) return;
     openSale(button.dataset.openSale);
   });
+  $("#operation-search-body").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-open-operation-search]");
+    if (!button) return;
+    setView("operaciones");
+    openSale(button.dataset.openOperationSearch);
+  });
   $("#client-name-suggestions").addEventListener("click", (event) => {
     const button = event.target.closest("[data-suggest-client]");
     if (!button) return;
@@ -5482,6 +5645,8 @@ async function init() {
   const today = new Date().toISOString().slice(0, 10);
   $("#dashboard-period-from").value = today.slice(0, 8) + "01";
   $("#dashboard-period-to").value = today;
+  $("#operation-search-from").value = today.slice(0, 8) + "01";
+  $("#operation-search-to").value = today;
   $("#cc-calendar-from").value = dateToInputValue(new Date());
   $("#cc-calendar-to").value = dateToInputValue(addDateDays(new Date(), 7));
   $("#real-commission-from").value = today.slice(0, 8) + "01";
@@ -5489,6 +5654,7 @@ async function init() {
   $("#commissionist-from").value = today.slice(0, 8) + "01";
   $("#commissionist-to").value = today;
   $("#commissionist-due").value = today;
+  renderOperationSearch();
   renderRealCommissionSummary();
   resetCashForm();
   resetCashReconciliationForm();

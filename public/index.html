@@ -222,38 +222,108 @@
           <div class="panel-head">
             <div>
               <h2>Resumen por periodo</h2>
-              <p class="subtle">Operaciones, cabezas, destino, categorias e importe estimado.</p>
+              <p class="subtle">Buscador operativo por periodo, tipo de operacion, destino, categoria y cliente.</p>
             </div>
             <div class="form-actions">
               <label>Desde<input id="dashboard-period-from" type="date"></label>
               <label>Hasta<input id="dashboard-period-to" type="date"></label>
-              <label>% comision estimada<input id="period-commission-rate" inputmode="decimal" value="1"></label>
+              <label>Tipo
+                <select id="period-type-filter">
+                  <option value="">Todos</option>
+                  <option value="DIRECTA">Directa</option>
+                  <option value="CONSIGNADA">Consignada</option>
+                  <option value="VENTA ANTICIPADA">Venta anticipada</option>
+                </select>
+              </label>
+              <label>Destino
+                <select id="period-destination-filter">
+                  <option value="">Todos</option>
+                  <option value="INVERNADA">Invernada</option>
+                  <option value="FAENA">Faena</option>
+                  <option value="FRIGORIFICO">Frigorifico</option>
+                  <option value="CRIA">Cria</option>
+                  <option value="REPRODUCCION">Reproduccion</option>
+                </select>
+              </label>
+              <label>Categoria<input id="period-category-filter" autocomplete="off" placeholder="Todas"></label>
+              <label>Cliente<input id="period-client-filter" list="cc-client-list" autocomplete="off" placeholder="Todos"></label>
               <button type="button" class="ghost-button" id="dashboard-period-run">Ver periodo</button>
             </div>
           </div>
           <div class="cc-grid">
             <div><span>Operaciones</span><strong id="period-operations">-</strong></div>
             <div><span>Cabezas</span><strong id="period-heads">-</strong></div>
+            <div><span>Kilos netos / usados</span><strong id="period-kilos">-</strong></div>
             <div><span>Importe bruto vendedor</span><strong id="period-seller-total">$ 0,00</strong></div>
-            <div><span>Comision estimada</span><strong id="period-commission-total">$ 0,00</strong></div>
           </div>
           <div class="summary-grid">
             <div class="table-wrap compact-table">
               <h3>Por destino</h3>
               <table>
-                <thead><tr><th>Destino</th><th>Operaciones</th><th>Cabezas</th><th>Importe</th></tr></thead>
+                <thead><tr><th>Destino</th><th>Operaciones</th><th>Cabezas</th><th>Kilos</th><th>Importe</th></tr></thead>
                 <tbody id="period-destination-body"></tbody>
               </table>
             </div>
             <div class="table-wrap compact-table">
               <h3>Por categoria</h3>
               <table>
-                <thead><tr><th>Categoria</th><th>Cabezas</th><th>Operaciones</th><th>Importe</th></tr></thead>
+                <thead><tr><th>Categoria</th><th>Cabezas</th><th>Kilos</th><th>Operaciones</th><th>Importe</th></tr></thead>
                 <tbody id="period-category-body"></tbody>
+              </table>
+            </div>
+            <div class="table-wrap compact-table">
+              <h3>Por cliente / productor</h3>
+              <table>
+                <thead><tr><th>Cliente</th><th>Operaciones</th><th>Cabezas</th><th>Kilos</th><th>Importe</th></tr></thead>
+                <tbody id="period-client-body"></tbody>
               </table>
             </div>
           </div>
           <p class="form-message" id="period-message"></p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Buscador de operaciones</h2>
+              <p class="subtle">Consulta compacta por cliente, tipo, categoria o periodo. Desde cada resultado puede abrir el detalle.</p>
+            </div>
+            <div class="form-actions">
+              <label>Desde<input id="operation-search-from" type="date"></label>
+              <label>Hasta<input id="operation-search-to" type="date"></label>
+              <label>Cliente<input id="operation-search-client" list="cc-client-list" autocomplete="off" placeholder="Todos"></label>
+              <label>Tipo / destino<input id="operation-search-type" autocomplete="off" placeholder="Ej.: directa, faena"></label>
+              <label>Categoria<input id="operation-search-category" autocomplete="off" placeholder="Todas"></label>
+              <label>Texto<input id="operation-search-text" autocomplete="off" placeholder="Operacion, comprador, consignataria"></label>
+              <button type="button" class="ghost-button" id="operation-search-run">Buscar</button>
+            </div>
+          </div>
+          <div class="cc-grid">
+            <div><span>Operaciones encontradas</span><strong id="operation-search-count">0</strong></div>
+            <div><span>Cabezas</span><strong id="operation-search-heads">-</strong></div>
+            <div><span>Kilos netos / usados</span><strong id="operation-search-kilos">-</strong></div>
+            <div><span>Importe bruto vendedor</span><strong id="operation-search-amount">$ 0,00</strong></div>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Operacion</th>
+                  <th>Fecha carga</th>
+                  <th>Tipo / destino</th>
+                  <th>Vendedor</th>
+                  <th>Comprador / consignataria</th>
+                  <th>Categorias</th>
+                  <th>Cabezas</th>
+                  <th>Kilos</th>
+                  <th>Importe</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="operation-search-body"></tbody>
+            </table>
+          </div>
+          <p class="form-message" id="operation-search-message"></p>
         </div>
 
         <div class="panel">
@@ -1738,6 +1808,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260629-ajustes-operativos"></script>
+    <script src="/app.js?v=20260629-buscador-operaciones"></script>
   </body>
 </html>
