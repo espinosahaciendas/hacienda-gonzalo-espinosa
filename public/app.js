@@ -29,8 +29,9 @@ const state = {
 let currentPaymentInstruments = [];
 let documentFilterIds = [];
 let selectedDocumentId = "";
+let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260629-buscador-operaciones";
+const APP_BUILD = "20260629-reporte-conciliaciones";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -457,9 +458,14 @@ function resetCashReconciliationForm() {
   if ($("#cash-rec-pay-concept")) $("#cash-rec-pay-concept").value = "";
   if ($("#cash-rec-pay-to")) $("#cash-rec-pay-to").value = "";
   if ($("#cash-rec-pay-amount")) $("#cash-rec-pay-amount").value = "";
+  $("#cash-rec-break-concept").value = "";
+  $("#cash-rec-break-detail").value = "";
+  $("#cash-rec-break-amount").value = "";
+  cashReconciliationBreakdown = [];
   cashReconciliationApplications = [];
   setCashReconciliationMessage("");
   setCashReconciliationPayMessage("");
+  renderCashReconciliationBreakdown();
   renderCashReconciliationApplications();
 }
 
@@ -510,6 +516,45 @@ function renderCashReconciliationApplications() {
     : `<tr><td colspan="5">Sin aplicaciones cargadas.</td></tr>`;
 }
 
+function renderCashReconciliationBreakdown() {
+  const total = cashReconciliationBreakdown.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const recibido = parseMoneyInput($("#cash-rec-amount")?.value || 0);
+  const diff = recibido - total;
+  $("#cash-rec-breakdown-summary").textContent = cashReconciliationBreakdown.length
+    ? `${cashReconciliationBreakdown.length} item/s - detallado ${moneyValue(total)} - diferencia ${moneyValue(diff)}`
+    : recibido ? `Sin detalle - recibido ${moneyValue(recibido)}` : "Sin detalle cargado";
+  $("#cash-rec-break-body").innerHTML = cashReconciliationBreakdown.length
+    ? cashReconciliationBreakdown.map((item) => `
+        <tr>
+          <td>${escapeHtml(item.concepto || "-")}</td>
+          <td>${escapeHtml(item.detalle || "-")}</td>
+          <td class="amount positive">${moneyValue(item.importe)}</td>
+          <td><button type="button" class="small-button danger-button" data-cash-rec-break-remove="${escapeHtml(item.id)}">Quitar</button></td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="4">Sin detalle cargado.</td></tr>`;
+}
+
+function addCashReconciliationBreakdown() {
+  const importe = parseMoneyInput($("#cash-rec-break-amount").value);
+  const concepto = $("#cash-rec-break-concept").value.trim();
+  if (!concepto || importe <= 0) {
+    setCashReconciliationMessage("Para agregar el detalle carga concepto e importe mayor a cero.", "error");
+    return;
+  }
+  cashReconciliationBreakdown.push({
+    id: `DET-${Date.now()}-${cashReconciliationBreakdown.length}`,
+    concepto,
+    detalle: $("#cash-rec-break-detail").value,
+    importe
+  });
+  $("#cash-rec-break-concept").value = "";
+  $("#cash-rec-break-detail").value = "";
+  $("#cash-rec-break-amount").value = "";
+  setCashReconciliationMessage("");
+  renderCashReconciliationBreakdown();
+}
+
 function addCashReconciliationApplication() {
   const importe = parseMoneyInput($("#cash-rec-app-amount").value);
   const concepto = $("#cash-rec-app-concept").value.trim();
@@ -550,10 +595,12 @@ function renderCashReconciliations() {
           <td class="${amountClass(item.saldo)}">${moneyValue(item.saldo)}</td>
           <td>${Math.abs(Number(item.saldo || 0)) <= 0.01 ? "Cerrada" : "Abierta"}</td>
           <td>
-            ${state.usuario?.rol === "CONSULTA" ? "-" : `<button type="button" class="small-button" data-cash-rec-edit="${escapeHtml(item.id)}">Editar</button>
+            <button type="button" class="small-button" data-cash-rec-print="${escapeHtml(item.id)}">PDF</button>
+            ${state.usuario?.rol === "CONSULTA" ? "" : `<button type="button" class="small-button" data-cash-rec-edit="${escapeHtml(item.id)}">Editar</button>
             <button type="button" class="small-button danger-button" data-cash-rec-delete="${escapeHtml(item.id)}">Eliminar</button>`}
           </td>
         </tr>
+        ${item.detalleRecibido?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Detalle recibido:</strong> ${item.detalleRecibido.map((det) => `${escapeHtml(det.concepto || "-")} · ${escapeHtml(det.detalle || "-")} · ${moneyValue(det.importe)}`).join(" | ")}</td></tr>` : ""}
         ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} · ${escapeHtml(app.concepto || "-")} · ${moneyValue(app.importe)}`).join(" | ")}</td></tr>` : ""}
       `).join("")
     : `<tr><td colspan="8">Sin conciliaciones de efectivo cargadas.</td></tr>`;
@@ -599,6 +646,12 @@ function fillCashReconciliationForm(item) {
   $("#cash-rec-reference").value = item.referencia || "";
   $("#cash-rec-amount").value = moneyValue(item.importeRecibido);
   $("#cash-rec-notes").value = item.observacion || "";
+  cashReconciliationBreakdown = (item.detalleRecibido || []).map((detail, index) => ({
+    id: detail.id || `DET-EDIT-${index}`,
+    concepto: detail.concepto || "",
+    detalle: detail.detalle || "",
+    importe: Number(detail.importe || 0)
+  }));
   cashReconciliationApplications = (item.aplicaciones || []).map((app, index) => ({
     id: app.id || `EDIT-${index}`,
     fecha: dateToInput(app.fecha),
@@ -607,6 +660,7 @@ function fillCashReconciliationForm(item) {
     importe: Number(app.importe || 0)
   }));
   setCashTab("conciliaciones");
+  renderCashReconciliationBreakdown();
   renderCashReconciliationApplications();
   setCashReconciliationMessage("Conciliacion lista para editar.", "ok");
 }
@@ -650,6 +704,7 @@ async function saveCashReconciliation(event) {
     referencia: $("#cash-rec-reference").value,
     importeRecibido: parseMoneyInput($("#cash-rec-amount").value),
     observacion: $("#cash-rec-notes").value,
+    detalleRecibido: cashReconciliationBreakdown,
     aplicaciones: cashReconciliationApplications
   };
   try {
@@ -730,6 +785,84 @@ function printCashReport() {
     <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoria</th><th>Importe</th><th>Salio de</th><th>Pagado por</th><th>Comprobante</th><th>Estado</th><th>Observacion</th></tr></thead><tbody>
       ${rows.map((item) => `<tr><td>${escapeHtml(item.fecha || "-")}</td><td>${escapeHtml(item.concepto || "-")}${item.proveedor ? `<br>${escapeHtml(item.proveedor)}` : ""}</td><td>${escapeHtml(item.categoria || "-")}</td><td class="amount">${moneyValue(item.importe)}</td><td>${escapeHtml(item.origenEfectivo || "-")}</td><td>${escapeHtml(item.pagadoPor || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td class="${item.recuperado ? "" : "pending"}">${item.recuperado ? "Recuperado" : "Pendiente"}</td><td>${escapeHtml(item.observacion || "-")}</td></tr>`).join("")}
     </tbody></table>
+    <button onclick="window.print()">Imprimir / guardar PDF</button>
+  </body></html>`);
+  popup.document.close();
+}
+
+function cashReconciliationReportItems(itemId = "") {
+  const items = state.cajaConciliaciones?.items || [];
+  if (itemId) return items.filter((item) => String(item.id) === String(itemId));
+  const from = parseInputDate($("#cash-rec-report-from")?.value);
+  const to = parseInputDate($("#cash-rec-report-to")?.value);
+  return items.filter((item) => {
+    const date = parseDisplayDate(item.fecha);
+    if (!date) return false;
+    const value = dateOnly(date);
+    if (from && value < dateOnly(from)) return false;
+    if (to && value > dateOnly(to)) return false;
+    return true;
+  });
+}
+
+function cashReconciliationRowsHtml(items) {
+  if (!items.length) return `<tr><td colspan="7">Sin conciliaciones para el filtro seleccionado.</td></tr>`;
+  return items.map((item) => {
+    const detailRows = (item.detalleRecibido || []).length
+      ? `<tr class="detail-row"><td colspan="7"><strong>Detalle recibido</strong><table><thead><tr><th>Concepto</th><th>Detalle</th><th>Importe</th></tr></thead><tbody>${item.detalleRecibido.map((detail) => `<tr><td>${escapeHtml(detail.concepto || "-")}</td><td>${escapeHtml(detail.detalle || "-")}</td><td class="amount positive">${moneyValue(detail.importe)}</td></tr>`).join("")}</tbody></table></td></tr>`
+      : "";
+    const applicationRows = (item.aplicaciones || []).length
+      ? `<tr class="detail-row"><td colspan="7"><strong>Egresos / aplicaciones</strong><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Destino</th><th>Importe</th></tr></thead><tbody>${item.aplicaciones.map((app) => `<tr><td>${escapeHtml(app.fecha || "-")}</td><td>${escapeHtml(app.concepto || "-")}</td><td>${escapeHtml(app.destino || "-")}</td><td class="amount negative">${moneyValue(app.importe)}</td></tr>`).join("")}</tbody></table></td></tr>`
+      : "";
+    return `<tr>
+      <td>${escapeHtml(item.fecha || "-")}</td>
+      <td>${escapeHtml(item.recibidoDe || "-")}</td>
+      <td>${escapeHtml(item.referencia || "-")}</td>
+      <td class="amount positive">${moneyValue(item.importeRecibido)}</td>
+      <td class="amount negative">${moneyValue(item.totalAplicado)}</td>
+      <td class="amount ${Number(item.saldo || 0) >= 0 ? "positive" : "negative"}">${moneyValue(item.saldo)}</td>
+      <td>${Math.abs(Number(item.saldo || 0)) <= 0.01 ? "Cerrada" : "Abierta"}</td>
+    </tr>${detailRows}${applicationRows}${item.observacion ? `<tr class="detail-row"><td colspan="7"><strong>Observacion:</strong> ${escapeHtml(item.observacion)}</td></tr>` : ""}`;
+  }).join("");
+}
+
+function printCashReconciliationReport(itemId = "") {
+  const items = cashReconciliationReportItems(itemId);
+  const totals = items.reduce((acc, item) => {
+    acc.income += Number(item.importeRecibido || 0);
+    acc.out += Number(item.totalAplicado || 0);
+    acc.balance += Number(item.saldo || 0);
+    return acc;
+  }, { income: 0, out: 0, balance: 0 });
+  const fromLabel = itemId ? "Movimiento individual" : ($("#cash-rec-report-from").value || "inicio");
+  const toLabel = itemId ? "" : ($("#cash-rec-report-to").value || "fin");
+  const title = itemId && items[0]
+    ? safePdfTitle("Conciliacion", items[0].recibidoDe, items[0].fecha)
+    : safePdfTitle("Conciliaciones_efectivo", fromLabel, toLabel);
+  const popup = window.open("", "_blank", "width=1100,height=850");
+  if (!popup) return;
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
+    body{font-family:Arial,sans-serif;margin:10mm;color:#173632}
+    header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px;margin-bottom:10px}
+    img{width:72px;height:72px;object-fit:contain;background:#173632;padding:6px}
+    h1{font-size:18px;margin:0} p{margin:3px 0;font-size:11px}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}
+    .summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}
+    .summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}
+    table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:7px}
+    th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}
+    th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.positive{color:#0f6b43}.negative{color:#9b1c1c}
+    .detail-row td{background:#f8fbfa}.detail-row table{font-size:9px;margin-top:4px}
+    button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 landscape;margin:8mm}body{margin:0}button{display:none}}
+  </style></head><body>
+    <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>Conciliaciones de efectivo</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>${escapeHtml(itemId ? "Movimiento individual" : `Periodo: ${fromLabel} a ${toLabel}`)}</p></div></header>
+    <div class="summary">
+      <div><span>Ingresos</span><strong>${moneyValue(totals.income)}</strong></div>
+      <div><span>Egresos / aplicaciones</span><strong>${moneyValue(totals.out)}</strong></div>
+      <div><span>Saldo</span><strong>${moneyValue(totals.balance)}</strong></div>
+      <div><span>Movimientos</span><strong>${items.length}</strong></div>
+    </div>
+    <table><thead><tr><th>Fecha</th><th>Recibido de</th><th>Referencia</th><th>Ingreso</th><th>Egreso</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>${cashReconciliationRowsHtml(items)}</tbody></table>
     <button onclick="window.print()">Imprimir / guardar PDF</button>
   </body></html>`);
   popup.document.close();
@@ -1443,6 +1576,65 @@ function commissionistDetailHtml(detail) {
     </div>`;
 }
 
+function commissionistStatusRows(commissionistName = $("#commissionist-client")?.value || "") {
+  const key = normalizeSearch(commissionistName);
+  if (!key || !state.cuenta) return [];
+  return (state.cuenta.movimientos || [])
+    .filter((movement) => !movement.paymentId)
+    .filter((movement) => normalizeSearch(movement.cliente) === key || normalizeSearch(commissionistDetailFromObservation(movement.observacion)?.comisionista) === key)
+    .filter((movement) => normalizeSearch(movement.concepto).includes("comisionista") || commissionistDetailFromObservation(movement.observacion))
+    .map((movement) => {
+      const detail = commissionistDetailFromObservation(movement.observacion);
+      const subtotals = detail ? commissionistDetailSubtotals(detail.items || []) : {
+        facturado: { comision: Math.abs(Number(movement.importe || 0)), base: 0, items: 0 },
+        efectivo: { comision: 0, base: 0, items: 0 }
+      };
+      const total = Math.abs(Number(movement.importe || 0)) || Math.abs(Number(subtotals.facturado.comision || 0) + Number(subtotals.efectivo.comision || 0));
+      const pending = Number(movement.importePendiente ?? total);
+      const paid = Math.max(total - Math.abs(pending), 0);
+      return {
+        fecha: movement.fecha || movement.vencimiento || "",
+        comprobante: movement.comprobante || (detail?.periodoDesde && detail?.periodoHasta ? `${detail.periodoDesde} / ${detail.periodoHasta}` : "-"),
+        facturado: Number(subtotals.facturado.comision || 0),
+        efectivo: Number(subtotals.efectivo.comision || 0),
+        total,
+        pending: Math.abs(pending),
+        paid,
+        estado: movement.estado || "PENDIENTE"
+      };
+    })
+    .sort((a, b) => (parseDisplayDate(b.fecha)?.getTime() || 0) - (parseDisplayDate(a.fecha)?.getTime() || 0));
+}
+
+function renderCommissionistStatus() {
+  if (!$("#commissionist-status-body")) return;
+  const rows = commissionistStatusRows();
+  const totals = rows.reduce((acc, row) => {
+    const pendingRatio = row.total ? row.pending / row.total : 0;
+    acc.pendingFacturado += row.facturado * pendingRatio;
+    acc.pendingEfectivo += row.efectivo * pendingRatio;
+    acc.pending += row.pending;
+    acc.paid += row.paid;
+    return acc;
+  }, { pendingFacturado: 0, pendingEfectivo: 0, pending: 0, paid: 0 });
+  $("#commissionist-pending-invoiced").textContent = moneyValue(totals.pendingFacturado);
+  $("#commissionist-pending-cash").textContent = moneyValue(totals.pendingEfectivo);
+  $("#commissionist-pending-total").textContent = moneyValue(totals.pending);
+  $("#commissionist-paid-total").textContent = moneyValue(totals.paid);
+  $("#commissionist-status-summary").textContent = rows.length ? `${rows.length} liquidacion/es encontradas` : "Sin movimientos para ese comisionista";
+  $("#commissionist-status-body").innerHTML = rows.length
+    ? rows.map((row) => `<tr>
+        <td>${escapeHtml(row.fecha || "-")}</td>
+        <td>${escapeHtml(row.comprobante || "-")}</td>
+        <td class="amount">${moneyValue(row.facturado)}</td>
+        <td class="amount">${moneyValue(row.efectivo)}</td>
+        <td class="amount">${moneyValue(row.total)}</td>
+        <td class="amount ${row.pending > 0.01 ? "negative" : "positive"}">${moneyValue(row.pending)}</td>
+        <td>${escapeHtml(row.pending > 0.01 ? row.estado : "PAGADO")}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="7">Seleccione un comisionista para ver su estado.</td></tr>`;
+}
+
 function isCashDetailRow(row) {
   return normalizeSearch(`${row?.origen || ""} ${row?.comprobante || ""} ${row?.comprador || ""} ${row?.concepto || ""}`).includes("efectivo");
 }
@@ -2041,7 +2233,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
     ? rows.map((item) => `<tr><td>${escapeHtml(item.vencimiento || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td>${escapeHtml(item.concepto || item.movementId)}</td><td class="amount">${moneyValue(item.importe)}</td><td class="amount">${moneyValue(item.saldoPendiente)}</td></tr>`).join("")
     : `<tr><td colspan="5">${emptyText}</td></tr>`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(receiptTitle)}</title><style>
-    body{font-family:Arial,sans-serif;margin:18mm;color:#173632} header{display:flex;align-items:center;gap:18px;border-bottom:2px solid #173632;padding-bottom:12px} img{width:92px;height:92px;object-fit:contain;background:#173632;padding:8px} h1{font-size:20px;margin:0} h2{font-size:15px;margin-top:22px} p{margin:5px 0} table{width:100%;border-collapse:collapse;font-size:12px} th,td{border:1px solid #cbd7d4;padding:7px;text-align:left} th{background:#edf3f1} .amount{text-align:right;font-weight:700}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:16px 0}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:8px}.summary span{display:block;color:#52706b;font-size:11px}.summary strong{font-size:15px}.discount th{background:#f8ebe5}.discount-total{background:#fff3e8;font-weight:700}.net-total{background:#eaf2ff;font-weight:700} button{margin-top:18px;padding:9px 14px}@media print{button{display:none}}
+    body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px} img{width:76px;height:76px;object-fit:contain;background:#173632;padding:6px} h1{font-size:18px;margin:0} h2{font-size:13px;margin-top:14px} p{margin:3px 0;font-size:11px} table{width:100%;border-collapse:collapse;font-size:10px} th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top} th{background:#edf3f1} .amount{text-align:right;font-weight:700;white-space:nowrap}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}.discount th{background:#f8ebe5}.discount-total{background:#fff3e8;font-weight:700}.net-total{background:#eaf2ff;font-weight:700} button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}button{display:none}body{margin:0}}
   </style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${payment.tipo === "PAGO" ? "Comprobante de pago" : "Comprobante de cobro"}</h1><p><strong>${escapeHtml(payment.id)}</strong></p><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p></div></header>
   ${payment.anulado ? `<p><strong>COMPROBANTE ANULADO</strong></p>` : ""}
@@ -2791,6 +2983,7 @@ async function generateCommissionistMovement() {
       })
     });
     await reloadCurrentAccount();
+    renderCommissionistStatus();
     $("#commissionist-message").textContent = `Movimiento generado por ${moneyValue(amount)}.`;
     $("#commissionist-message").className = "form-message ok";
   } catch (error) {
@@ -5220,6 +5413,8 @@ async function init() {
   $("#commissionist-load").addEventListener("click", loadCommissionistOperations);
   $("#commissionist-generate").addEventListener("click", generateCommissionistMovement);
   $("#commissionist-percent").addEventListener("input", renderCommissionistRows);
+  $("#commissionist-client").addEventListener("input", renderCommissionistStatus);
+  $("#commissionist-client").addEventListener("change", renderCommissionistStatus);
   $("#commissionist-body").addEventListener("change", (event) => {
     const checkbox = event.target.closest("[data-commissionist-row]");
     if (!checkbox) return;
@@ -5277,23 +5472,36 @@ async function init() {
   $("#cash-rec-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
   $("#cash-rec-amount").addEventListener("blur", (event) => {
     formatMoneyInput(event.target);
+    renderCashReconciliationBreakdown();
     renderCashReconciliationApplications();
   });
+  $("#cash-rec-break-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
+  $("#cash-rec-break-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
+  $("#cash-rec-break-add").addEventListener("click", addCashReconciliationBreakdown);
   $("#cash-rec-app-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
   $("#cash-rec-app-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
   $("#cash-rec-app-add").addEventListener("click", addCashReconciliationApplication);
   $("#cash-rec-pay-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
   $("#cash-rec-pay-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
   $("#cash-rec-pay-save").addEventListener("click", applyCashReconciliationPayment);
+  $("#cash-rec-print").addEventListener("click", () => printCashReconciliationReport());
   $("#cash-rec-app-body").addEventListener("click", (event) => {
     const removeButton = event.target.closest("[data-cash-rec-app-remove]");
     if (!removeButton) return;
     cashReconciliationApplications = cashReconciliationApplications.filter((item) => item.id !== removeButton.dataset.cashRecAppRemove);
     renderCashReconciliationApplications();
   });
+  $("#cash-rec-break-body").addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-cash-rec-break-remove]");
+    if (!removeButton) return;
+    cashReconciliationBreakdown = cashReconciliationBreakdown.filter((item) => item.id !== removeButton.dataset.cashRecBreakRemove);
+    renderCashReconciliationBreakdown();
+  });
   $("#cash-rec-body").addEventListener("click", (event) => {
     const editButton = event.target.closest("[data-cash-rec-edit]");
     const deleteButton = event.target.closest("[data-cash-rec-delete]");
+    const printButton = event.target.closest("[data-cash-rec-print]");
+    if (printButton) printCashReconciliationReport(printButton.dataset.cashRecPrint);
     if (editButton) {
       const item = (state.cajaConciliaciones.items || []).find((row) => row.id === editButton.dataset.cashRecEdit);
       if (item) fillCashReconciliationForm(item);
@@ -5647,6 +5855,8 @@ async function init() {
   $("#dashboard-period-to").value = today;
   $("#operation-search-from").value = today.slice(0, 8) + "01";
   $("#operation-search-to").value = today;
+  $("#cash-rec-report-from").value = today.slice(0, 8) + "01";
+  $("#cash-rec-report-to").value = today;
   $("#cc-calendar-from").value = dateToInputValue(new Date());
   $("#cc-calendar-to").value = dateToInputValue(addDateDays(new Date(), 7));
   $("#real-commission-from").value = today.slice(0, 8) + "01";
@@ -5656,6 +5866,7 @@ async function init() {
   $("#commissionist-due").value = today;
   renderOperationSearch();
   renderRealCommissionSummary();
+  renderCommissionistStatus();
   resetCashForm();
   resetCashReconciliationForm();
   setCashTab("diaria");

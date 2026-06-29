@@ -1623,6 +1623,26 @@
               <label>Observaciones<textarea id="cash-rec-notes" rows="2" placeholder="Detalle interno"></textarea></label>
               <div class="cc-subpanel">
                 <div class="panel-head">
+                  <h3>Discriminacion del efectivo recibido</h3>
+                  <span class="subtle" id="cash-rec-breakdown-summary">Sin detalle cargado</span>
+                </div>
+                <div class="form-grid">
+                  <label>Concepto<input id="cash-rec-break-concept" placeholder="Ej.: efectivo, transferencia, retencion, diferencia"></label>
+                  <label>Detalle / referencia<input id="cash-rec-break-detail" placeholder="Opcional"></label>
+                  <label>Importe<input id="cash-rec-break-amount" inputmode="decimal" placeholder="$ 0,00"></label>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" id="cash-rec-break-add">Agregar detalle</button>
+                </div>
+                <div class="table-wrap compact-table">
+                  <table>
+                    <thead><tr><th>Concepto</th><th>Detalle</th><th>Importe</th><th></th></tr></thead>
+                    <tbody id="cash-rec-break-body"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="cc-subpanel">
+                <div class="panel-head">
                   <h3>Aplicaciones / pagos con este efectivo</h3>
                   <span class="subtle" id="cash-rec-app-summary">Sin aplicaciones cargadas</span>
                 </div>
@@ -1654,6 +1674,11 @@
               <div>
                 <h2>Detalle de conciliaciones</h2>
                 <p class="subtle">Saldo disponible por cada efectivo recibido.</p>
+              </div>
+              <div class="form-actions">
+                <label>Desde<input id="cash-rec-report-from" type="date"></label>
+                <label>Hasta<input id="cash-rec-report-to" type="date"></label>
+                <button type="button" class="ghost-button" id="cash-rec-print">PDF conciliaciones</button>
               </div>
             </div>
             <div class="table-wrap compact-table">
@@ -1783,6 +1808,37 @@
         </div>
         <div class="panel">
           <div class="panel-head">
+            <div>
+              <h2>Estado de comisiones del comisionista</h2>
+              <p class="subtle">Separa comision facturada y comision sobre efectivo, con estado de cuenta corriente.</p>
+            </div>
+            <span class="subtle" id="commissionist-status-summary">Seleccione un comisionista</span>
+          </div>
+          <div class="cc-grid">
+            <div><span>Pendiente facturado</span><strong id="commissionist-pending-invoiced">$ 0,00</strong></div>
+            <div><span>Pendiente efectivo</span><strong id="commissionist-pending-cash">$ 0,00</strong></div>
+            <div><span>Total pendiente</span><strong id="commissionist-pending-total">$ 0,00</strong></div>
+            <div><span>Total pagado / imputado</span><strong id="commissionist-paid-total">$ 0,00</strong></div>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Periodo / comprobante</th>
+                  <th>Facturado</th>
+                  <th>Efectivo</th>
+                  <th>Total</th>
+                  <th>Pendiente</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody id="commissionist-status-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
             <h2>Operaciones del periodo</h2>
             <span class="subtle" id="commissionist-summary">Sin operaciones seleccionadas</span>
           </div>
@@ -1808,6 +1864,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260629-buscador-operaciones"></script>
+    <script src="/app.js?v=20260629-reporte-conciliaciones"></script>
   </body>
 </html>
