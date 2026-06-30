@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260630-recibo-imputaciones-mixtas";
+const APP_BUILD = "20260630-reporte-parciales-unicos";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -3472,22 +3472,47 @@ function renderSaleLines(lines) {
 function operationPartialBillingLines(operation = state.currentOperation) {
   const direct = Array.isArray(operation?.facturacionParcial) ? operation.facturacionParcial : [];
   const draft = Array.isArray(operation?.draftData?.facturacionParcial) ? operation.draftData.facturacionParcial : [];
+  return dedupePartialBillingLines([...direct, ...draft]);
+}
+
+function partialBillingKey(line) {
+  const clean = (value) => String(value || "").replace(/\s+/g, " ").trim().toUpperCase();
+  return [
+    clean(line.fecha),
+    clean(line.planVencimientos || line.vencimiento),
+    clean(line.comprobante),
+    Number(line.cantidad || 0).toFixed(2),
+    Number(line.importeBruto || 0).toFixed(2),
+    Number(line.importeNeto || 0).toFixed(2),
+    Number(line.iva || 0).toFixed(2)
+  ].join("|");
+}
+
+function mergePartialParty(current, incoming) {
+  const a = normalizeSearch(current || "");
+  const b = normalizeSearch(incoming || "");
+  if (!a) return incoming || "";
+  if (!b || a === b) return current || incoming || "";
+  if (a === "ambas" || b === "ambas") return "AMBAS";
+  if ((a === "vendedor" && b === "comprador") || (a === "comprador" && b === "vendedor")) return "AMBAS";
+  return current || incoming || "";
+}
+
+function dedupePartialBillingLines(lines = []) {
   const seen = new Set();
-  return [...direct, ...draft].filter((line) => {
-    const key = [
-      line.fecha,
-      line.planVencimientos || line.vencimiento,
-      line.comprobante,
-      line.parteCuenta,
-      Number(line.cantidad || 0).toFixed(2),
-      Number(line.importeBruto || 0).toFixed(2),
-      Number(line.importeNeto || 0).toFixed(2),
-      Number(line.iva || 0).toFixed(2)
-    ].join("|");
-    if (seen.has(key)) return false;
+  const result = [];
+  lines.forEach((line) => {
+    const key = partialBillingKey(line);
+    const existing = result.find((item) => partialBillingKey(item) === key);
+    if (existing) {
+      existing.parteCuenta = mergePartialParty(existing.parteCuenta, line.parteCuenta);
+      return;
+    }
+    if (seen.has(key)) return;
     seen.add(key);
-    return true;
+    result.push(line);
   });
+  return result;
 }
 
 function visiblePartialBillingLines() {
@@ -3513,21 +3538,7 @@ function visiblePartialBillingLines() {
 function reportPartialBillingLines(operation = state.currentOperation) {
   const fromOperation = operationPartialBillingLines(operation);
   const fromScreen = visiblePartialBillingLines();
-  const seen = new Set();
-  return [...fromOperation, ...fromScreen].filter((line) => {
-    const key = [
-      line.fecha,
-      line.planVencimientos || line.vencimiento,
-      line.comprobante,
-      Number(line.cantidad || 0).toFixed(2),
-      Number(line.importeBruto || 0).toFixed(2),
-      Number(line.importeNeto || 0).toFixed(2),
-      Number(line.iva || 0).toFixed(2)
-    ].join("|");
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return dedupePartialBillingLines([...fromOperation, ...fromScreen]);
 }
 
 function partialBillingTotals(operation = state.currentOperation, partialLines = null) {
@@ -5272,8 +5283,9 @@ function renderReport() {
     </div>
     ${partialDueReport}
   ` : "";
-  const sellerFinalNet = hasPartialBilling ? partialTotals.billedNet + (Number(calc.netoTotalProd || 0) - Number(calc.netoLiquidacionProd || 0)) : calc.netoTotalProd;
-  const buyerFinalNet = hasPartialBilling ? partialTotals.billedNet + (Number(calc.netoTotalComp || 0) - Number(calc.netoLiquidacionComp || 0)) : calc.netoTotalComp;
+  const sellerFinalNet = hasPartialBilling ? partialTotals.billedNet : calc.netoTotalProd;
+  const buyerFinalNet = hasPartialBilling ? partialTotals.billedNet : calc.netoTotalComp;
+  const finalNetLabel = hasPartialBilling ? "TOTAL PARCIAL A COBRAR" : "NETO TOTAL OPERACION";
   const sellerLiquidationSummary = hasPartialBilling ? `
     ${partialFinalReport}
     <div class="report-net seller-net"><span>NETO LIQUIDACIONES PARCIALES</span><strong>${moneyValue(partialTotals.billedNet)}</strong></div>
@@ -5315,6 +5327,7 @@ function renderReport() {
         ${operationNote}
         ${partyNote("Observaciones comprador", buyerObservation)}
         <div class="report-section"><h3>Detalle de carga comprador</h3><table class="report-table control-table">${loadTableHead}<tbody>${buyerLines}${kgTotalReportRow}<tr class="report-total"><td colspan="9">Importe bruto venta</td><td>${moneyValue(buyerLinesTotal)}</td></tr></tbody></table></div>
+        ${partialReport}
         ${reportExportButton("buyer")}
       </section>
     </div>
@@ -5343,7 +5356,7 @@ function renderReport() {
           ${calc.cashExpenseProd ? `<tr><th>Gasto descontado efectivo</th><td>${moneyValue(calc.cashExpenseProd)}</td><th>Concepto</th><td>${escapeHtml($("#liq-cash-exp-concept-prod").value || "-")}</td></tr>` : ""}
         ${calc.comEfProd ? `<tr><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfProd)}</td><th></th><td></td></tr>` : ""}
         </tbody></table></div>` : ""}
-        <div class="report-net seller-net total"><span>NETO TOTAL OPERACION</span><strong>${moneyValue(sellerFinalNet)}</strong></div>
+        <div class="report-net seller-net total"><span>${finalNetLabel}</span><strong>${moneyValue(sellerFinalNet)}</strong></div>
         ${reportExportButton("seller")}
       </section>
       <section class="report-page-block buyer-report">
@@ -5358,7 +5371,7 @@ function renderReport() {
         ${calc.efectivoComp || calc.comEfComp ? `<div class="report-section"><h3>Efectivo</h3><table class="report-table"><tbody>
           <tr><th>Efectivo</th><td>${moneyValue(calc.efectivoComp)}</td><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfComp)}</td></tr>
         </tbody></table></div>` : ""}
-        <div class="report-net buyer-net total"><span>NETO TOTAL OPERACION</span><strong>${moneyValue(buyerFinalNet)}</strong></div>
+        <div class="report-net buyer-net total"><span>${finalNetLabel}</span><strong>${moneyValue(buyerFinalNet)}</strong></div>
         ${reportExportButton("buyer")}
       </section>
     </div>
