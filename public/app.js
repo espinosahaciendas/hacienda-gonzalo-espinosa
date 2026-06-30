@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260630-reporte-parciales-unicos";
+const APP_BUILD = "20260630-parciales-cc-comprobante";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -3476,7 +3476,10 @@ function operationPartialBillingLines(operation = state.currentOperation) {
 }
 
 function partialBillingKey(line) {
-  const clean = (value) => String(value || "").replace(/\s+/g, " ").trim().toUpperCase();
+  const clean = (value) => {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    return text === "-" ? "" : text.toUpperCase();
+  };
   return [
     clean(line.fecha),
     clean(line.planVencimientos || line.vencimiento),
@@ -3537,8 +3540,8 @@ function visiblePartialBillingLines() {
 
 function reportPartialBillingLines(operation = state.currentOperation) {
   const fromOperation = operationPartialBillingLines(operation);
-  const fromScreen = visiblePartialBillingLines();
-  return dedupePartialBillingLines([...fromOperation, ...fromScreen]);
+  if (fromOperation.length) return fromOperation;
+  return dedupePartialBillingLines(visiblePartialBillingLines());
 }
 
 function partialBillingTotals(operation = state.currentOperation, partialLines = null) {
