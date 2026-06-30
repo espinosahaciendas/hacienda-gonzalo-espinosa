@@ -114,6 +114,58 @@ function normalizeText(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
 
+function normalizePartialText(value) {
+  const text = normalizeText(value);
+  return text === "-" ? "" : text;
+}
+
+function partialBillingKey(line) {
+  return [
+    normalizePartialText(line.fecha).toUpperCase(),
+    normalizePartialText(line.planVencimientos || line.vencimiento).toUpperCase(),
+    normalizePartialText(line.comprobante).toUpperCase(),
+    Number(parseMoney(line.cantidad) || 0).toFixed(2),
+    Number(parseMoney(line.importeBruto) || 0).toFixed(2),
+    Number(parseMoney(line.importeNeto) || 0).toFixed(2),
+    Number(parseMoney(line.iva) || 0).toFixed(2)
+  ].join("|");
+}
+
+function mergePartialParty(current, incoming) {
+  const a = normalizeKey(current || "");
+  const b = normalizeKey(incoming || "");
+  if (!a) return incoming || "";
+  if (!b || a === b) return current || incoming || "";
+  if (a === "AMBAS" || b === "AMBAS") return "AMBAS";
+  if ((a === "VENDEDOR" && b === "COMPRADOR") || (a === "COMPRADOR" && b === "VENDEDOR")) return "AMBAS";
+  return current || incoming || "";
+}
+
+function dedupePartialBillingLines(lines = []) {
+  const result = [];
+  lines.forEach((line) => {
+    const key = partialBillingKey(line);
+    const existing = result.find((item) => partialBillingKey(item) === key);
+    if (existing) {
+      existing.parteCuenta = mergePartialParty(existing.parteCuenta, line.parteCuenta);
+      if (!existing.comprobante && line.comprobante) existing.comprobante = line.comprobante;
+      if (!existing.vencimiento && line.vencimiento) existing.vencimiento = line.vencimiento;
+      if (!existing.planVencimientos && line.planVencimientos) existing.planVencimientos = line.planVencimientos;
+      return;
+    }
+    result.push({ ...line });
+  });
+  return result;
+}
+
+function operationPartialBillingLines(operation = {}) {
+  const draft = operation.draftData || {};
+  return dedupePartialBillingLines([
+    ...asArray(operation.facturacionParcial),
+    ...asArray(draft.facturacionParcial)
+  ]);
+}
+
 function parseMoney(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   const raw = String(value || "");
@@ -470,7 +522,7 @@ function buildOperationAccountMovements(operation) {
   const efectivoProdSinIva = normalizeFrigorificoEfectivoSinIva(liq.efectivoProd, frigoEfectivoBase, frigo);
   const efectivoProdCuenta = frigo ? efectivoProdSinIva * 1.105 : efectivoProdSinIva;
   const movements = [];
-  const partialAccountLines = asArray(draft.facturacionParcial).filter((line) => {
+  const partialAccountLines = operationPartialBillingLines(operation).filter((line) => {
     const parteCuenta = normalizeKey(line.parteCuenta || "NINGUNA");
     const amount = Math.abs(parseMoney(line.importeNeto) || (parseMoney(line.importeBruto) + parseMoney(line.iva)));
     return ["VENDEDOR", "COMPRADOR", "AMBAS"].includes(parteCuenta) && amount;
@@ -629,9 +681,9 @@ function buildOperationAccountMovements(operation) {
     const amount = Math.abs(parseMoney(line.importeNeto) || (parseMoney(line.importeBruto) + parseMoney(line.iva)));
     if (!amount) return;
     const fecha = line.fecha || operationDate;
-    const planVencimientos = normalizeText(line.planVencimientos);
+    const planVencimientos = normalizePartialText(line.planVencimientos);
     const planItems = parsePlanItems(planVencimientos, amount, planVencimientos ? fecha : line.vencimiento || line.fecha || dueBaseDate);
-    const comprobante = line.comprobante || `Parcial ${line.id || ""}`.trim();
+    const comprobante = normalizePartialText(line.comprobante) || `Parcial ${line.id || ""}`.trim();
     const baseConcept = `facturacion parcial${line.cantidad ? ` ${line.cantidad} cab.` : ""} sobre operacion total`;
     const pushPartial = ({ role, cliente, counterpart, sign }) => {
       if (!cliente) return;
@@ -1895,9 +1947,9 @@ class BackupDataSource {
       id: `FP-${Date.now()}`,
       fecha: formatDateForDisplay(input.fecha),
       vencimiento: formatDateForDisplay(input.vencimiento || input.fecha),
-      planVencimientos: normalizeText(input.planVencimientos),
+      planVencimientos: normalizePartialText(input.planVencimientos),
       comprobante: normalizeText(input.comprobante),
-      parteCuenta: normalizeKey(input.parteCuenta || "NINGUNA"),
+      parteCuenta: normalizeKey(input.parteCuenta || "AMBAS"),
       cantidad: parseMoney(input.cantidad),
       importeBruto: parseMoney(input.importeBruto),
       importeNeto: parseMoney(input.importeNeto),
@@ -1909,7 +1961,10 @@ class BackupDataSource {
       error.statusCode = 400;
       throw error;
     }
-    operation.draftData.facturacionParcial.push(line);
+    operation.draftData.facturacionParcial = dedupePartialBillingLines([
+      ...operation.draftData.facturacionParcial,
+      line
+    ]);
     data.operations = operations;
     this.saveData(data);
     return { operation, line };
