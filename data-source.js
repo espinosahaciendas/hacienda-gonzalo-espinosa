@@ -407,7 +407,9 @@ function pairedAccountMovementId(movementId, targetClient, movements) {
     ["-VENDEDOR-FACT-", "-COMPRADOR-FACT-"],
     ["-COMPRADOR-FACT-", "-VENDEDOR-FACT-"],
     ["-VENDEDOR-EFEC-", "-COMPRADOR-EFEC-"],
-    ["-COMPRADOR-EFEC-", "-VENDEDOR-EFEC-"]
+    ["-COMPRADOR-EFEC-", "-VENDEDOR-EFEC-"],
+    ["-FP-VENDEDOR", "-FP-COMPRADOR"],
+    ["-FP-COMPRADOR", "-FP-VENDEDOR"]
   ];
   for (const [from, to] of replacements) {
     if (!id.includes(from)) continue;
@@ -473,7 +475,14 @@ function buildOperationAccountMovements(operation) {
     const amount = Math.abs(parseMoney(line.importeNeto) || (parseMoney(line.importeBruto) + parseMoney(line.iva)));
     return ["VENDEDOR", "COMPRADOR", "AMBAS"].includes(parteCuenta) && amount;
   });
-  const accountByPartialBilling = partialAccountLines.length > 0;
+  const accountByPartialBillingProd = partialAccountLines.some((line) => {
+    const parteCuenta = normalizeKey(line.parteCuenta || "NINGUNA");
+    return parteCuenta === "VENDEDOR" || parteCuenta === "AMBAS";
+  });
+  const accountByPartialBillingComp = partialAccountLines.some((line) => {
+    const parteCuenta = normalizeKey(line.parteCuenta || "NINGUNA");
+    return parteCuenta === "COMPRADOR" || parteCuenta === "AMBAS";
+  });
   const conceptWithCounterpart = (suffix, counterpart) => `${typeText} - ${suffix}${counterpart ? ` - por ${counterpart}` : ""}`;
   const consigneeAppliesToRole = (role) => {
     if (!operationConsignee) return false;
@@ -509,7 +518,7 @@ function buildOperationAccountMovements(operation) {
     });
   };
 
-  if (!accountByPartialBilling && liq.netoLiquidacionProd) {
+  if (!accountByPartialBillingProd && liq.netoLiquidacionProd) {
     addPlan({
       cliente: operation.vendedor || draft.vendedor,
       role: "VENDEDOR-FACT",
@@ -531,7 +540,7 @@ function buildOperationAccountMovements(operation) {
       conceptSuffix: "efectivo vendedor"
     });
   }
-  if (!accountByPartialBilling && liq.netoLiquidacionComp) {
+  if (!accountByPartialBillingComp && liq.netoLiquidacionComp) {
     addPlan({
       cliente: operation.comprador || draft.comprador,
       role: "COMPRADOR-FACT",
