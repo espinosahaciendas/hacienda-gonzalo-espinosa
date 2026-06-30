@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260630-compensacion-saldo-disponible";
+const APP_BUILD = "20260630-compensacion-saldo-visible";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1831,15 +1831,16 @@ function renderCuentaCorriente() {
           : movement.operacion
             ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>`
             : externalMovementActions(movement);
+        const amountDisplay = currentAccountMovementAmountForDisplay(movement, payment);
         return `
         <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
           <td>${escapeHtml(movement.fecha || "-")}</td>
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
-          <td>${escapeHtml(currentAccountDueDetailText(movement))}</td>
+          <td>${escapeHtml(currentAccountMovementConceptForDisplay(movement, payment))}</td>
           <td>${escapeHtml(movement.comprobante || "-")}</td>
           <td>${escapeHtml(movement.operacion || "-")}</td>
-          <td class="${amountClass(movement.importe)}">${moneyValue(Math.sign(movement.importe) * Number(movement.importePendiente ?? Math.abs(movement.importe)))}</td>
+          <td class="${amountDisplay.className}">${amountDisplay.text}</td>
           <td>${escapeHtml(movement.estado || "-")}</td>
           <td>${baseActions}${documentActionButtons(movement)}</td>
         </tr>
@@ -2051,7 +2052,9 @@ function syncCurrentAccountPaymentMode() {
   $("#cc-compensation-panel").hidden = !isCompensation;
   $(".cc-counterparty-option").hidden = isCompensation;
   $("#cc-discount-only").closest("label").hidden = isCompensation;
-  $("#cc-payment-method").closest("label").hidden = isCompensation;
+  $("#cc-payment-method").closest("label").hidden = false;
+  $("#cc-payment-method").closest("label").childNodes[0].textContent = isCompensation ? "Medio cobrado por fuera" : "Medio";
+  $("#cc-payment-reference").closest("label").childNodes[0].textContent = isCompensation ? "Referencia del cobro externo" : "Referencia";
   $("#cc-payment-amount").readOnly = isCompensation;
   $("#cc-payment-amount").closest("label").childNodes[0].textContent = isCompensation ? "Saldo disponible / control" : "Importe";
   $("#cc-save-payment").textContent = isCompensation ? "Guardar compensacion" : "Guardar pago / cobro";
@@ -2432,6 +2435,28 @@ function compensationSummaryTableRow(payment, colspan) {
   return box ? `<tr class="cc-compensation-detail"><td colspan="${colspan}">${box}</td></tr>` : "";
 }
 
+function currentAccountMovementAmountForDisplay(movement, payment) {
+  const raw = Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
+  if (payment?.tipo !== "COMPENSACION") {
+    return { value: raw, text: moneyValue(raw), className: amountClass(raw) };
+  }
+  const summary = compensationSummary(payment);
+  const signed = compensationSignedAmount(payment);
+  if (summary?.onlyAppliesPreviousBalance) {
+    const applied = Math.abs(signed);
+    return { value: applied, text: `${moneyValue(applied)} aplicado`, className: "amount-positive" };
+  }
+  return { value: signed, text: moneyValue(signed), className: amountClass(signed) };
+}
+
+function currentAccountMovementConceptForDisplay(movement, payment) {
+  if (payment?.tipo !== "COMPENSACION") return currentAccountDueDetailText(movement);
+  const summary = compensationSummary(payment);
+  const method = payment.medio ? ` - ${payment.medio}` : "";
+  if (summary?.onlyAppliesPreviousBalance) return `Aplicado contra saldo disponible cobrado por fuera${method}`;
+  return `Compensacion de venta/liquidacion cobrada por fuera${method}`;
+}
+
 async function saveExternalCurrentAccountMovement() {
   try {
     const isMag = isExternalMagSale();
@@ -2518,7 +2543,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   </style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${payment.tipo === "COMPENSACION" ? "Comprobante de compensacion / aplicacion de saldo disponible" : payment.tipo === "PAGO" ? "Comprobante de pago" : "Comprobante de cobro"}</h1><p><strong>${escapeHtml(payment.id)}</strong></p><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p></div></header>
   ${payment.anulado ? `<p><strong>COMPROBANTE ANULADO</strong></p>` : ""}
-  <p><strong>Cliente:</strong> ${escapeHtml(payment.cliente)}</p><p><strong>Fecha:</strong> ${escapeHtml(payment.fecha)}</p><p><strong>Importe:</strong> ${moneyValue(payment.importe)}</p><p><strong>Referencia:</strong> ${escapeHtml(payment.referencia || "-")}</p>
+  <p><strong>Cliente:</strong> ${escapeHtml(payment.cliente)}</p><p><strong>Fecha:</strong> ${escapeHtml(payment.fecha)}</p><p><strong>Importe:</strong> ${moneyValue(payment.importe)}</p><p><strong>${payment.tipo === "COMPENSACION" ? "Medio externo informado" : "Referencia"}:</strong> ${escapeHtml(payment.tipo === "COMPENSACION" ? `${payment.medio || "-"}${payment.referencia ? ` - ${payment.referencia}` : ""}` : payment.referencia || "-")}</p>
   <div class="summary">
     <div><span>${payment.tipo === "COMPENSACION" ? "Saldo disponible cobrado por fuera" : payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
     <div><span>${payment.tipo === "COMPENSACION" ? "Liquidacion aplicada" : "Vencimientos aplicados"}</span><strong>${moneyValue(paidTotal)}</strong></div>
@@ -2618,6 +2643,10 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
     const original = Number(movement.importe || 0);
     const imputed = isPayment ? null : Math.sign(original) * Number(movement.importeImputado || 0);
     const pending = isPayment ? null : Math.sign(original) * Number(movement.importePendiente ?? Math.abs(original));
+    const amountDisplay = currentAccountMovementAmountForDisplay(movement, payment);
+    const conceptDisplay = payment?.tipo === "COMPENSACION"
+      ? currentAccountMovementConceptForDisplay(movement, payment)
+      : currentAccountConceptText(movement, viewMode);
     const imputations = imputationsByMovement.get(String(movement.id)) || [];
     const allocationRows = imputations.map((item) => `
       <tr class="allocation-row">
@@ -2634,10 +2663,10 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
       <td>${escapeHtml(movement.fecha || "-")}</td>
       <td>${escapeHtml(movement.vencimiento || "-")}</td>
       <td>${escapeHtml(movement.cliente || "-")}</td>
-      <td>${escapeHtml(currentAccountConceptText(movement, viewMode))}</td>
+      <td>${escapeHtml(conceptDisplay)}</td>
       <td>${escapeHtml(movement.comprobante || "-")}</td>
       <td>${escapeHtml(movement.operacion || "-")}</td>
-      <td class="amount ${original < 0 ? "negative" : "positive"}">${moneyValue(original)}</td>
+      <td class="amount ${amountDisplay.value < 0 ? "negative" : "positive"}">${amountDisplay.text}</td>
       <td class="amount">${imputed === null ? "-" : moneyValue(imputed)}</td>
       <td class="amount ${pending !== null && pending < 0 ? "negative" : "positive"}">${pending === null ? "-" : moneyValue(pending)}</td>
       <td class="status">${escapeHtml(movement.estado || "-")}</td>
