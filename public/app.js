@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260629-resumen-conciliaciones";
+const APP_BUILD = "20260630-imputacion-cliente-normalizado";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -105,6 +105,13 @@ function normalizeSearch(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ");
+}
+
+function normalizeAccountName(value) {
+  return normalizeSearch(value)
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function setView(view) {
@@ -1960,6 +1967,7 @@ function openCurrentAccountPanel(panelId) {
     renderExternalDueRows();
   } else {
     $("#cc-payment-client").value = $("#cc-client-search").value;
+    $("#cc-payment-type").value = openCurrentAccountSuggestedPaymentType($("#cc-payment-client").value);
     $("#cc-payment-date").value = today;
     setMoneyInput("#cc-payment-amount", 0);
     currentPaymentInstruments = [];
@@ -1973,6 +1981,26 @@ function openCurrentAccountPanel(panelId) {
     renderCurrentAccountImputations();
     renderCurrentAccountCounterpartyImputations();
   }
+}
+
+function openCurrentAccountOpenMovementsForClient(clientName) {
+  const client = normalizeAccountName(clientName);
+  if (!client) return [];
+  return (state.cuenta?.movimientos || [])
+    .filter((movement) => normalizeAccountName(movement.cliente) === client)
+    .filter((movement) => !movement.paymentId)
+    .filter((movement) => {
+      const status = String(movement.estado || "").toUpperCase();
+      return status !== "IMPUTADO" && status !== "ANULADO";
+    });
+}
+
+function openCurrentAccountSuggestedPaymentType(clientName) {
+  const movements = openCurrentAccountOpenMovementsForClient(clientName);
+  const hasPayableToClient = movements.some((movement) => pendingSignedAmount(movement) < -0.01);
+  if (hasPayableToClient) return "PAGO";
+  const hasReceivableFromClient = movements.some((movement) => pendingSignedAmount(movement) > 0.01);
+  return hasReceivableFromClient ? "COBRO" : $("#cc-payment-type").value;
 }
 
 function externalMovementBaseId(id) {
@@ -2122,15 +2150,19 @@ function openExternalMovementEdit(movementId) {
 }
 
 function getPaymentPendingMovements(clientSelector = "#cc-payment-client", typeSelector = "#cc-payment-type") {
-  const client = normalizeSearch($(clientSelector).value);
+  const client = normalizeAccountName($(clientSelector).value || $("#cc-client-search")?.value || "");
   const type = $(typeSelector).value;
   return (state.cuenta.movimientos || []).filter((movement) => {
-    if (normalizeSearch(movement.cliente) !== client || String(movement.estado || "").toUpperCase() === "IMPUTADO") return false;
+    const status = String(movement.estado || "").toUpperCase();
+    if (normalizeAccountName(movement.cliente) !== client || status === "IMPUTADO" || status === "ANULADO" || movement.paymentId) return false;
     const amount = Number(movement.importe || 0);
+    const pending = Number(movement.importePendiente ?? Math.abs(amount));
+    if (pending <= 0.01) return false;
+    const signedPending = Math.sign(amount) * pending;
     const isCommission = String(movement.origen || "").toUpperCase() === "COMISION";
     const isExpenseDiscount = isExpenseOrDiscountMovement(movement);
-    if (type === "PAGO") return amount < 0 || ((isCommission || isExpenseDiscount) && amount > 0);
-    return amount > 0;
+    if (type === "PAGO") return signedPending < -0.01 || ((isCommission || isExpenseDiscount) && signedPending > 0.01);
+    return signedPending > 0.01;
   });
 }
 
