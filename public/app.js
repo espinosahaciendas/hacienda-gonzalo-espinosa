@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260630-vencimientos-saldo-abierto";
+const APP_BUILD = "20260630-recibo-imputaciones-mixtas";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2333,9 +2333,12 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   const instruments = payment.instrumentos?.length ? payment.instrumentos : [{ medio: payment.medio, fecha: payment.fecha, referencia: payment.referencia, importe: payment.importe }];
   const imputations = payment.imputaciones || [];
   const isDiscountImputation = (item) => {
-    const text = normalizeSearch(`${item.concepto || ""} ${item.comprobante || ""}`);
+    const text = normalizeSearch(`${item.concepto || ""} ${item.comprobante || ""} ${item.movementId || ""}`);
+    const movementId = normalizeSearch(item.movementId || "");
+    if (payment.tipo === "PAGO" && (movementId.includes("vendedor-fact") || movementId.includes("vendedor-efec") || movementId.includes("fp-vendedor"))) return false;
+    if (payment.tipo === "COBRO" && (movementId.includes("comprador-fact") || movementId.includes("comprador-efec") || movementId.includes("fp-comprador"))) return false;
     const originalSigned = Number(item.importeOriginalFirmado ?? item.importeFirmadoOriginal ?? 0);
-    if (originalSigned) return originalSigned > 0;
+    if (originalSigned) return payment.tipo === "PAGO" ? originalSigned > 0 : originalSigned < 0;
     if (text.includes("comisionista")) return false;
     return text.includes("comision") ||
       text.includes("descuento") ||
