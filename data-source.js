@@ -306,6 +306,7 @@ function signedPayment(item) {
   if (item.importeFirmado !== undefined && item.importeFirmado !== "") return parseMoney(item.importeFirmado);
   const type = normalizeKey(item.tipo);
   const amount = Math.abs(parseMoney(item.importe));
+  if (type === "COMPENSACION") return amount;
   return type === "PAGO" ? amount : -amount;
 }
 
@@ -847,7 +848,9 @@ function buildAccountData(data) {
       fecha: item.fecha,
       vencimiento: item.fecha,
       origen: item.tipo || "PAGO/COBRO",
-      concepto: `${item.tipo || "Movimiento"} - ${item.medio || ""}`.trim(),
+      concepto: item.tipo === "COMPENSACION"
+        ? "COMPENSACION / aplicacion de saldo cobrado por fuera"
+        : `${item.tipo || "Movimiento"} - ${item.medio || ""}`.trim(),
       comprobante: item.referencia,
       paymentId: item.id,
       importe: item.anulado ? 0 : signedPayment(item),
@@ -2499,24 +2502,30 @@ class BackupDataSource {
     const data = this.readData();
     const cliente = normalizeText(input.cliente);
     const importe = Math.abs(parseMoney(input.importe));
-    if (!cliente || !importe) {
+    const tipoInput = normalizeKey(input.tipo);
+    const tipo = tipoInput === "PAGO" ? "PAGO" : tipoInput === "COMPENSACION" ? "COMPENSACION" : "COBRO";
+    const imputacionesInput = asArray(input.imputaciones)
+      .map((item) => ({ movementId: normalizeText(item.movementId || item.rowId), importe: Math.abs(parseMoney(item.importe)) }))
+      .filter((item) => item.movementId);
+    if (!cliente || (!importe && !(tipo === "COMPENSACION" && imputacionesInput.length))) {
       const error = new Error("Falta seleccionar cliente o cargar un importe mayor a cero.");
       error.statusCode = 400;
       throw error;
     }
-    const tipo = normalizeKey(input.tipo) === "PAGO" ? "PAGO" : "COBRO";
     const payments = asArray(data.currentAccountPayments);
     const year = new Date().getFullYear();
+    const prefix = tipo === "PAGO" ? "PAG" : tipo === "COMPENSACION" ? "COMP" : "COB";
     const number = payments.reduce((max, item) => {
-      const match = String(item.id || "").match(new RegExp(`^(?:PAG|COB)-${year}-(\\d+)$`));
+      const match = String(item.id || "").match(new RegExp(`^(?:PAG|COB|COMP)-${year}-(\\d+)$`));
       return match ? Math.max(max, Number(match[1])) : max;
     }, 0) + 1;
     const saved = {
-      id: `${tipo === "PAGO" ? "PAG" : "COB"}-${year}-${String(number).padStart(4, "0")}`,
+      id: `${prefix}-${year}-${String(number).padStart(4, "0")}`,
       tipo,
       cliente,
       fecha: formatDateForDisplay(input.fecha),
       importe,
+      importeFirmado: input.importeFirmado !== undefined && input.importeFirmado !== "" ? parseMoney(input.importeFirmado) : undefined,
       medio: normalizeText(input.medio || "Transferencia"),
       referencia: normalizeText(input.referencia),
       observacion: normalizeText(input.observacion),
@@ -2527,9 +2536,7 @@ class BackupDataSource {
         referencia: normalizeText(item.referencia),
         importe: Math.abs(parseMoney(item.importe))
       })),
-      imputaciones: asArray(input.imputaciones)
-        .map((item) => ({ movementId: normalizeText(item.movementId || item.rowId), importe: Math.abs(parseMoney(item.importe)) }))
-        .filter((item) => item.movementId)
+      imputaciones: imputacionesInput
     };
     const accountMovementsForPairing = asArray(data.operations).flatMap((operation) => buildOperationAccountMovements(operation));
     payments.push(saved);
