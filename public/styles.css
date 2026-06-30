@@ -1415,6 +1415,33 @@ label textarea {
   color: var(--muted);
 }
 
+.cc-compensation-detail td {
+  background: #f7fbf9;
+}
+
+.cc-compensation-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 8px 10px;
+  border-left: 4px solid var(--accent);
+}
+
+.cc-compensation-box strong {
+  width: 100%;
+}
+
+.cc-compensation-box span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cc-compensation-box .positive,
+.cc-compensation-box .negative {
+  font-weight: 700;
+}
+
 .cc-counterparty-option {
   border: 2px solid #b67a19;
   background: #fffaf0;

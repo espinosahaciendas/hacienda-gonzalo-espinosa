@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   clientes: [],
   operaciones: [],
   cuenta: null,
@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260630-compensacion-clara";
+const APP_BUILD = "20260630-compensacion-saldo-visible";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -318,7 +318,7 @@ function showDocumentPreview(documentId) {
   const url = documentDownloadUrl(documento.id);
   $("#document-preview-panel").hidden = false;
   $("#document-preview-title").textContent = documento.titulo || documento.nombreOriginal || "Vista del comprobante";
-  $("#document-preview-subtitle").textContent = `${documento.cliente || "-"} · ${documentReferenceText(documento)}`;
+  $("#document-preview-subtitle").textContent = `${documento.cliente || "-"} Â· ${documentReferenceText(documento)}`;
   $("#document-preview-open").href = url;
   $("#document-preview-frame").src = url;
   renderDocumentos();
@@ -396,7 +396,7 @@ async function saveDocument(event) {
 }
 
 async function deleteDocument(documentId) {
-  if (!window.confirm("Se eliminara la referencia y el PDF original. ¿Continuar?")) return;
+  if (!window.confirm("Se eliminara la referencia y el PDF original. Â¿Continuar?")) return;
   await fetchJson(`/api/documentos/${encodeURIComponent(documentId)}`, { method: "DELETE" });
   await reloadAppData();
   setView("archivo");
@@ -616,8 +616,8 @@ function renderCashReconciliations() {
             <button type="button" class="small-button danger-button" data-cash-rec-delete="${escapeHtml(item.id)}">Eliminar</button>`}
           </td>
         </tr>
-        ${item.detalleRecibido?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Detalle recibido:</strong> ${item.detalleRecibido.map((det) => `${escapeHtml(det.concepto || "-")} · ${escapeHtml(det.detalle || "-")} · ${moneyValue(det.importe)}`).join(" | ")}</td></tr>` : ""}
-        ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} · ${escapeHtml(app.concepto || "-")} · ${moneyValue(app.importe)}`).join(" | ")}</td></tr>` : ""}
+        ${item.detalleRecibido?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Detalle recibido:</strong> ${item.detalleRecibido.map((det) => `${escapeHtml(det.concepto || "-")} Â· ${escapeHtml(det.detalle || "-")} Â· ${moneyValue(det.importe)}`).join(" | ")}</td></tr>` : ""}
+        ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} Â· ${escapeHtml(app.concepto || "-")} Â· ${moneyValue(app.importe)}`).join(" | ")}</td></tr>` : ""}
       `).join("")
     : `<tr><td colspan="8">Sin conciliaciones de efectivo cargadas.</td></tr>`;
   renderCashReconciliationOpenBalances(items);
@@ -764,14 +764,14 @@ async function applyCashReconciliationPayment() {
 }
 
 async function deleteCashMovement(id) {
-  if (!window.confirm("Se eliminara este movimiento de caja. ¿Continuar?")) return;
+  if (!window.confirm("Se eliminara este movimiento de caja. Â¿Continuar?")) return;
   await fetchJson(`/api/caja-diaria/${encodeURIComponent(id)}`, { method: "DELETE" });
   await reloadAppData();
   setView("caja");
 }
 
 async function deleteCashReconciliation(id) {
-  if (!window.confirm("Se eliminara esta conciliacion de efectivo. ¿Continuar?")) return;
+  if (!window.confirm("Se eliminara esta conciliacion de efectivo. Â¿Continuar?")) return;
   await fetchJson(`/api/caja-conciliaciones/${encodeURIComponent(id)}`, { method: "DELETE" });
   await reloadAppData();
   setView("caja");
@@ -1823,6 +1823,9 @@ function renderCuentaCorriente() {
   $("#cc-movements-body").innerHTML = movements.length
     ? movements.slice(0, 200).map((movement) => {
         const detail = commissionistDetailFromObservation(movement.observacion);
+        const payment = movement.paymentId
+          ? (state.cuenta.pagos || []).find((item) => item.id === movement.paymentId)
+          : null;
         const baseActions = movement.paymentId
           ? `<button type="button" class="small-button" data-cc-payment-receipt="${escapeHtml(movement.paymentId)}">Ver comprobante</button> <button type="button" class="small-button" data-cc-payment-print="${escapeHtml(movement.paymentId)}">Imprimir/PDF</button>${movement.estado === "ANULADO" ? "" : ` <button type="button" class="small-button danger-button" data-cc-payment-cancel="${escapeHtml(movement.paymentId)}">Anular</button>`}`
           : movement.operacion
@@ -1840,6 +1843,7 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.estado || "-")}</td>
           <td>${baseActions}${documentActionButtons(movement)}</td>
         </tr>
+        ${compensationSummaryTableRow(payment, 9)}
         ${detail ? `<tr class="cc-detail-row"><td colspan="9">${commissionistDetailHtml(detail)}</td></tr>` : ""}
       `;
       }).join("")
@@ -2110,7 +2114,7 @@ function addExternalDueRow() {
   const vencimiento = $("#cc-external-due-date").value || $("#cc-external-due").value;
   const importe = numberValue("#cc-external-due-amount");
   if (!vencimiento || importe <= 0) {
-    $("#cc-external-message").textContent = "Para agregar un vencimiento cargá fecha e importe mayor a cero.";
+    $("#cc-external-message").textContent = "Para agregar un vencimiento cargÃ¡ fecha e importe mayor a cero.";
     $("#cc-external-message").className = "form-message error";
     return;
   }
@@ -2335,6 +2339,42 @@ function renderCurrentAccountInstruments() {
     : `<tr><td colspan="5">Sin instrumentos cargados.</td></tr>`;
 }
 
+function compensationSummary(payment) {
+  if (!payment || payment.tipo !== "COMPENSACION") return null;
+  const rows = payment.imputaciones || [];
+  const liquidacionAplicada = rows
+    .filter((item) => Number(item.importeOriginalFirmado ?? 0) < 0)
+    .reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const gastosAplicados = rows
+    .filter((item) => Number(item.importeOriginalFirmado ?? 0) > 0)
+    .reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const saldo = liquidacionAplicada - gastosAplicados;
+  return {
+    liquidacionAplicada,
+    gastosAplicados,
+    saldo,
+    label: saldo >= 0
+      ? "Saldo informado a favor del cliente"
+      : "Saldo pendiente a recuperar / cobrar al cliente"
+  };
+}
+
+function compensationSummaryBox(payment) {
+  const summary = compensationSummary(payment);
+  if (!summary) return "";
+  return `<div class="cc-compensation-box">
+    <strong>Resumen de compensacion</strong>
+    <span>Liquidacion cobrada por fuera aplicada: ${moneyValue(summary.liquidacionAplicada)}</span>
+    <span>Gastos / saldos descontados: ${moneyValue(summary.gastosAplicados)}</span>
+    <span class="${summary.saldo >= 0 ? "positive" : "negative"}">${escapeHtml(summary.label)}: ${moneyValue(Math.abs(summary.saldo))}</span>
+  </div>`;
+}
+
+function compensationSummaryTableRow(payment, colspan) {
+  const box = compensationSummaryBox(payment);
+  return box ? `<tr class="cc-compensation-detail"><td colspan="${colspan}">${box}</td></tr>` : "";
+}
+
 async function saveExternalCurrentAccountMovement() {
   try {
     const isMag = isExternalMagSale();
@@ -2410,6 +2450,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   const discountTotal = discountImputations.reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const instrumentTotal = instruments.reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const controlNet = paidTotal - discountTotal;
+  const compensation = compensationSummary(payment);
   const receiptKind = payment.tipo === "COMPENSACION" ? "Compensacion" : payment.tipo === "PAGO" ? "Pago" : "Cobro";
   const receiptTitle = safePdfTitle(payment.id, receiptKind, payment.cliente, payment.fecha);
   const imputationRows = (rows, emptyText) => rows.length
@@ -2425,7 +2466,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
     <div><span>${payment.tipo === "COMPENSACION" ? "Saldo cobrado por fuera / informado" : payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
     <div><span>${payment.tipo === "COMPENSACION" ? "Liquidacion aplicada" : "Vencimientos aplicados"}</span><strong>${moneyValue(paidTotal)}</strong></div>
     <div><span>Descuentos / gastos / comisiones</span><strong>${moneyValue(discountTotal)}</strong></div>
-    <div><span>${payment.tipo === "COMPENSACION" ? "Saldo resultante informado" : "Control neto"}</span><strong>${moneyValue(controlNet)}</strong></div>
+    <div><span>${payment.tipo === "COMPENSACION" ? compensation?.label || "Saldo resultante informado" : "Control neto"}</span><strong>${moneyValue(payment.tipo === "COMPENSACION" ? Math.abs(compensation?.saldo || controlNet) : controlNet)}</strong></div>
   </div>
   ${payment.tipo === "COMPENSACION" ? `<p><strong>Nota:</strong> La liquidacion fue cobrada directamente por el cliente o aplicada por fuera. Este comprobante no representa un pago realizado por Gonzalo Espinosa.</p>` : `<h2>Detalle de instrumentos</h2><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${instruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("")}</tbody></table>`}
   <h2>${payment.tipo === "COMPENSACION" ? "Liquidaciones / saldos aplicados" : payment.tipo === "PAGO" ? "Importes pagados / vencimientos cancelados" : "Importes cobrados / vencimientos cancelados"}</h2>
@@ -2470,7 +2511,7 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
 }
 
 function currentAccountReportStyles() {
-  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.due-date-row td{background:#dfecea;font-weight:700}.due-compact td{font-size:8.2px}.subtle-line{display:block;color:#52706b;font-size:7.6px;margin-top:2px}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-subtotals{display:grid;grid-template-columns:repeat(2,minmax(170px,1fr));gap:6px;margin:6px 0}.commissionist-subtotals div{border:1px solid #cbd7d4;background:#fff;padding:6px}.commissionist-subtotals span{font-size:8px;text-transform:uppercase}.commissionist-subtotals strong{display:block;font-size:11px}.commissionist-subtotals small{display:block;color:#52706b}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
+  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.due-date-row td{background:#dfecea;font-weight:700}.due-compact td{font-size:8.2px}.subtle-line{display:block;color:#52706b;font-size:7.6px;margin-top:2px}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-subtotals{display:grid;grid-template-columns:repeat(2,minmax(170px,1fr));gap:6px;margin:6px 0}.commissionist-subtotals div{border:1px solid #cbd7d4;background:#fff;padding:6px}.commissionist-subtotals span{font-size:8px;text-transform:uppercase}.commissionist-subtotals strong{display:block;font-size:11px}.commissionist-subtotals small{display:block;color:#52706b}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.cc-compensation-detail td{background:#f7fbf9}.cc-compensation-box{padding:5px 7px;border-left:3px solid #173632}.cc-compensation-box strong{display:block;margin-bottom:3px}.cc-compensation-box span{display:inline-block;margin-right:12px;color:#52706b}.cc-compensation-box .positive{color:#0f6b43;font-weight:700}.cc-compensation-box .negative{color:#9b1c1c;font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
 }
 
 function currentAccountImputationsByMovement() {
@@ -2516,6 +2557,7 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
   if (!rows.length) return `<tr><td colspan="10">Sin movimientos para los filtros aplicados.</td></tr>`;
   return rows.map((movement) => {
     const isPayment = Boolean(movement.paymentId);
+    const payment = isPayment ? (state.cuenta.pagos || []).find((item) => item.id === movement.paymentId) : null;
     const original = Number(movement.importe || 0);
     const imputed = isPayment ? null : Math.sign(original) * Number(movement.importeImputado || 0);
     const pending = isPayment ? null : Math.sign(original) * Number(movement.importePendiente ?? Math.abs(original));
@@ -2542,7 +2584,7 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
       <td class="amount">${imputed === null ? "-" : moneyValue(imputed)}</td>
       <td class="amount ${pending !== null && pending < 0 ? "negative" : "positive"}">${pending === null ? "-" : moneyValue(pending)}</td>
       <td class="status">${escapeHtml(movement.estado || "-")}</td>
-    </tr>${commissionistDetailReportRow(commissionistDetailFromObservation(movement.observacion))}${allocationRows}`;
+    </tr>${compensationSummaryTableRow(payment, 10)}${commissionistDetailReportRow(commissionistDetailFromObservation(movement.observacion))}${allocationRows}`;
   }).join("");
 }
 
@@ -3425,7 +3467,7 @@ async function saveCategory(original, value) {
 
 async function deleteCategory(category) {
   try {
-    const confirmed = window.confirm(`Se quitara "${category}" del listado de categorias. Las ventas ya cargadas no se modifican. ¿Continuar?`);
+    const confirmed = window.confirm(`Se quitara "${category}" del listado de categorias. Las ventas ya cargadas no se modifican. Â¿Continuar?`);
     if (!confirmed) return;
     await fetchJson(`/api/categorias/${encodeURIComponent(category)}`, { method: "DELETE" });
     await reloadCategories();
@@ -4771,7 +4813,7 @@ function fillSaleLineForm(line) {
 
 async function deleteSaleLine(lineId) {
   if (!state.selectedOperationId || !lineId) return;
-  const confirmed = window.confirm("Se quitara solo esta linea de venta. La operacion queda cargada. ¿Continuar?");
+  const confirmed = window.confirm("Se quitara solo esta linea de venta. La operacion queda cargada. Â¿Continuar?");
   if (!confirmed) return;
   setSaleMessage("Quitando linea...");
   try {
@@ -4828,7 +4870,7 @@ async function savePartialBilling() {
 
 async function deletePartialBilling(lineId) {
   if (!state.selectedOperationId || !lineId) return;
-  const confirmed = window.confirm("Se quitara este parcial y su movimiento de cuenta corriente si tenia impacto. ¿Continuar?");
+  const confirmed = window.confirm("Se quitara este parcial y su movimiento de cuenta corriente si tenia impacto. Â¿Continuar?");
   if (!confirmed) return;
   try {
     await fetchJson(`/api/operaciones/${encodeURIComponent(state.selectedOperationId)}/facturacion-parcial/${encodeURIComponent(lineId)}`, {
@@ -5511,7 +5553,7 @@ async function applyClientMaintenance() {
       if (!targetName || !target) {
         throw new Error("Indique el cliente correcto de destino.");
       }
-      const confirmed = window.confirm(`Se fusionara "${currentName}" dentro de "${target.nombre}". Las operaciones y cuenta corriente pasaran al cliente correcto. ¿Continuar?`);
+      const confirmed = window.confirm(`Se fusionara "${currentName}" dentro de "${target.nombre}". Las operaciones y cuenta corriente pasaran al cliente correcto. Â¿Continuar?`);
       if (!confirmed) return;
       await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}/fusionar`, {
         method: "POST",
@@ -5519,7 +5561,7 @@ async function applyClientMaintenance() {
       });
       $("#client-search").value = target.nombre;
     } else {
-      const confirmed = window.confirm(`Se intentara eliminar "${currentName}". Solo se permite si no tiene operaciones ni movimientos. ¿Continuar?`);
+      const confirmed = window.confirm(`Se intentara eliminar "${currentName}". Solo se permite si no tiene operaciones ni movimientos. Â¿Continuar?`);
       if (!confirmed) return;
       await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}`, { method: "DELETE" });
       $("#client-search").value = "";
@@ -5851,7 +5893,7 @@ async function init() {
     }
     const cancelButton = event.target.closest("[data-cc-payment-cancel]");
     if (cancelButton) {
-      const confirmed = window.confirm("Se anulara el comprobante y su contrapartida, si existe. Los movimientos imputados volveran a quedar pendientes. ¿Continuar?");
+      const confirmed = window.confirm("Se anulara el comprobante y su contrapartida, si existe. Los movimientos imputados volveran a quedar pendientes. Â¿Continuar?");
       if (!confirmed) return;
       await fetchJson(`/api/cuenta-corriente/pagos-cobros/${encodeURIComponent(cancelButton.dataset.ccPaymentCancel)}/anular`, { method: "POST" });
       await reloadCurrentAccount();
@@ -5870,7 +5912,7 @@ async function init() {
     }
     const deleteExternalButton = event.target.closest("[data-cc-delete-external]");
     if (deleteExternalButton) {
-      const confirmed = window.confirm("Se eliminara este movimiento externo. Si es Venta MAG, tambien se elimina su renglon asociado. ¿Continuar?");
+      const confirmed = window.confirm("Se eliminara este movimiento externo. Si es Venta MAG, tambien se elimina su renglon asociado. Â¿Continuar?");
       if (!confirmed) return;
       await fetchJson(`/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(deleteExternalButton.dataset.ccDeleteExternal)}`, { method: "DELETE" });
       await reloadCurrentAccount();
@@ -5884,7 +5926,7 @@ async function init() {
     }
     const deleteExternalButton = event.target.closest("[data-cc-delete-external]");
     if (deleteExternalButton) {
-      const confirmed = window.confirm("Se eliminara este movimiento externo. Si es Venta MAG, tambien se elimina su renglon asociado. ¿Continuar?");
+      const confirmed = window.confirm("Se eliminara este movimiento externo. Si es Venta MAG, tambien se elimina su renglon asociado. Â¿Continuar?");
       if (!confirmed) return;
       fetchJson(`/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(deleteExternalButton.dataset.ccDeleteExternal)}`, { method: "DELETE" })
         .then(reloadCurrentAccount)
@@ -6137,3 +6179,4 @@ bootstrap().catch((error) => {
   $("#status").textContent = error.message;
   $("#status").style.color = "#9b1c1c";
 });
+
