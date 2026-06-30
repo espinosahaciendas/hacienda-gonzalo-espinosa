@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260630-vencimientos-ejecutivo";
+const APP_BUILD = "20260630-vencimientos-saldo-abierto";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -430,6 +430,15 @@ function setCashTab(tab) {
   $("#cash-reconciliation-view").hidden = isDaily;
   $all("[data-cash-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.cashTab === (isDaily ? "diaria" : "conciliaciones"));
+  });
+}
+
+function setCurrentAccountTab(tab) {
+  const dueTab = tab === "vencimientos";
+  $("#cc-account-view").hidden = dueTab;
+  $("#cc-due-view").hidden = !dueTab;
+  $all("[data-cc-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.ccTab === (dueTab ? "vencimientos" : "estado"));
   });
 }
 
@@ -1837,6 +1846,8 @@ function renderCuentaCorriente() {
     : `<tr><td colspan="9">Sin movimientos para esta busqueda.</td></tr>`;
 
   const due = (state.cuenta.vencimientos || []).filter((movement) => {
+    if (Math.abs(signedPendingAmount(movement)) <= 0.01) return false;
+    if (movement.paymentId) return false;
     const matchesEntity = viewMode === "CONSIGNATARIA"
       ? matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee)
       : viewMode === "COMISIONISTA"
@@ -1849,16 +1860,19 @@ function renderCuentaCorriente() {
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
   $("#cc-due-body").innerHTML = due.length
-    ? due.slice(0, 80).map((movement) => `
+    ? due.slice(0, 80).map((movement) => {
+      const amount = signedPendingAmount(movement);
+      return `
         <tr class="${isCashMovement(movement) ? "movement-cash" : ""}">
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
           <td>${escapeHtml(currentAccountConceptText(movement, viewMode))}</td>
           <td>${escapeHtml(movement.comprobante || "-")}</td>
-          <td class="${amountClass(movement.importe)}">${moneyValue(movement.importe)}</td>
+          <td class="${amountClass(amount)}">${moneyValue(amount)}</td>
           <td>${externalMovementActions(movement)}</td>
         </tr>
-      `).join("")
+      `;
+    }).join("")
     : `<tr><td colspan="6">Sin vencimientos pendientes para esta busqueda.</td></tr>`;
 }
 
@@ -2612,6 +2626,7 @@ function printCurrentAccountDueReport(options = {}) {
   const rows = (state.cuenta.movimientos || [])
     .filter((movement) => movement.estado !== "ANULADO")
     .filter((movement) => !movement.paymentId && movement.estado !== "IMPUTADO")
+    .filter((movement) => Math.abs(signedPendingAmount(movement)) > 0.01)
     .filter((movement) => String(movement.origen || "").toUpperCase() !== "COMISION")
     .filter((movement) => matchesCurrentAccountReportFilters(movement, baseFilters, true, filters.statusFilter !== "TODOS"))
     .filter((movement) => dueDateInRange(movement, effectiveFilters.dateFrom, effectiveFilters.dateTo))
@@ -5590,6 +5605,9 @@ async function init() {
   $("#cc-date-to").addEventListener("change", renderCuentaCorriente);
   $("#cc-due-date-from").addEventListener("change", renderCuentaCorriente);
   $("#cc-due-date-to").addEventListener("change", renderCuentaCorriente);
+  $all("[data-cc-tab]").forEach((button) => {
+    button.addEventListener("click", () => setCurrentAccountTab(button.dataset.ccTab));
+  });
   $("#cc-print-report").addEventListener("click", () => printCurrentAccountReport());
   $("#cc-print-due-report").addEventListener("click", printCurrentAccountDueReport);
   $("#cc-export-calendar").addEventListener("click", exportCurrentAccountCalendar);

@@ -1239,6 +1239,14 @@
           </div>
         </div>
 
+        <div class="operation-screen-toolbar">
+          <div class="segmented">
+            <button type="button" class="active" data-cc-tab="estado">Estado por cliente</button>
+            <button type="button" data-cc-tab="vencimientos">Vencimientos</button>
+          </div>
+        </div>
+
+        <div id="cc-account-view">
         <div class="panel cc-workspace">
           <div class="panel-head">
             <div>
@@ -1427,7 +1435,9 @@
             </table>
           </div>
         </div>
+        </div>
 
+        <div id="cc-due-view" hidden>
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -1455,6 +1465,7 @@
               <tbody id="cc-due-body"></tbody>
             </table>
           </div>
+        </div>
         </div>
       </section>
 
@@ -1869,6 +1880,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260630-vencimientos-ejecutivo"></script>
+    <script src="/app.js?v=20260630-vencimientos-saldo-abierto"></script>
   </body>
 </html>
