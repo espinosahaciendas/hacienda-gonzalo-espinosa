@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260630-imputacion-cliente-normalizado";
+const APP_BUILD = "20260630-vencimientos-ejecutivo";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1747,6 +1747,7 @@ function renderCuentaCorriente() {
   const dueFilter = $("#cc-due-filter").value;
   const dateFrom = parseInputDate($("#cc-date-from").value);
   const dateTo = parseInputDate($("#cc-date-to").value);
+  const duePanelRange = getCurrentAccountDuePanelRange();
   const words = query.split(" ").filter(Boolean);
   const exactClient = viewMode === "CLIENTE" ? getExactCurrentAccountClient(query) : "";
   const exactConsignee = viewMode === "CONSIGNATARIA" ? getExactCurrentAccountConsignee(query) : "";
@@ -1844,6 +1845,7 @@ function renderCuentaCorriente() {
     if (!matchesEntity) return false;
     if (conceptFilter === "COMISION" && !isCommissionPendingMovement(movement, viewMode)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
+    if (!dueDateInRange(movement, duePanelRange.from, duePanelRange.to)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
   $("#cc-due-body").innerHTML = due.length
@@ -2397,7 +2399,7 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
 }
 
 function currentAccountReportStyles() {
-  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.due-date-row td{background:#dfecea;font-weight:700}.due-compact td{font-size:8.2px}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-subtotals{display:grid;grid-template-columns:repeat(2,minmax(170px,1fr));gap:6px;margin:6px 0}.commissionist-subtotals div{border:1px solid #cbd7d4;background:#fff;padding:6px}.commissionist-subtotals span{font-size:8px;text-transform:uppercase}.commissionist-subtotals strong{display:block;font-size:11px}.commissionist-subtotals small{display:block;color:#52706b}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
+  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.due-date-row td{background:#dfecea;font-weight:700}.due-compact td{font-size:8.2px}.subtle-line{display:block;color:#52706b;font-size:7.6px;margin-top:2px}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-subtotals{display:grid;grid-template-columns:repeat(2,minmax(170px,1fr));gap:6px;margin:6px 0}.commissionist-subtotals div{border:1px solid #cbd7d4;background:#fff;padding:6px}.commissionist-subtotals span{font-size:8px;text-transform:uppercase}.commissionist-subtotals strong{display:block;font-size:11px}.commissionist-subtotals small{display:block;color:#52706b}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
 }
 
 function currentAccountImputationsByMovement() {
@@ -2545,6 +2547,18 @@ function dueDateInRange(movement, from, to) {
   return true;
 }
 
+function getCurrentAccountDuePanelRange() {
+  return {
+    from: parseInputDate($("#cc-due-date-from")?.value || ""),
+    to: parseInputDate($("#cc-due-date-to")?.value || "")
+  };
+}
+
+function currentAccountDuePanelRangeLabel(range) {
+  if (!range.from && !range.to) return "";
+  return `${range.from ? formatDisplayDate(range.from) : "inicio"} a ${range.to ? formatDisplayDate(range.to) : "fin"}`;
+}
+
 function dueReportQuickRange(mode) {
   const today = dateOnly(new Date());
   if (mode === "NEXT_7") {
@@ -2586,16 +2600,19 @@ function printCurrentAccountDueReport(options = {}) {
     : currentFilters;
   const quickRange = dueReportQuickRange(options.range);
   const hasForcedRange = Boolean(quickRange.dateFrom || quickRange.dateTo);
+  const panelRange = getCurrentAccountDuePanelRange();
+  const hasPanelRange = Boolean(panelRange.from || panelRange.to);
   const effectiveFilters = {
     ...filters,
-    dateFrom: quickRange.dateFrom || filters.dateFrom,
-    dateTo: quickRange.dateTo || filters.dateTo,
-    dueFilter: hasForcedRange ? "TODOS" : filters.dueFilter === "TODOS" && !filters.dateFrom && !filters.dateTo ? "7" : filters.dueFilter
+    dateFrom: quickRange.dateFrom || panelRange.from || filters.dateFrom,
+    dateTo: quickRange.dateTo || panelRange.to || filters.dateTo,
+    dueFilter: (hasForcedRange || hasPanelRange) ? "TODOS" : filters.dueFilter === "TODOS" && !filters.dateFrom && !filters.dateTo ? "7" : filters.dueFilter
   };
   const baseFilters = { ...effectiveFilters, dateFrom: null, dateTo: null };
   const rows = (state.cuenta.movimientos || [])
     .filter((movement) => movement.estado !== "ANULADO")
     .filter((movement) => !movement.paymentId && movement.estado !== "IMPUTADO")
+    .filter((movement) => String(movement.origen || "").toUpperCase() !== "COMISION")
     .filter((movement) => matchesCurrentAccountReportFilters(movement, baseFilters, true, filters.statusFilter !== "TODOS"))
     .filter((movement) => dueDateInRange(movement, effectiveFilters.dateFrom, effectiveFilters.dateTo))
     .sort((a, b) => {
@@ -2609,8 +2626,7 @@ function printCurrentAccountDueReport(options = {}) {
       movement.vencimiento || "",
       movement.operacion || movement.id || "",
       movement.cliente || "",
-      movement.comprobante || "",
-      movement.concepto || ""
+      movement.comprobante || ""
     ].join("|");
     if (!groups.has(key)) {
       groups.set(key, {
@@ -2619,32 +2635,43 @@ function printCurrentAccountDueReport(options = {}) {
         vendedor: movement.vendedor || "",
         comprador: movement.comprador || "",
         consignataria: movement.consignataria || "",
-        concepto: currentAccountDueDetailText(movement),
+        conceptos: new Set(),
+        contrapartes: new Set(),
+        comprobantes: new Set(),
         comprobante: movement.comprobante || "",
         operacion: movement.operacion || "",
         factura: 0,
-        efectivo: 0,
-        comision: 0
+        efectivo: 0
       });
     }
     const item = groups.get(key);
     const amount = signedPendingAmount(movement);
+    item.conceptos.add(dueReportBusinessLabel(movement));
+    if (movement.vendedor) item.contrapartes.add(`V: ${movement.vendedor}`);
+    if (movement.comprador) item.contrapartes.add(`C: ${movement.comprador}`);
+    if (movement.consignataria) item.contrapartes.add(`Consig.: ${movement.consignataria}`);
+    if (movement.comprobante) item.comprobantes.add(movement.comprobante);
     if (isCashMovement(movement)) item.efectivo += amount;
-    else if (String(movement.origen || "").toUpperCase() === "COMISION") item.comision += amount;
     else item.factura += amount;
   });
-  const dueRows = Array.from(groups.values());
+  const dueRows = Array.from(groups.values()).map((row) => ({
+    ...row,
+    concepto: Array.from(row.conceptos).filter(Boolean).join(" / ") || "-",
+    contraparte: Array.from(row.contrapartes).filter(Boolean).join(" | ") || "-",
+    comprobante: Array.from(row.comprobantes).filter(Boolean).join(" / ") || row.comprobante || "-"
+  }));
   const totals = dueRows.reduce((acc, row) => {
     acc.factura += Number(row.factura || 0);
     acc.efectivo += Number(row.efectivo || 0);
-    acc.comision += Number(row.comision || 0);
+    acc.total += Number(row.factura || 0) + Number(row.efectivo || 0);
     return acc;
-  }, { factura: 0, efectivo: 0, comision: 0 });
+  }, { factura: 0, efectivo: 0, total: 0 });
   const filterLabel = options.all ? "Todos" : $("#cc-client-search").value.trim() || "Todos";
-  const periodLabel = filters.dateFrom || filters.dateTo
-    ? `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`
+  const panelPeriodLabel = currentAccountDuePanelRangeLabel(panelRange);
+  const periodLabel = effectiveFilters.dateFrom || effectiveFilters.dateTo
+    ? `${effectiveFilters.dateFrom ? formatDisplayDate(effectiveFilters.dateFrom) : "inicio"} a ${effectiveFilters.dateTo ? formatDisplayDate(effectiveFilters.dateTo) : "fin"}`
     : effectiveFilters.dueFilter === "7" ? "Proximos 7 dias" : $("#cc-due-filter option:checked").textContent;
-  const finalPeriodLabel = quickRange.label || periodLabel;
+  const finalPeriodLabel = quickRange.label || panelPeriodLabel || periodLabel;
   const rowsByDate = new Map();
   dueRows.forEach((row) => {
     const key = row.vencimiento || "Sin fecha";
@@ -2656,27 +2683,32 @@ function printCurrentAccountDueReport(options = {}) {
         const dateTotals = dateRows.reduce((acc, row) => {
           acc.factura += Number(row.factura || 0);
           acc.efectivo += Number(row.efectivo || 0);
-          acc.comision += Number(row.comision || 0);
+          acc.total += Number(row.factura || 0) + Number(row.efectivo || 0);
           return acc;
-        }, { factura: 0, efectivo: 0, comision: 0 });
-        const dateTotal = dateTotals.factura + dateTotals.efectivo + dateTotals.comision;
-        return `<tr class="due-date-row"><td colspan="8">${escapeHtml(date)} - Total del dia ${moneyValue(dateTotal)}${dateTotals.efectivo ? ` | efectivo ${moneyValue(dateTotals.efectivo)}` : ""}</td></tr>${dateRows.map((row) => {
-          const business = [row.operacion, row.concepto].filter(Boolean).join(" - ");
-          const counterpart = [row.vendedor, row.comprador, row.consignataria].filter(Boolean).join(" / ");
+        }, { factura: 0, efectivo: 0, total: 0 });
+        return `<tr class="due-date-row"><td colspan="7">${escapeHtml(date)} - Total del dia ${moneyValue(dateTotals.total)}</td></tr>${dateRows.map((row) => {
           const rowClass = row.efectivo ? "movement-cash due-compact" : "due-compact";
-          return `<tr class="${rowClass}"><td>${escapeHtml(row.vencimiento || "-")}</td><td>${escapeHtml(row.cliente || "-")}</td><td>${escapeHtml(business || "-")}</td><td>${escapeHtml(counterpart || "-")}</td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount ${row.factura < 0 ? "negative" : "positive"}">${row.factura ? moneyValue(row.factura) : "-"}</td><td class="amount ${row.efectivo < 0 ? "negative" : "positive"}">${row.efectivo ? moneyValue(row.efectivo) : "-"}</td><td class="amount ${row.comision < 0 ? "negative" : "positive"}">${row.comision ? moneyValue(row.comision) : "-"}</td></tr>`;
+          const total = Number(row.factura || 0) + Number(row.efectivo || 0);
+          return `<tr class="${rowClass}"><td>${escapeHtml(row.cliente || "-")}</td><td>${escapeHtml(row.concepto || "-")}<br><span class="subtle-line">${escapeHtml(row.contraparte || "-")}</span></td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount ${row.factura < 0 ? "negative" : "positive"}">${row.factura ? moneyValue(row.factura) : "-"}</td><td class="amount ${row.efectivo < 0 ? "negative" : "positive"}">${row.efectivo ? moneyValue(row.efectivo) : "-"}</td><td class="amount ${total < 0 ? "negative" : "positive"}">${moneyValue(total)}</td><td>${escapeHtml(row.operacion || "-")}</td></tr>`;
         }).join("")}`;
       }).join("")
-    : `<tr><td colspan="8">Sin vencimientos para el periodo.</td></tr>`;
+    : `<tr><td colspan="7">Sin vencimientos para el periodo.</td></tr>`;
   const popup = window.open("", "_blank", "width=1100,height=850");
   if (!popup) return;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(safePdfTitle("Vencimientos", finalPeriodLabel))}</title><style>${currentAccountReportStyles()}</style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>Reporte de vencimientos</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
-  <div class="summary"><div><span>Periodo</span><strong>${escapeHtml(finalPeriodLabel)}</strong></div><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Total factura</span><strong>${moneyValue(totals.factura)}</strong></div><div><span>Total efectivo</span><strong>${moneyValue(totals.efectivo)}</strong></div><div><span>Total comisiones</span><strong>${moneyValue(totals.comision)}</strong></div></div>
-  <h2>Detalle semanal</h2>
-  <table><thead><tr><th>Vto.</th><th>Cliente</th><th>Operacion / negocio</th><th>Partes / consignataria</th><th>Comprobante</th><th>Factura</th><th>Efectivo</th><th>Comision</th></tr></thead><tbody>${dueRowsHtml}</tbody></table>
+  <div class="summary"><div><span>Periodo</span><strong>${escapeHtml(finalPeriodLabel)}</strong></div><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Total facturado</span><strong>${moneyValue(totals.factura)}</strong></div><div><span>Total efectivo</span><strong>${moneyValue(totals.efectivo)}</strong></div><div><span>Total general</span><strong>${moneyValue(totals.total)}</strong></div></div>
+  <h2>Agenda de vencimientos</h2>
+  <table><thead><tr><th>Cliente</th><th>Negocio</th><th>Comprobante</th><th>Facturado</th><th>Efectivo</th><th>Total</th><th>Op.</th></tr></thead><tbody>${dueRowsHtml}</tbody></table>
   <button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
   popup.document.close();
+}
+
+function dueReportBusinessLabel(movement) {
+  const kind = movementDueKind(movement);
+  const operationType = [movement?.tipoOperacion, movement?.destinoOperacion].filter(Boolean).join(" ");
+  if (operationType) return `${kind} - ${operationType}`;
+  return movement?.concepto || kind;
 }
 
 function calendarRangeDates() {
@@ -5556,6 +5588,8 @@ async function init() {
   $("#cc-due-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-date-from").addEventListener("change", renderCuentaCorriente);
   $("#cc-date-to").addEventListener("change", renderCuentaCorriente);
+  $("#cc-due-date-from").addEventListener("change", renderCuentaCorriente);
+  $("#cc-due-date-to").addEventListener("change", renderCuentaCorriente);
   $("#cc-print-report").addEventListener("click", () => printCurrentAccountReport());
   $("#cc-print-due-report").addEventListener("click", printCurrentAccountDueReport);
   $("#cc-export-calendar").addEventListener("click", exportCurrentAccountCalendar);
