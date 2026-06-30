@@ -1379,6 +1379,17 @@
                 <div class="table-wrap compact-table"><table><thead><tr><th></th><th>Vto.</th><th>Concepto</th><th>Comprobante</th><th>Importe</th></tr></thead><tbody id="cc-counterparty-body"></tbody></table></div>
               </div>
             </div>
+            <div class="cc-subpanel cc-compensation-panel" id="cc-compensation-panel" hidden>
+              <div class="panel-head">
+                <h3>Saldo disponible cobrado por fuera</h3>
+                <span class="subtle">Para controlar plata que el cliente ya tiene disponible y aplicar gastos o pagos pendientes sin movimiento de dinero por Gonzalo Espinosa.</span>
+              </div>
+              <div class="cc-compensation-preview">
+                <div><span>Disponible antes de esta aplicacion</span><strong id="cc-comp-balance-before">$ 0,00</strong></div>
+                <div><span>Gastos / pagos aplicados ahora</span><strong id="cc-comp-selected">$ 0,00</strong></div>
+                <div><span>Disponible que queda al cliente</span><strong id="cc-comp-balance-after">$ 0,00</strong></div>
+              </div>
+            </div>
             <div class="cc-subpanel">
               <div class="panel-head"><h3 id="cc-imputation-title">Imputar pendientes / descontar comisiones y gastos</h3><span class="subtle" id="cc-imputation-summary">Seleccione un cliente</span></div>
               <label class="check-field"><input type="checkbox" id="cc-discount-only"> Descontar gastos/comisiones y dejar saldo pendiente</label>
@@ -1881,6 +1892,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260630-compensacion-saldo-visible"></script>
+    <script src="/app.js?v=20260630-compensacion-saldo-disponible"></script>
   </body>
 </html>
