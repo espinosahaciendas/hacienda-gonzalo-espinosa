@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260630-parciales-cc-comprobante";
+const APP_BUILD = "20260630-compensacion-clara";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1993,6 +1993,7 @@ function openCurrentAccountPanel(panelId) {
     $("#cc-counterparty-panel").hidden = true;
     $("#cc-counterparty-client").value = "";
     $("#cc-counterparty-type").value = $("#cc-payment-type").value === "PAGO" ? "COBRO" : "PAGO";
+    syncCurrentAccountPaymentMode();
     renderCurrentAccountInstruments();
     renderCurrentAccountImputations();
     renderCurrentAccountCounterpartyImputations();
@@ -2017,6 +2018,45 @@ function openCurrentAccountSuggestedPaymentType(clientName) {
   if (hasPayableToClient) return "PAGO";
   const hasReceivableFromClient = movements.some((movement) => pendingSignedAmount(movement) > 0.01);
   return hasReceivableFromClient ? "COBRO" : $("#cc-payment-type").value;
+}
+
+function syncCurrentAccountPaymentMode() {
+  const type = $("#cc-payment-type").value;
+  const isCompensation = type === "COMPENSACION";
+  const config = {
+    COBRO: {
+      title: "Registrar cobro recibido",
+      text: "Usalo cuando recibis dinero del cliente. Imputa movimientos positivos a cobrar.",
+      imputation: "Imputar movimientos a cobrar"
+    },
+    PAGO: {
+      title: "Registrar pago realizado",
+      text: "Usalo cuando pagas dinero al cliente. Permite descontar gastos o comisiones en el mismo comprobante.",
+      imputation: "Imputar liquidaciones a pagar / descontar gastos"
+    },
+    COMPENSACION: {
+      title: "Compensacion / aplicacion de saldo",
+      text: "Usalo cuando la plata no pasa por Gonzalo Espinosa: el cliente ya cobro por fuera y solo aplicas esa liquidacion contra gastos o saldos pendientes.",
+      imputation: "Seleccionar liquidacion cobrada por fuera y gastos a aplicar"
+    }
+  }[type] || {};
+  $("#cc-payment-title").textContent = config.title || "Registrar pago / cobro";
+  $("#cc-payment-mode-help").innerHTML = `<strong>${escapeHtml(config.title || "")}</strong><span>${escapeHtml(config.text || "")}</span>`;
+  $("#cc-imputation-title").textContent = config.imputation || "Imputar pendientes";
+  $("#cc-instrument-panel").hidden = isCompensation;
+  $(".cc-counterparty-option").hidden = isCompensation;
+  $("#cc-discount-only").closest("label").hidden = isCompensation;
+  $("#cc-payment-method").closest("label").hidden = isCompensation;
+  $("#cc-payment-amount").readOnly = isCompensation;
+  $("#cc-payment-amount").closest("label").childNodes[0].textContent = isCompensation ? "Saldo informado / control" : "Importe";
+  $("#cc-save-payment").textContent = isCompensation ? "Guardar compensacion" : "Guardar pago / cobro";
+  $("#cc-save-payment-receipt").textContent = isCompensation ? "Guardar y generar comprobante de compensacion" : "Guardar y generar comprobante";
+  if (isCompensation) {
+    $("#cc-counterparty-enabled").checked = false;
+    $("#cc-counterparty-panel").hidden = true;
+    currentPaymentInstruments = [];
+    renderCurrentAccountInstruments();
+  }
 }
 
 function externalMovementBaseId(id) {
@@ -2177,6 +2217,7 @@ function getPaymentPendingMovements(clientSelector = "#cc-payment-client", typeS
     const signedPending = Math.sign(amount) * pending;
     const isCommission = String(movement.origen || "").toUpperCase() === "COMISION";
     const isExpenseDiscount = isExpenseOrDiscountMovement(movement);
+    if (type === "COMPENSACION") return Math.abs(signedPending) > 0.01;
     if (type === "PAGO") return signedPending < -0.01 || ((isCommission || isExpenseDiscount) && signedPending > 0.01);
     return signedPending > 0.01;
   });
@@ -2247,7 +2288,10 @@ function refreshPrimaryImputationSummary() {
     availableText: available ? `${available} pendiente/s disponibles` : "Sin pendientes para imputar",
     updatePaymentAmount: true
   });
-  if (selected.length && selected.some((item) => Number(item.dataset.ccSignedPending || 0) < 0) && selected.some((item) => Number(item.dataset.ccSignedPending || 0) > 0)) {
+  if ($("#cc-payment-type").value === "COMPENSACION" && selected.length) {
+    $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - saldo informado ${moneyValue(Math.abs(signedTotal))}`;
+    if (!currentPaymentInstruments.length) setMoneyInput("#cc-payment-amount", Math.abs(signedTotal));
+  } else if (selected.length && selected.some((item) => Number(item.dataset.ccSignedPending || 0) < 0) && selected.some((item) => Number(item.dataset.ccSignedPending || 0) > 0)) {
     if (discountOnly) {
       $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - descuentos a aplicar ${moneyValue(positiveTotal)}`;
       if (!currentPaymentInstruments.length) setMoneyInput("#cc-payment-amount", positiveTotal);
@@ -2330,11 +2374,20 @@ async function saveExternalCurrentAccountMovement() {
 function printCurrentAccountReceipt(payment, autoPrint = false) {
   const popup = window.open("", "_blank", "width=900,height=800");
   if (!popup) return;
-  const instruments = payment.instrumentos?.length ? payment.instrumentos : [{ medio: payment.medio, fecha: payment.fecha, referencia: payment.referencia, importe: payment.importe }];
+  const isCompensation = payment.tipo === "COMPENSACION";
+  const instruments = payment.instrumentos?.length
+    ? payment.instrumentos
+    : isCompensation
+      ? []
+      : [{ medio: payment.medio, fecha: payment.fecha, referencia: payment.referencia, importe: payment.importe }];
   const imputations = payment.imputaciones || [];
   const isDiscountImputation = (item) => {
     const text = normalizeSearch(`${item.concepto || ""} ${item.comprobante || ""} ${item.movementId || ""}`);
     const movementId = normalizeSearch(item.movementId || "");
+    if (payment.tipo === "COMPENSACION") {
+      const originalSigned = Number(item.importeOriginalFirmado ?? item.importeFirmadoOriginal ?? 0);
+      return originalSigned > 0;
+    }
     if (payment.tipo === "PAGO" && (movementId.includes("vendedor-fact") || movementId.includes("vendedor-efec") || movementId.includes("fp-vendedor"))) return false;
     if (payment.tipo === "COBRO" && (movementId.includes("comprador-fact") || movementId.includes("comprador-efec") || movementId.includes("fp-comprador"))) return false;
     const originalSigned = Number(item.importeOriginalFirmado ?? item.importeFirmadoOriginal ?? 0);
@@ -2357,24 +2410,25 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   const discountTotal = discountImputations.reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const instrumentTotal = instruments.reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const controlNet = paidTotal - discountTotal;
-  const receiptTitle = safePdfTitle(payment.id, payment.tipo === "PAGO" ? "Pago" : "Cobro", payment.cliente, payment.fecha);
+  const receiptKind = payment.tipo === "COMPENSACION" ? "Compensacion" : payment.tipo === "PAGO" ? "Pago" : "Cobro";
+  const receiptTitle = safePdfTitle(payment.id, receiptKind, payment.cliente, payment.fecha);
   const imputationRows = (rows, emptyText) => rows.length
     ? rows.map((item) => `<tr><td>${escapeHtml(item.vencimiento || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td>${escapeHtml(item.concepto || item.movementId)}</td><td class="amount">${moneyValue(item.importe)}</td><td class="amount">${moneyValue(item.saldoPendiente)}</td></tr>`).join("")
     : `<tr><td colspan="5">${emptyText}</td></tr>`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(receiptTitle)}</title><style>
     body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px} img{width:76px;height:76px;object-fit:contain;background:#173632;padding:6px} h1{font-size:18px;margin:0} h2{font-size:13px;margin-top:14px} p{margin:3px 0;font-size:11px} table{width:100%;border-collapse:collapse;font-size:10px} th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top} th{background:#edf3f1} .amount{text-align:right;font-weight:700;white-space:nowrap}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}.discount th{background:#f8ebe5}.discount-total{background:#fff3e8;font-weight:700}.net-total{background:#eaf2ff;font-weight:700} button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}button{display:none}body{margin:0}}
   </style></head><body>
-  <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${payment.tipo === "PAGO" ? "Comprobante de pago" : "Comprobante de cobro"}</h1><p><strong>${escapeHtml(payment.id)}</strong></p><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p></div></header>
+  <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${payment.tipo === "COMPENSACION" ? "Comprobante de compensacion / aplicacion de saldo" : payment.tipo === "PAGO" ? "Comprobante de pago" : "Comprobante de cobro"}</h1><p><strong>${escapeHtml(payment.id)}</strong></p><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p></div></header>
   ${payment.anulado ? `<p><strong>COMPROBANTE ANULADO</strong></p>` : ""}
   <p><strong>Cliente:</strong> ${escapeHtml(payment.cliente)}</p><p><strong>Fecha:</strong> ${escapeHtml(payment.fecha)}</p><p><strong>Importe:</strong> ${moneyValue(payment.importe)}</p><p><strong>Referencia:</strong> ${escapeHtml(payment.referencia || "-")}</p>
   <div class="summary">
-    <div><span>${payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
-    <div><span>Vencimientos aplicados</span><strong>${moneyValue(paidTotal)}</strong></div>
-    <div><span>Descuentos / comisiones</span><strong>${moneyValue(discountTotal)}</strong></div>
-    <div><span>Control neto</span><strong>${moneyValue(controlNet)}</strong></div>
+    <div><span>${payment.tipo === "COMPENSACION" ? "Saldo cobrado por fuera / informado" : payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
+    <div><span>${payment.tipo === "COMPENSACION" ? "Liquidacion aplicada" : "Vencimientos aplicados"}</span><strong>${moneyValue(paidTotal)}</strong></div>
+    <div><span>Descuentos / gastos / comisiones</span><strong>${moneyValue(discountTotal)}</strong></div>
+    <div><span>${payment.tipo === "COMPENSACION" ? "Saldo resultante informado" : "Control neto"}</span><strong>${moneyValue(controlNet)}</strong></div>
   </div>
-  <h2>Detalle de instrumentos</h2><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${instruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("")}</tbody></table>
-  <h2>${payment.tipo === "PAGO" ? "Importes pagados / vencimientos cancelados" : "Importes cobrados / vencimientos cancelados"}</h2>
+  ${payment.tipo === "COMPENSACION" ? `<p><strong>Nota:</strong> La liquidacion fue cobrada directamente por el cliente o aplicada por fuera. Este comprobante no representa un pago realizado por Gonzalo Espinosa.</p>` : `<h2>Detalle de instrumentos</h2><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${instruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("")}</tbody></table>`}
+  <h2>${payment.tipo === "COMPENSACION" ? "Liquidaciones / saldos aplicados" : payment.tipo === "PAGO" ? "Importes pagados / vencimientos cancelados" : "Importes cobrados / vencimientos cancelados"}</h2>
   <table><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe aplicado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(paidImputations, "Sin vencimientos liquidados en este comprobante.")}</tbody></table>
   <h2>Descuentos aplicados</h2>
   <table class="discount"><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe descontado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(discountImputations, "Sin descuentos aplicados.")}<tr class="discount-total"><td colspan="3">Total descuentos / comisiones</td><td class="amount">${moneyValue(discountTotal)}</td><td></td></tr><tr class="net-total"><td colspan="3">Neto del comprobante</td><td class="amount">${moneyValue(instrumentTotal || payment.importe)}</td><td></td></tr></tbody></table>
@@ -2913,18 +2967,22 @@ function exportCurrentAccountCalendar() {
 async function saveCurrentAccountPayment(printReceipt = false) {
   try {
     const amount = numberValue("#cc-payment-amount");
+    const selectedSignedTotal = $all("[data-cc-impute]:checked")
+      .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
+    const paymentType = $("#cc-payment-type").value;
     const response = await fetchJson("/api/cuenta-corriente/pagos-cobros", {
       method: "POST",
       body: JSON.stringify({
-        tipo: $("#cc-payment-type").value,
+        tipo: paymentType,
         cliente: $("#cc-payment-client").value,
         fecha: $("#cc-payment-date").value,
         importe: amount,
+        importeFirmado: paymentType === "COMPENSACION" ? -selectedSignedTotal : undefined,
         medio: $("#cc-payment-method").value,
         referencia: $("#cc-payment-reference").value,
         observacion: $("#cc-payment-notes").value,
         instrumentos: currentPaymentInstruments,
-        imputaciones: collectSelectedCurrentAccountImputations("[data-cc-impute]:checked", amount, $("#cc-payment-type").value),
+        imputaciones: collectSelectedCurrentAccountImputations("[data-cc-impute]:checked", amount, paymentType),
         contrapartida: $("#cc-counterparty-enabled").checked ? {
           tipo: $("#cc-counterparty-type").value,
           cliente: $("#cc-counterparty-client").value,
@@ -3161,6 +3219,7 @@ function collectSelectedCurrentAccountImputations(selector, availableAmount, pay
   })).filter((item) => item.movementId && item.pending > 0);
   const hasPositive = rows.some((item) => item.signedPending > 0);
   const hasNegative = rows.some((item) => item.signedPending < 0);
+  if (paymentType === "COMPENSACION") return rows.map((item) => ({ movementId: item.movementId, importe: item.pending }));
   const discountOnly = selector.includes("data-cc-impute") && paymentType === "PAGO" && $("#cc-discount-only")?.checked;
   if (hasPositive && hasNegative) {
     if (discountOnly) {
@@ -5743,6 +5802,7 @@ async function init() {
   $("#cc-payment-client").addEventListener("input", renderCurrentAccountImputations);
   $("#cc-payment-type").addEventListener("change", () => {
     $("#cc-counterparty-type").value = $("#cc-payment-type").value === "PAGO" ? "COBRO" : "PAGO";
+    syncCurrentAccountPaymentMode();
     renderCurrentAccountImputations();
     renderCurrentAccountCounterpartyImputations();
   });

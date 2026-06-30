@@ -1397,6 +1397,24 @@ label textarea {
   background: white;
 }
 
+.cc-mode-help {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #bdd0cb;
+  border-left: 4px solid var(--accent);
+  background: #f3faf7;
+  color: var(--ink);
+}
+
+.cc-mode-help strong {
+  font-size: 15px;
+}
+
+.cc-mode-help span {
+  color: var(--muted);
+}
+
 .cc-counterparty-option {
   border: 2px solid #b67a19;
   background: #fffaf0;

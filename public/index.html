@@ -1342,9 +1342,10 @@
             <p class="form-message" id="cc-external-message"></p>
           </div>
           <div class="cc-entry-panel" id="cc-payment-panel" hidden>
-            <div class="panel-head"><h3>Registrar pago / cobro</h3><button type="button" class="ghost-button" id="cc-close-payment">Cerrar</button></div>
+            <div class="panel-head"><h3 id="cc-payment-title">Registrar pago / cobro</h3><button type="button" class="ghost-button" id="cc-close-payment">Cerrar</button></div>
+            <div class="cc-mode-help" id="cc-payment-mode-help"></div>
             <div class="form-grid">
-              <label>Tipo<select id="cc-payment-type"><option value="COBRO">Cobro recibido</option><option value="PAGO">Pago realizado</option></select></label>
+              <label>Tipo<select id="cc-payment-type"><option value="COBRO">Cobro recibido</option><option value="PAGO">Pago realizado</option><option value="COMPENSACION">Compensacion / aplicacion de saldo</option></select></label>
               <label>Cliente<input id="cc-payment-client" list="cc-client-list"></label>
               <label>Fecha<input id="cc-payment-date" type="date"></label>
               <label>Importe<input id="cc-payment-amount" class="money-input" inputmode="decimal"></label>
@@ -1352,7 +1353,7 @@
               <label>Referencia<input id="cc-payment-reference" placeholder="Comprobante, recibo o detalle"></label>
               <label>Observacion<input id="cc-payment-notes"></label>
             </div>
-            <div class="cc-subpanel">
+            <div class="cc-subpanel" id="cc-instrument-panel">
               <div class="panel-head"><h3>Detalle de instrumentos</h3><span class="subtle" id="cc-instrument-summary">Sin instrumentos cargados</span></div>
               <div class="form-grid">
                 <label>Medio<select id="cc-instrument-method"><option>E-cheq</option><option>Cheque</option><option>Transferencia</option><option>Efectivo</option><option>Otro</option></select></label>
@@ -1379,7 +1380,7 @@
               </div>
             </div>
             <div class="cc-subpanel">
-              <div class="panel-head"><h3>Imputar pendientes / descontar comisiones y gastos</h3><span class="subtle" id="cc-imputation-summary">Seleccione un cliente</span></div>
+              <div class="panel-head"><h3 id="cc-imputation-title">Imputar pendientes / descontar comisiones y gastos</h3><span class="subtle" id="cc-imputation-summary">Seleccione un cliente</span></div>
               <label class="check-field"><input type="checkbox" id="cc-discount-only"> Descontar gastos/comisiones y dejar saldo pendiente</label>
               <div class="table-wrap compact-table"><table><thead><tr><th></th><th>Vto.</th><th>Concepto</th><th>Comprobante</th><th>Importe</th></tr></thead><tbody id="cc-imputation-body"></tbody></table></div>
             </div>
@@ -1880,6 +1881,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260630-parciales-cc-comprobante"></script>
+    <script src="/app.js?v=20260630-compensacion-clara"></script>
   </body>
 </html>
