@@ -31,7 +31,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260630-compensacion-saldo-visible";
+const APP_BUILD = "20260701-compensacion-por-origen";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2076,6 +2076,58 @@ function compensationAvailableBalanceForClient(clientName) {
     .reduce((sum, payment) => sum + compensationSignedAmount(payment), 0);
 }
 
+function compensationOriginFromPayment(payment) {
+  if (!payment || payment.tipo !== "COMPENSACION") return null;
+  if (payment.compensationOriginId) {
+    return {
+      id: String(payment.compensationOriginId),
+      label: payment.compensationOriginLabel || `Saldo ${payment.compensationOriginId}`
+    };
+  }
+  const source = (payment.imputaciones || []).find((item) => Number(item.importeOriginalFirmado ?? 0) < 0);
+  if (source) {
+    return {
+      id: String(source.movementId),
+      label: `${source.comprobante || "Liquidacion cobrada por fuera"} - ${source.concepto || source.movementId}`
+    };
+  }
+  return { id: "GENERAL", label: "Saldo general anterior sin origen identificado" };
+}
+
+function compensationOriginsForClient(clientName) {
+  const client = normalizeAccountName(clientName);
+  const groups = new Map();
+  (state.cuenta?.pagos || [])
+    .filter((payment) => payment.tipo === "COMPENSACION" && !payment.anulado && normalizeAccountName(payment.cliente) === client)
+    .forEach((payment) => {
+      const origin = compensationOriginFromPayment(payment);
+      if (!origin) return;
+      if (!groups.has(origin.id)) groups.set(origin.id, { ...origin, balance: 0 });
+      const row = groups.get(origin.id);
+      row.balance += compensationSignedAmount(payment);
+      if ((!row.label || row.id === "GENERAL") && origin.label) row.label = origin.label;
+    });
+  return Array.from(groups.values()).filter((item) => Math.abs(item.balance) > 0.01);
+}
+
+function selectedCompensationOpeningOrigin() {
+  const checkbox = $all("[data-cc-impute]:checked")
+    .find((item) => Number(item.dataset.ccSignedPending || 0) < -0.01);
+  if (!checkbox) return null;
+  return {
+    id: checkbox.dataset.ccImpute || checkbox.dataset.ccCounterpartyImpute,
+    label: `${checkbox.dataset.ccComprobante || "Liquidacion cobrada por fuera"} - ${checkbox.dataset.ccConcepto || ""}`.trim()
+  };
+}
+
+function selectedCompensationOrigin() {
+  const opening = selectedCompensationOpeningOrigin();
+  if (opening) return opening;
+  const selectedId = $("#cc-comp-origin")?.value || "";
+  const found = compensationOriginsForClient($("#cc-payment-client").value).find((item) => item.id === selectedId);
+  return found || null;
+}
+
 function selectedCompensationSignedTotal() {
   return $all("[data-cc-impute]:checked")
     .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
@@ -2083,13 +2135,28 @@ function selectedCompensationSignedTotal() {
 
 function renderCompensationBalancePreview() {
   if (!$("#cc-compensation-panel") || $("#cc-payment-type").value !== "COMPENSACION") return;
-  const before = compensationAvailableBalanceForClient($("#cc-payment-client").value);
+  const origins = compensationOriginsForClient($("#cc-payment-client").value);
+  const opening = selectedCompensationOpeningOrigin();
+  const select = $("#cc-comp-origin");
+  if (select) {
+    const current = select.value;
+    select.innerHTML = opening
+      ? `<option value="${escapeHtml(opening.id)}">Nuevo saldo: ${escapeHtml(opening.label)}</option>`
+      : origins.length
+        ? origins.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)} - disponible ${moneyValue(item.balance)}</option>`).join("")
+        : `<option value="">Sin saldos disponibles por origen</option>`;
+    if (!opening && origins.some((item) => item.id === current)) select.value = current;
+  }
+  const origin = selectedCompensationOrigin();
+  const before = opening ? 0 : (origin?.balance ?? compensationAvailableBalanceForClient($("#cc-payment-client").value));
   const selected = selectedCompensationSignedTotal();
   const after = before - selected;
+  const selectedDisplay = opening ? after : selected;
   $("#cc-comp-balance-before").textContent = moneyValue(before);
   $("#cc-comp-balance-before").className = amountClass(before);
-  $("#cc-comp-selected").textContent = moneyValue(selected);
-  $("#cc-comp-selected").className = amountClass(selected);
+  $("#cc-comp-selected-label").textContent = opening ? "Disponible que se genera con esta liquidacion" : "Gastos / pagos aplicados ahora";
+  $("#cc-comp-selected").textContent = moneyValue(selectedDisplay);
+  $("#cc-comp-selected").className = amountClass(selectedDisplay);
   $("#cc-comp-balance-after").textContent = moneyValue(after);
   $("#cc-comp-balance-after").className = amountClass(after);
 }
@@ -2293,7 +2360,7 @@ function renderCurrentAccountImputations() {
     ? movements.map((movement) => {
         const pending = Number(movement.importePendiente ?? Math.abs(movement.importe));
         const signedPending = Math.sign(Number(movement.importe || 0)) * pending;
-        return `<tr><td><input type="checkbox" data-cc-impute="${escapeHtml(movement.id)}" data-cc-pending="${pending}" data-cc-signed-pending="${signedPending}"></td><td>${escapeHtml(movement.vencimiento || "-")}</td><td>${escapeHtml(movement.concepto || "-")}</td><td>${escapeHtml(movement.comprobante || "-")}</td><td>${moneyValue(pending)}</td></tr>`;
+        return `<tr><td><input type="checkbox" data-cc-impute="${escapeHtml(movement.id)}" data-cc-pending="${pending}" data-cc-signed-pending="${signedPending}" data-cc-concepto="${escapeHtml(movement.concepto || "")}" data-cc-comprobante="${escapeHtml(movement.comprobante || "")}"></td><td>${escapeHtml(movement.vencimiento || "-")}</td><td>${escapeHtml(movement.concepto || "-")}</td><td>${escapeHtml(movement.comprobante || "-")}</td><td>${moneyValue(pending)}</td></tr>`;
       }).join("")
     : `<tr><td colspan="5">Sin pendientes para imputar.</td></tr>`;
 }
@@ -2405,8 +2472,14 @@ function compensationSignedAmount(payment) {
 
 function compensationRunningBalance(payment) {
   if (!payment || payment.tipo !== "COMPENSACION") return 0;
+  const origin = compensationOriginFromPayment(payment);
   const rows = (state.cuenta?.pagos || [])
     .filter((item) => item.tipo === "COMPENSACION" && !item.anulado && normalizeAccountName(item.cliente) === normalizeAccountName(payment.cliente))
+    .filter((item) => {
+      if (!origin) return true;
+      const itemOrigin = compensationOriginFromPayment(item);
+      return itemOrigin?.id === origin.id;
+    })
     .sort((a, b) => {
       const dateA = parseDisplayDate(a.fecha)?.getTime() || 0;
       const dateB = parseDisplayDate(b.fecha)?.getTime() || 0;
@@ -3098,6 +3171,7 @@ async function saveCurrentAccountPayment(printReceipt = false) {
     const selectedSignedTotal = $all("[data-cc-impute]:checked")
       .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
     const paymentType = $("#cc-payment-type").value;
+    const compensationOrigin = paymentType === "COMPENSACION" ? selectedCompensationOrigin() : null;
     const response = await fetchJson("/api/cuenta-corriente/pagos-cobros", {
       method: "POST",
       body: JSON.stringify({
@@ -3109,6 +3183,8 @@ async function saveCurrentAccountPayment(printReceipt = false) {
         medio: $("#cc-payment-method").value,
         referencia: $("#cc-payment-reference").value,
         observacion: $("#cc-payment-notes").value,
+        compensationOriginId: compensationOrigin?.id,
+        compensationOriginLabel: compensationOrigin?.label,
         instrumentos: currentPaymentInstruments,
         imputaciones: collectSelectedCurrentAccountImputations("[data-cc-impute]:checked", amount, paymentType),
         contrapartida: $("#cc-counterparty-enabled").checked ? {
@@ -5931,6 +6007,7 @@ async function init() {
     renderCurrentAccountImputations();
     renderCompensationBalancePreview();
   });
+  $("#cc-comp-origin").addEventListener("change", renderCompensationBalancePreview);
   $("#cc-payment-type").addEventListener("change", () => {
     $("#cc-counterparty-type").value = $("#cc-payment-type").value === "PAGO" ? "COBRO" : "PAGO";
     syncCurrentAccountPaymentMode();

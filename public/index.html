@@ -1384,9 +1384,11 @@
                 <h3>Saldo disponible cobrado por fuera</h3>
                 <span class="subtle">Para controlar plata que el cliente ya tiene disponible y aplicar gastos o pagos pendientes sin movimiento de dinero por Gonzalo Espinosa.</span>
               </div>
+              <label>Aplicar contra saldo de<select id="cc-comp-origin"></select></label>
+              <p class="subtle">Si seleccionas una nueva venta/liquidacion cobrada por fuera, se abre un saldo propio. Si seleccionas solo gastos, elegi de que saldo disponible se descuentan.</p>
               <div class="cc-compensation-preview">
                 <div><span>Disponible antes de esta aplicacion</span><strong id="cc-comp-balance-before">$ 0,00</strong></div>
-                <div><span>Gastos / pagos aplicados ahora</span><strong id="cc-comp-selected">$ 0,00</strong></div>
+                <div><span id="cc-comp-selected-label">Gastos / pagos aplicados ahora</span><strong id="cc-comp-selected">$ 0,00</strong></div>
                 <div><span>Disponible que queda al cliente</span><strong id="cc-comp-balance-after">$ 0,00</strong></div>
               </div>
             </div>
@@ -1892,6 +1894,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260630-compensacion-saldo-visible"></script>
+    <script src="/app.js?v=20260701-compensacion-por-origen"></script>
   </body>
 </html>
