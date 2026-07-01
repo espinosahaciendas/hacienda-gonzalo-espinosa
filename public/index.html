@@ -1118,9 +1118,9 @@
                     <div class="advanced-subpanel" id="liq-buyer-expenses" hidden>
                       <h3>Gastos de liquidacion consignada comprador</h3>
                       <div class="form-grid">
-                        <label>Gastos de procesamiento<input id="liq-exp-procesamiento-comp" class="money-input" inputmode="decimal"></label>
-                        <label>Otros gastos 1<input id="liq-exp-otros-1-comp" class="money-input" inputmode="decimal"></label>
-                        <label>Otros gastos 2<input id="liq-exp-otros-2-comp" class="money-input" inputmode="decimal"></label>
+                        <label>Comision<input id="liq-exp-procesamiento-comp" class="money-input" inputmode="decimal"></label>
+                        <label>Gastos de procesamiento<input id="liq-exp-otros-1-comp" class="money-input" inputmode="decimal"></label>
+                        <label>Otros gastos<input id="liq-exp-otros-2-comp" class="money-input" inputmode="decimal"></label>
                       </div>
                       <label>Observaciones gastos<input id="liq-exp-observ-comp"></label>
                     </div>
@@ -1762,6 +1762,14 @@
                   <option>E-cheq</option>
                   <option>Nota de credito/debito</option>
                   <option>Otro comprobante</option>
+                </select>
+              </label>
+              <label>Parte
+                <select id="document-party">
+                  <option value="">General / interno</option>
+                  <option value="VENDEDOR">Vendedor / productor</option>
+                  <option value="COMPRADOR">Comprador</option>
+                  <option value="CONSIGNATARIA">Consignataria</option>
                 </select>
               </label>
               <label>Titulo<input id="document-title" placeholder="Ej.: Liquidacion comprador A-0004..."></label>

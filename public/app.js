@@ -244,6 +244,7 @@ function resetDocumentForm() {
   $("#document-entity-id").value = "";
   $("#document-client").value = "";
   $("#document-type").value = "Liquidacion";
+  $("#document-party").value = "";
   $("#document-title").value = "";
   $("#document-file").value = "";
   $("#document-notes").value = "";
@@ -257,18 +258,52 @@ function documentDownloadUrl(documentId) {
 function documentReferenceText(documento) {
   const type = documento.entidadTipo || "GENERAL";
   const id = documento.entidadId || documento.operacion || documento.movimientoId || documento.pagoId || "-";
-  return `${type}: ${id}`;
+  const party = documento.parte ? ` · ${documentPartyLabel(documento.parte)}` : "";
+  return `${type}: ${id}${party}`;
 }
 
-function relatedDocumentsForMovement(movement) {
+function documentPartyLabel(value) {
+  const key = normalizeSearch(value).toUpperCase();
+  if (key === "VENDEDOR") return "Vendedor / productor";
+  if (key === "COMPRADOR") return "Comprador";
+  if (key === "CONSIGNATARIA") return "Consignataria";
+  return "General / interno";
+}
+
+function movementDocumentParty(movement) {
+  const explicit = normalizeSearch(movement?.parte || "");
+  if (explicit.includes("VENDEDOR")) return "VENDEDOR";
+  if (explicit.includes("COMPRADOR")) return "COMPRADOR";
+  if (explicit.includes("CONSIGNATARIA")) return "CONSIGNATARIA";
+  const text = normalizeSearch(`${movement?.concepto || ""} ${movement?.id || ""}`);
+  if (text.includes("VENDEDOR") || text.includes("PRODUCTOR")) return "VENDEDOR";
+  if (text.includes("COMPRADOR")) return "COMPRADOR";
+  if (text.includes("CONSIGNATARIA")) return "CONSIGNATARIA";
+  return "";
+}
+
+function documentMatchesMovement(documento, movement) {
   const movementId = String(movement.id || "");
   const operationId = String(movement.operacion || "");
   const paymentId = String(movement.paymentId || "");
-  return (state.documentos || []).filter((documento) =>
-    (movementId && String(documento.movimientoId || documento.entidadId) === movementId)
-    || (operationId && String(documento.operacion || documento.entidadId) === operationId)
-    || (paymentId && String(documento.pagoId || documento.entidadId) === paymentId)
-  );
+  const documentMovement = String(documento.movimientoId || "");
+  const documentEntity = String(documento.entidadId || "");
+  const documentOperation = String(documento.operacion || "");
+  const documentPayment = String(documento.pagoId || "");
+  const movementParty = movementDocumentParty(movement);
+  const documentParty = normalizeSearch(documento.parte || "").toUpperCase();
+  const sameClient = !documento.cliente || !movement.cliente || normalizeSearch(documento.cliente) === normalizeSearch(movement.cliente);
+  if (movementId && (documentMovement === movementId || (documento.entidadTipo === "MOVIMIENTO" && documentEntity === movementId))) return true;
+  if (paymentId && (documentPayment === paymentId || (documento.entidadTipo === "PAGO" && documentEntity === paymentId))) return sameClient;
+  if (!operationId) return false;
+  const sameOperation = documentOperation === operationId || (documento.entidadTipo === "OPERACION" && documentEntity === operationId);
+  if (!sameOperation) return false;
+  if (documentParty && movementParty && documentParty !== movementParty) return false;
+  return sameClient;
+}
+
+function relatedDocumentsForMovement(movement) {
+  return (state.documentos || []).filter((documento) => documentMatchesMovement(documento, movement));
 }
 
 function documentActionButtons(movement) {
@@ -279,7 +314,8 @@ function documentActionButtons(movement) {
     operacion: movement.operacion || "",
     pagoId: movement.paymentId || "",
     comprobante: movement.comprobante || "",
-    concepto: movement.concepto || ""
+    concepto: movement.concepto || "",
+    parte: movementDocumentParty(movement)
   }));
   return ` <button type="button" class="small-button" data-document-attach="${payload}">Adjuntar PDF</button>${docs.length ? ` <button type="button" class="small-button" data-document-list="${payload}">PDFs (${docs.length})</button>` : ""}`;
 }
@@ -334,9 +370,10 @@ function fillDocumentFormFromMovement(movement) {
   documentFilterIds = [];
   clearDocumentPreview();
   const isPayment = Boolean(movement.pagoId);
-  $("#document-entity-type").value = isPayment ? "PAGO" : movement.operacion ? "OPERACION" : "MOVIMIENTO";
-  $("#document-entity-id").value = isPayment ? movement.pagoId : movement.operacion || movement.id || "";
+  $("#document-entity-type").value = isPayment ? "PAGO" : "MOVIMIENTO";
+  $("#document-entity-id").value = isPayment ? movement.pagoId : movement.id || movement.operacion || "";
   $("#document-client").value = movement.cliente || "";
+  $("#document-party").value = movement.parte || movementDocumentParty(movement) || "";
   $("#document-title").value = movement.comprobante ? `${movement.comprobante} - ${movement.cliente || ""}`.trim() : movement.concepto || "";
   $("#document-type").value = isPayment ? "Recibo / pago" : "Liquidacion";
   $("#document-notes").value = movement.concepto || "";
@@ -375,6 +412,7 @@ async function saveDocument(event) {
   form.append("entidadId", entityId);
   form.append("cliente", $("#document-client").value);
   form.append("tipo", $("#document-type").value);
+  form.append("parte", $("#document-party").value);
   form.append("titulo", $("#document-title").value || file.name);
   form.append("observacion", $("#document-notes").value);
   if (entityType === "OPERACION") form.append("operacion", entityId);
@@ -5495,8 +5533,8 @@ function renderReport() {
       <h3>Gastos liquidacion comprador</h3>
       <table class="report-table">
         <tbody>
-          <tr><th>Gastos de procesamiento</th><td>${moneyValue(buyerExpenses.procesamiento)}</td><th>Otros gastos 1</th><td>${moneyValue(buyerExpenses.otros1)}</td></tr>
-          <tr><th>Otros gastos 2</th><td>${moneyValue(buyerExpenses.otros2)}</td><th>Detalle</th><td>${escapeHtml($("#liq-exp-observ-comp").value || "-")}</td></tr>
+          <tr><th>Comision</th><td>${moneyValue(buyerExpenses.procesamiento)}</td><th>Gastos de procesamiento</th><td>${moneyValue(buyerExpenses.otros1)}</td></tr>
+          <tr><th>Otros gastos</th><td>${moneyValue(buyerExpenses.otros2)}</td><th>Detalle</th><td>${escapeHtml($("#liq-exp-observ-comp").value || "-")}</td></tr>
         </tbody>
       </table>
     </div>
