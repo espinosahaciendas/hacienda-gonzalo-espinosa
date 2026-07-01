@@ -2529,6 +2529,8 @@ class BackupDataSource {
       medio: normalizeText(input.medio || "Transferencia"),
       referencia: normalizeText(input.referencia),
       observacion: normalizeText(input.observacion),
+      compensationOriginId: normalizeText(input.compensationOriginId),
+      compensationOriginLabel: normalizeText(input.compensationOriginLabel),
       instrumentos: asArray(input.instrumentos).map((item) => ({
         id: normalizeText(item.id) || `INST-${Date.now()}`,
         medio: normalizeText(item.medio),
