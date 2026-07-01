@@ -6,9 +6,13 @@ const { createDataSource } = require("./data-source");
 
 const PORT = Number(process.env.PORT || 4100);
 const AUTH_REQUIRED = process.env.AUTH_REQUIRED === "1";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const BACKUP_DOWNLOAD_ENABLED = process.env.BACKUP_DOWNLOAD_ENABLED === "1";
+const CONSULTA_DOCUMENTS_ENABLED = process.env.CONSULTA_DOCUMENTS_ENABLED === "1";
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const LOCAL_DOCUMENTS_DIR = path.join(ROOT, "data", "documentos");
+assertProductionConfig();
 const dataSource = createDataSource();
 
 const MIME_TYPES = {
@@ -25,6 +29,7 @@ const MIME_TYPES = {
 function sendJson(res, statusCode, payload) {
   const body = JSON.stringify(payload, null, 2);
   res.writeHead(statusCode, {
+    ...securityHeaders(),
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body)
   });
@@ -34,6 +39,7 @@ function sendJson(res, statusCode, payload) {
 function sendJsonDownload(res, filename, payload) {
   const body = JSON.stringify(payload, null, 2);
   res.writeHead(200, {
+    ...securityHeaders(),
     "Content-Type": "application/json; charset=utf-8",
     "Content-Disposition": `attachment; filename="${filename}"`,
     "Content-Length": Buffer.byteLength(body)
@@ -43,6 +49,7 @@ function sendJsonDownload(res, filename, payload) {
 
 function sendBinaryDownload(res, filename, mimeType, content) {
   res.writeHead(200, {
+    ...securityHeaders(),
     "Content-Type": mimeType || "application/octet-stream",
     "Content-Disposition": `inline; filename="${String(filename || "documento.pdf").replace(/"/g, "")}"`,
     "Content-Length": Buffer.byteLength(content)
@@ -62,6 +69,38 @@ function parseCookies(req) {
 function setSessionCookie(res, token, maxAge = 43200) {
   const secure = process.env.COOKIE_SECURE === "1" ? "; Secure" : "";
   res.setHeader("Set-Cookie", `hacienda_session=${encodeURIComponent(token || "")}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secure}`);
+}
+
+function assertProductionConfig() {
+  if (!IS_PRODUCTION) return;
+  const missing = [];
+  if (process.env.AUTH_REQUIRED !== "1") missing.push("AUTH_REQUIRED=1");
+  if (process.env.COOKIE_SECURE !== "1") missing.push("COOKIE_SECURE=1");
+  if (!process.env.DATABASE_URL) missing.push("DATABASE_URL");
+  if (!process.env.SUPABASE_URL) missing.push("SUPABASE_URL");
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  if (missing.length) {
+    throw new Error(`Configuracion insegura de produccion. Falta: ${missing.join(", ")}`);
+  }
+}
+
+function securityHeaders() {
+  const headers = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+  };
+  if (IS_PRODUCTION) {
+    headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+  }
+  return headers;
+}
+
+function userCanReadDocuments(session) {
+  if (!session) return false;
+  if (session.rol === "ADMIN") return true;
+  return session.rol === "CONSULTA" && CONSULTA_DOCUMENTS_ENABLED;
 }
 
 function readBody(req) {
@@ -291,6 +330,7 @@ function sendStatic(req, res) {
     }
     const type = MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
     res.writeHead(200, {
+      ...securityHeaders(),
       "Content-Type": type,
       "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
       "Pragma": "no-cache",
@@ -377,6 +417,10 @@ async function handleApi(req, res) {
   if (parsed.pathname === "/api/backup/download" && req.method === "GET") {
     if (session.rol !== "ADMIN") {
       sendJson(res, 403, { error: "Solo un usuario administrador puede descargar backups." });
+      return;
+    }
+    if (IS_PRODUCTION && !BACKUP_DOWNLOAD_ENABLED) {
+      sendJson(res, 403, { error: "La descarga de backups completos esta deshabilitada por seguridad." });
       return;
     }
     const stamp = new Date().toISOString().slice(0, 10);
@@ -598,6 +642,10 @@ async function handleApi(req, res) {
 
   if (parsed.pathname === "/api/documentos") {
     if (req.method === "GET") {
+      if (!userCanReadDocuments(session)) {
+        sendJson(res, 403, { error: "No tiene permiso para consultar documentos." });
+        return;
+      }
       sendJson(res, 200, { items: await dataSource.getDocumentos(parsed.query) });
       return;
     }
@@ -610,6 +658,10 @@ async function handleApi(req, res) {
       }
       if (file.mimeType !== "application/pdf" && !String(file.filename || "").toLowerCase().endsWith(".pdf")) {
         sendJson(res, 400, { error: "Solo se admiten archivos PDF." });
+        return;
+      }
+      if (file.content.subarray(0, 5).toString("utf8") !== "%PDF-") {
+        sendJson(res, 400, { error: "El archivo seleccionado no parece ser un PDF valido." });
         return;
       }
       const id = `DOC-${Date.now()}`;
@@ -632,6 +684,10 @@ async function handleApi(req, res) {
 
   const documentoDownloadMatch = parsed.pathname.match(/^\/api\/documentos\/([^/]+)\/descargar$/);
   if (documentoDownloadMatch && req.method === "GET") {
+    if (!userCanReadDocuments(session)) {
+      sendJson(res, 403, { error: "No tiene permiso para descargar documentos." });
+      return;
+    }
     const documento = await dataSource.getDocumento(decodeURIComponent(documentoDownloadMatch[1]));
     if (!documento) {
       sendJson(res, 404, { error: "No se encontro el documento." });
