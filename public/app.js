@@ -3316,8 +3316,11 @@ function commissionistAccountMovementApplies(movement, commissionist) {
     || origin === "COMISION"
     || concept.includes("comision");
   if (!isCommissionLike) return false;
+  if (origin === "CONSIGNATARIA") {
+    return normalizeSearch(movement.cliente) === key
+      || normalizeSearch(movement.consignataria) === key;
+  }
   return normalizeSearch(movement.cliente) === key
-    || normalizeSearch(movement.consignataria) === key
     || normalizeSearch(movement.comisionista) === key;
 }
 
@@ -3326,6 +3329,36 @@ function commissionistAccountOperationIds(commissionist) {
     .filter((movement) => commissionistAccountMovementApplies(movement, commissionist))
     .map((movement) => String(movement.operacion || ""))
     .filter(Boolean));
+}
+
+function commissionistLiquidatedPartyLabel(movement) {
+  const raw = normalizeSearch(movement.liquidacionConsignatariaA || "");
+  if (raw === "VENDEDOR") return "Vendedor / productor";
+  if (raw === "COMPRADOR") return "Comprador";
+  if (raw === "AMBAS") return "Ambas partes";
+  const counterpart = normalizeSearch(movement.contraparte || "");
+  if (counterpart && counterpart === normalizeSearch(movement.vendedor || "")) return "Vendedor / productor";
+  if (counterpart && counterpart === normalizeSearch(movement.comprador || "")) return "Comprador";
+  return movement.consignatariaCuenta || String(movement.origen || "").toUpperCase() === "CONSIGNATARIA" ? "Parte liquidada" : "-";
+}
+
+function commissionistLiquidatedClient(movement) {
+  if (movement.contraparte) return movement.contraparte;
+  const raw = normalizeSearch(movement.liquidacionConsignatariaA || "");
+  if (raw === "VENDEDOR") return movement.vendedor || "";
+  if (raw === "COMPRADOR") return movement.comprador || "";
+  if (raw === "AMBAS") return [movement.vendedor, movement.comprador].filter(Boolean).join(" / ");
+  return movement.cliente || "";
+}
+
+function commissionistOperationCounterpart(movement) {
+  const liquidated = normalizeSearch(commissionistLiquidatedClient(movement));
+  const seller = normalizeSearch(movement.vendedor || "");
+  const buyer = normalizeSearch(movement.comprador || "");
+  if (liquidated && seller && liquidated === seller) return movement.comprador || "";
+  if (liquidated && buyer && liquidated === buyer) return movement.vendedor || "";
+  if (movement.vendedor || movement.comprador) return [movement.vendedor, movement.comprador].filter(Boolean).join(" / ");
+  return movement.contraparte || "";
 }
 
 function pendingCommissionistAccountRows(commissionist, from, to, alreadyLiquidatedIds) {
@@ -3340,10 +3373,17 @@ function pendingCommissionistAccountRows(commissionist, from, to, alreadyLiquida
       const amount = Math.abs(signedPendingAmount(movement));
       return {
         id: movement.id,
+        operacion: movement.operacion || movement.id,
         fecha: movement.fecha || movement.vencimiento,
         origen: "Comision pendiente CC",
-        vendedor: movement.contraparte || movement.vendedor || movement.cliente,
-        comprador: movement.comprador || movement.concepto || "-",
+        cuenta: movement.consignataria || movement.cliente || commissionist,
+        liquidoA: commissionistLiquidatedPartyLabel(movement),
+        clienteLiquidado: commissionistLiquidatedClient(movement),
+        contraparteOperacion: commissionistOperationCounterpart(movement),
+        negocio: operationBusinessText(movement) || movement.contraparte || "-",
+        detalle: movement.concepto || "-",
+        vendedor: movement.cliente || commissionist,
+        comprador: operationBusinessText(movement) || movement.concepto || "-",
         comprobante: movement.comprobante || "",
         base: amount,
         porcentaje: 0,
@@ -3376,12 +3416,12 @@ function renderCommissionistRows() {
           <td><input type="checkbox" data-commissionist-row="${escapeHtml(row.id)}" ${row.selected ? "checked" : ""} ${row.noGenerate ? "disabled" : ""}></td>
           <td><input type="checkbox" data-commissionist-invoice-row="${escapeHtml(row.id)}" ${row.invoiceSelected ? "checked" : ""} ${row.invoiceCandidate ? "" : "disabled"}></td>
           <td>${escapeHtml(row.fecha || "-")}</td>
-          <td>${escapeHtml(row.origen || "-")}</td>
-          <td>${escapeHtml(row.id)}</td>
-          <td>${escapeHtml(row.vendedor || "-")}</td>
-          <td>${escapeHtml(row.comprador || "-")}</td>
+          <td>${escapeHtml(row.operacion || row.id)}</td>
+          <td>${escapeHtml(row.cuenta || row.vendedor || "-")}</td>
+          <td>${escapeHtml(row.liquidoA || "-")}</td>
+          <td>${escapeHtml(row.clienteLiquidado || row.vendedor || "-")}</td>
+          <td>${escapeHtml(row.contraparteOperacion || row.comprador || "-")}</td>
           <td>${escapeHtml(row.comprobante || "-")}</td>
-          <td>${moneyValue(row.base)}</td>
           <td>${moneyValue(commission)}${row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</td>
         </tr>`;
       }).join("")
@@ -3421,8 +3461,13 @@ async function loadCommissionistOperations() {
       const liq = detail.liquidacion || {};
       return {
         id: detail.id,
+        operacion: detail.id,
         fecha: detail.fecha,
         origen: "Operacion",
+        cuenta: selectedCommissionist,
+        liquidoA: "Operacion a liquidar",
+        clienteLiquidado: detail.vendedor,
+        contraparteOperacion: detail.comprador,
         vendedor: detail.vendedor,
         comprador: detail.comprador,
         comprobante: liq.comprobanteProd || liq.comprobanteComp || "",
@@ -3440,8 +3485,13 @@ async function loadCommissionistOperations() {
     .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
     .map((movement) => ({
       id: movement.id,
+      operacion: movement.operacion || movement.id,
       fecha: movement.fecha || movement.vencimiento,
       origen: "Movimiento externo",
+      cuenta: movement.comisionista || selectedCommissionist,
+      liquidoA: "Movimiento externo",
+      clienteLiquidado: movement.cliente,
+      contraparteOperacion: movement.concepto || "-",
       vendedor: movement.cliente,
       comprador: movement.concepto || "-",
       comprobante: movement.comprobante || "",
