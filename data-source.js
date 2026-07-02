@@ -558,6 +558,7 @@ function buildOperationAccountMovements(operation) {
         concepto: conceptWithCounterpart(conceptSuffix, counterpart),
         comprobante,
         operacion: operation.id,
+        parte: String(role || "").startsWith("VENDEDOR") ? "VENDEDOR" : String(role || "").startsWith("COMPRADOR") ? "COMPRADOR" : "",
         contraparte: counterpart,
         vendedor: operation.vendedor || draft.vendedor || "",
         comprador: operation.comprador || draft.comprador || "",
@@ -632,6 +633,7 @@ function buildOperationAccountMovements(operation) {
       concepto: conceptWithCounterpart(conceptSuffix, counterpart),
       comprobante,
       operacion: operation.id,
+      parte: String(role || "").startsWith("VENDEDOR") ? "VENDEDOR" : String(role || "").startsWith("COMPRADOR") ? "COMPRADOR" : "",
       contraparte: counterpart,
       vendedor: operation.vendedor || draft.vendedor || "",
       comprador: operation.comprador || draft.comprador || "",
@@ -699,6 +701,7 @@ function buildOperationAccountMovements(operation) {
           concepto: conceptWithCounterpart(`${baseConcept}${multiple ? ` cuota ${index + 1}` : ""}`, counterpart),
           comprobante,
           operacion: operation.id,
+          parte: String(role || "").includes("VENDEDOR") ? "VENDEDOR" : String(role || "").includes("COMPRADOR") ? "COMPRADOR" : "",
           contraparte: counterpart,
           vendedor: operation.vendedor || draft.vendedor || "",
           comprador: operation.comprador || draft.comprador || "",
@@ -743,6 +746,7 @@ function buildOperationAccountMovements(operation) {
       concepto: conceptWithCounterpart("comision/diferencia consignataria", consigneeCounterpart),
       comprobante: liq.comprobanteProd || draft.comprobanteProd || liq.comprobanteComp || draft.comprobanteComp,
       operacion: operation.id,
+      parte: "CONSIGNATARIA",
       contraparte: consigneeCounterpart,
       consignataria: operationConsignee,
       consignatariaCuenta: true,
@@ -756,6 +760,22 @@ function buildOperationAccountMovements(operation) {
 
 function buildAccountData(data) {
   const movements = [];
+  const commissionInvoiceByMovement = new Map();
+  asArray(data.commissionInvoices).forEach((invoice) => {
+    if (invoice.anulado) return;
+    asArray(invoice.movimientos).forEach((item) => {
+      const movementId = normalizeText(item.movementId || item.id);
+      if (!movementId) return;
+      commissionInvoiceByMovement.set(movementId, {
+        id: invoice.id,
+        numero: invoice.numero,
+        fecha: invoice.fecha,
+        cliente: invoice.cliente,
+        periodoDesde: invoice.periodoDesde,
+        periodoHasta: invoice.periodoHasta
+      });
+    });
+  });
   asArray(data.operations).forEach((operation) => {
     buildOperationAccountMovements(operation).forEach((movement) => pushMovement(movements, movement));
   });
@@ -838,6 +858,13 @@ function buildAccountData(data) {
     const imputed = Math.min(Math.abs(movement.importe), allocations.get(String(movement.id)) || 0);
     movement.importeImputado = imputed;
     movement.importePendiente = Math.max(Math.abs(movement.importe) - imputed, 0);
+    const commissionInvoice = commissionInvoiceByMovement.get(String(movement.id));
+    if (commissionInvoice) {
+      movement.facturaComisionId = commissionInvoice.id;
+      movement.facturaComision = commissionInvoice.numero;
+      movement.fechaFacturaComision = commissionInvoice.fecha;
+      movement.estadoFacturacionComision = "FACTURADO";
+    }
     if (imputed >= Math.abs(movement.importe) - 0.01) movement.estado = "IMPUTADO";
     else if (imputed > 0.01) movement.estado = "PARCIAL";
   });
@@ -1370,6 +1397,7 @@ class BackupDataSource {
       tabRules: asArray(backup.tabRules),
       currentAccountPayments: asArray(backup.currentAccountPayments),
       currentAccountManualMovements: asArray(backup.currentAccountManualMovements),
+      commissionInvoices: asArray(backup.commissionInvoices),
       cajaDiaria: asArray(backup.cajaDiaria),
       cajaConciliaciones: asArray(backup.cajaConciliaciones),
       documentos: asArray(backup.documentos)
@@ -2095,8 +2123,78 @@ class BackupDataSource {
       clientes: cuenta.clientes,
       movimientos: cuenta.movimientos,
       vencimientos: cuenta.vencimientos,
-      pagos: cuenta.pagos
+      pagos: cuenta.pagos,
+      commissionInvoices: asArray(data.commissionInvoices).filter((invoice) => !invoice.anulado)
     };
+  }
+
+  async saveCommissionInvoice(input) {
+    const data = this.readData();
+    const cuenta = buildAccountData(data);
+    const cliente = normalizeText(input.cliente);
+    const numero = normalizeText(input.numero);
+    const movementIds = asArray(input.movimientos)
+      .map((item) => normalizeText(item.movementId || item.id || item))
+      .filter(Boolean);
+    if (!cliente || !numero || !movementIds.length) {
+      const error = new Error("Falta comisionista/consignataria, numero de factura o movimientos seleccionados.");
+      error.statusCode = 400;
+      throw error;
+    }
+    const activeInvoices = asArray(data.commissionInvoices).filter((invoice) => !invoice.anulado);
+    const alreadyInvoiced = new Set();
+    activeInvoices.forEach((invoice) => {
+      asArray(invoice.movimientos).forEach((item) => {
+        const id = normalizeText(item.movementId || item.id);
+        if (id) alreadyInvoiced.add(id);
+      });
+    });
+    const selected = movementIds.map((id) => {
+      const movement = asArray(cuenta.movimientos).find((row) => String(row.id) === String(id));
+      if (!movement) {
+        const error = new Error(`No se encontro el movimiento ${id}.`);
+        error.statusCode = 404;
+        throw error;
+      }
+      if (alreadyInvoiced.has(id)) {
+        const error = new Error(`El movimiento ${movement.comprobante || id} ya esta incluido en una factura de comisiones.`);
+        error.statusCode = 409;
+        throw error;
+      }
+      if (Math.abs(parseMoney(movement.importePendiente ?? movement.importe)) <= 0.01) {
+        const error = new Error(`El movimiento ${movement.comprobante || id} no tiene saldo pendiente.`);
+        error.statusCode = 409;
+        throw error;
+      }
+      return {
+        movementId: id,
+        fecha: movement.fecha,
+        vencimiento: movement.vencimiento,
+        concepto: movement.concepto,
+        comprobante: movement.comprobante,
+        operacion: movement.operacion,
+        contraparte: movement.contraparte || movement.vendedor || movement.comprador || "",
+        importe: Math.abs(parseMoney(movement.importePendiente ?? movement.importe))
+      };
+    });
+    const now = new Date().toISOString();
+    const saved = {
+      id: normalizeText(input.id) || `FCOM-${Date.now()}`,
+      cliente,
+      numero,
+      fecha: input.fecha ? formatDateForDisplay(input.fecha) : formatDateLocal(new Date()),
+      periodoDesde: input.periodoDesde ? formatDateForDisplay(input.periodoDesde) : normalizeText(input.periodoDesde),
+      periodoHasta: input.periodoHasta ? formatDateForDisplay(input.periodoHasta) : normalizeText(input.periodoHasta),
+      observacion: normalizeText(input.observacion),
+      movimientos: selected,
+      total: selected.reduce((sum, item) => sum + parseMoney(item.importe), 0),
+      creadoEn: now,
+      actualizadoEn: now
+    };
+    data.commissionInvoices = asArray(data.commissionInvoices);
+    data.commissionInvoices.push(saved);
+    this.saveData(data);
+    return saved;
   }
 
   async getCajaDiaria() {
@@ -2395,6 +2493,7 @@ class BackupDataSource {
       operacion: normalizeText(input.operacion),
       movimientoId: normalizeText(input.movimientoId),
       pagoId: normalizeText(input.pagoId),
+      parte: normalizeText(input.parte),
       tipo: normalizeText(input.tipo || "Comprobante"),
       titulo: normalizeText(input.titulo || input.nombreOriginal || "Comprobante PDF"),
       observacion: normalizeText(input.observacion),
@@ -2716,6 +2815,7 @@ class PostgresJsonDataSource extends BackupDataSource {
   async saveLiquidacion(operationId, input) { return this.withRemoteData(() => super.saveLiquidacion(operationId, input), true); }
   async getOperaciones() { return this.withRemoteData(() => super.getOperaciones()); }
   async getCuentaCorrienteResumen() { return this.withRemoteData(() => super.getCuentaCorrienteResumen()); }
+  async saveCommissionInvoice(input) { return this.withRemoteData(() => super.saveCommissionInvoice(input), true); }
   async getCajaDiaria() { return this.withRemoteData(() => super.getCajaDiaria()); }
   async saveCajaDiaria(input) { return this.withRemoteData(() => super.saveCajaDiaria(input), true); }
   async deleteCajaDiaria(itemId) { return this.withRemoteData(() => super.deleteCajaDiaria(itemId), true); }
