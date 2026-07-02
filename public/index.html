@@ -1827,7 +1827,7 @@
           <div class="panel-head">
             <div>
               <h2>Liquidacion de comisionistas</h2>
-              <p class="subtle">Seleccione operaciones, aplique un porcentaje y genere un movimiento a pagar en cuenta corriente.</p>
+              <p class="subtle">Primero genere las comisiones que falten. Luego facture comisiones ya existentes sin duplicar cuenta corriente.</p>
             </div>
           </div>
           <div class="form-grid">
@@ -1843,6 +1843,23 @@
             <button type="button" class="primary-button" id="commissionist-generate">Generar cuenta corriente</button>
           </div>
           <p class="form-message" id="commissionist-message"></p>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Facturar comisiones del periodo</h2>
+              <p class="subtle">Asocia una factura emitida a comisiones pendientes ya creadas. No genera deuda nueva.</p>
+            </div>
+          </div>
+          <div class="form-grid">
+            <label>Numero de factura emitida<input id="commissionist-invoice-number" placeholder="Ej. F A-0001-00000012"></label>
+            <label>Fecha factura<input id="commissionist-invoice-date" type="date"></label>
+            <label class="span-2">Observacion<input id="commissionist-invoice-note" placeholder="Periodo, detalle interno o referencia"></label>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="primary-button" id="commissionist-invoice-generate">Registrar factura de comisiones</button>
+          </div>
+          <p class="form-message" id="commissionist-invoice-message"></p>
         </div>
         <div class="panel">
           <div class="panel-head">
@@ -1885,6 +1902,7 @@
               <thead>
                 <tr>
                   <th></th>
+                  <th>Facturar</th>
                   <th>Fecha</th>
                   <th>Origen</th>
                   <th>Operacion</th>
@@ -1902,6 +1920,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260701-compensacion-por-origen"></script>
+    <script src="/app.js?v=20260702-facturas-comisiones"></script>
   </body>
 </html>

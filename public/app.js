@@ -1597,15 +1597,16 @@ function commissionSplitTotals(rows) {
 }
 
 function currentAccountConceptText(movement, viewMode) {
-  if (viewMode !== "CONSIGNATARIA") return movement.concepto || "-";
+  const invoiceSuffix = movement.facturaComision ? ` | Factura comision: ${movement.facturaComision}` : "";
+  if (viewMode !== "CONSIGNATARIA") return `${movement.concepto || "-"}${invoiceSuffix}`;
   if (isConsigneeOwnCharge(movement)) {
-    return `Comision / diferencia pendiente de Gonzalo Espinosa${movement.contraparte ? ` - por ${movement.contraparte}` : ""}`;
+    return `Comision / diferencia pendiente de Gonzalo Espinosa${movement.contraparte ? ` - por ${movement.contraparte}` : ""}${invoiceSuffix}`;
   }
   if (isConsigneeInformationalDue(movement)) {
     const action = Number(movement.importe || 0) < 0 ? "La consignataria debe pagar a" : "La consignataria debe cobrar de";
-    return `${action} ${movement.cliente || "-"} - ${movement.concepto || "-"}`;
+    return `${action} ${movement.cliente || "-"} - ${movement.concepto || "-"}${invoiceSuffix}`;
   }
-  return movement.concepto || "-";
+  return `${movement.concepto || "-"}${invoiceSuffix}`;
 }
 
 function movementCommissionistKey(movement) {
@@ -1713,8 +1714,12 @@ function commissionistStatusRows(commissionistName = $("#commissionist-client")?
   if (!key || !state.cuenta) return [];
   return (state.cuenta.movimientos || [])
     .filter((movement) => !movement.paymentId)
-    .filter((movement) => normalizeSearch(movement.cliente) === key || normalizeSearch(commissionistDetailFromObservation(movement.observacion)?.comisionista) === key)
-    .filter((movement) => normalizeSearch(movement.concepto).includes("comisionista") || commissionistDetailFromObservation(movement.observacion))
+    .filter((movement) => commissionistAccountMovementApplies(movement, commissionistName)
+      || normalizeSearch(movement.cliente) === key
+      || normalizeSearch(commissionistDetailFromObservation(movement.observacion)?.comisionista) === key)
+    .filter((movement) => commissionistAccountMovementApplies(movement, commissionistName)
+      || normalizeSearch(movement.concepto).includes("comisionista")
+      || commissionistDetailFromObservation(movement.observacion))
     .map((movement) => {
       const detail = commissionistDetailFromObservation(movement.observacion);
       const subtotals = detail ? commissionistDetailSubtotals(detail.items || []) : {
@@ -1726,13 +1731,15 @@ function commissionistStatusRows(commissionistName = $("#commissionist-client")?
       const paid = Math.max(total - Math.abs(pending), 0);
       return {
         fecha: movement.fecha || movement.vencimiento || "",
-        comprobante: movement.comprobante || (detail?.periodoDesde && detail?.periodoHasta ? `${detail.periodoDesde} / ${detail.periodoHasta}` : "-"),
+        comprobante: movement.facturaComision
+          ? `${movement.facturaComision} (${movement.comprobante || "-"})`
+          : movement.comprobante || (detail?.periodoDesde && detail?.periodoHasta ? `${detail.periodoDesde} / ${detail.periodoHasta}` : "-"),
         facturado: Number(subtotals.facturado.comision || 0),
         efectivo: Number(subtotals.efectivo.comision || 0),
         total,
         pending: Math.abs(pending),
         paid,
-        estado: movement.estado || "PENDIENTE"
+        estado: movement.facturaComision ? `FACTURADO - ${movement.estado || "PENDIENTE"}` : `SIN FACTURAR - ${movement.estado || "PENDIENTE"}`
       };
     })
     .sort((a, b) => (parseDisplayDate(b.fecha)?.getTime() || 0) - (parseDisplayDate(a.fecha)?.getTime() || 0));
@@ -3298,19 +3305,76 @@ function liquidatedCommissionistItemIds(commissionist) {
   return ids;
 }
 
+function commissionistAccountMovementApplies(movement, commissionist) {
+  const key = normalizeSearch(commissionist);
+  if (!key || movement.paymentId) return false;
+  const status = String(movement.estado || "").toUpperCase();
+  if (status === "ANULADO") return false;
+  const origin = String(movement.origen || "").toUpperCase();
+  const concept = normalizeSearch(movement.concepto || "");
+  const isCommissionLike = origin === "CONSIGNATARIA"
+    || origin === "COMISION"
+    || concept.includes("comision");
+  if (!isCommissionLike) return false;
+  return normalizeSearch(movement.cliente) === key
+    || normalizeSearch(movement.consignataria) === key
+    || normalizeSearch(movement.comisionista) === key;
+}
+
+function commissionistAccountOperationIds(commissionist) {
+  return new Set((state.cuenta?.movimientos || [])
+    .filter((movement) => commissionistAccountMovementApplies(movement, commissionist))
+    .map((movement) => String(movement.operacion || ""))
+    .filter(Boolean));
+}
+
+function pendingCommissionistAccountRows(commissionist, from, to, alreadyLiquidatedIds) {
+  return (state.cuenta?.movimientos || [])
+    .filter((movement) => commissionistAccountMovementApplies(movement, commissionist))
+    .filter((movement) => !movement.facturaComisionId && !movement.facturaComision)
+    .filter((movement) => !alreadyLiquidatedIds.has(String(movement.id)))
+    .filter((movement) => !["IMPUTADO", "ANULADO"].includes(String(movement.estado || "").toUpperCase()))
+    .filter((movement) => Math.abs(signedPendingAmount(movement)) > 0.01)
+    .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
+    .map((movement) => {
+      const amount = Math.abs(signedPendingAmount(movement));
+      return {
+        id: movement.id,
+        fecha: movement.fecha || movement.vencimiento,
+        origen: "Comision pendiente CC",
+        vendedor: movement.contraparte || movement.vendedor || movement.cliente,
+        comprador: movement.comprador || movement.concepto || "-",
+        comprobante: movement.comprobante || "",
+        base: amount,
+        porcentaje: 0,
+        comisionManual: amount,
+        selected: false,
+        invoiceSelected: true,
+        invoiceCandidate: true,
+        noGenerate: true,
+        note: "Lista para facturar"
+      };
+    });
+}
+
 function renderCommissionistRows() {
   const percent = percentValue("#commissionist-percent");
-  const selectedRows = state.commissionistRows.filter((row) => row.selected);
+  const selectedRows = state.commissionistRows.filter((row) => row.selected && !row.noGenerate);
+  const invoiceRows = state.commissionistRows.filter((row) => row.invoiceSelected && row.invoiceCandidate);
   const selectedBase = selectedRows.reduce((sum, row) => sum + Number(row.base || 0), 0);
   const selectedCommission = selectedRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
+  const invoiceTotal = invoiceRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
   $("#commissionist-summary").textContent = selectedRows.length
     ? `${selectedRows.length} item/s - importe bruto ${moneyValue(selectedBase)} - comision ${moneyValue(selectedCommission)}`
-    : state.commissionistRows.length ? "Seleccione operaciones para liquidar." : "Sin operaciones seleccionadas";
+    : invoiceRows.length
+      ? `${invoiceRows.length} comision/es listas para facturar - total ${moneyValue(invoiceTotal)}`
+      : state.commissionistRows.length ? "Seleccione operaciones para liquidar o facturar." : "Sin operaciones seleccionadas";
   $("#commissionist-body").innerHTML = state.commissionistRows.length
     ? state.commissionistRows.map((row) => {
         const commission = commissionistRowCommission(row, percent);
         return `<tr>
-          <td><input type="checkbox" data-commissionist-row="${escapeHtml(row.id)}" ${row.selected ? "checked" : ""}></td>
+          <td><input type="checkbox" data-commissionist-row="${escapeHtml(row.id)}" ${row.selected ? "checked" : ""} ${row.noGenerate ? "disabled" : ""}></td>
+          <td><input type="checkbox" data-commissionist-invoice-row="${escapeHtml(row.id)}" ${row.invoiceSelected ? "checked" : ""} ${row.invoiceCandidate ? "" : "disabled"}></td>
           <td>${escapeHtml(row.fecha || "-")}</td>
           <td>${escapeHtml(row.origen || "-")}</td>
           <td>${escapeHtml(row.id)}</td>
@@ -3318,10 +3382,10 @@ function renderCommissionistRows() {
           <td>${escapeHtml(row.comprador || "-")}</td>
           <td>${escapeHtml(row.comprobante || "-")}</td>
           <td>${moneyValue(row.base)}</td>
-          <td>${moneyValue(commission)}</td>
+          <td>${moneyValue(commission)}${row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="9">Busque operaciones y movimientos externos por periodo.</td></tr>`;
+    : `<tr><td colspan="10">Busque operaciones y movimientos externos por periodo.</td></tr>`;
 }
 
 function commissionistRowCommission(row, fallbackPercent) {
@@ -3342,6 +3406,7 @@ async function loadCommissionistOperations() {
   $("#commissionist-message").textContent = "Buscando operaciones...";
   $("#commissionist-message").className = "form-message";
   const alreadyLiquidatedIds = liquidatedCommissionistItemIds(selectedCommissionist);
+  const accountCommissionOperationIds = commissionistAccountOperationIds(selectedCommissionist);
   const candidates = state.operaciones
     .filter((operation) => operation.estado !== "ANULADA")
     .filter((operation) => commissionistDateInRange(operation, from, to));
@@ -3350,6 +3415,7 @@ async function loadCommissionistOperations() {
     .filter(Boolean)
     .filter((detail) => detail.liquidacion)
     .filter((detail) => !alreadyLiquidatedIds.has(String(detail.id)))
+    .filter((detail) => !accountCommissionOperationIds.has(String(detail.id)))
     .filter((detail) => operationCommissionistKeys(detail).includes(normalizeSearch(selectedCommissionist)))
     .map((detail) => {
       const liq = detail.liquidacion || {};
@@ -3385,7 +3451,8 @@ async function loadCommissionistOperations() {
       selected: true
     }))
     .filter((row) => Number(row.base || 0) > 0);
-  state.commissionistRows = [...state.commissionistRows, ...externalRows]
+  const accountRows = pendingCommissionistAccountRows(selectedCommissionist, from, to, alreadyLiquidatedIds);
+  state.commissionistRows = [...state.commissionistRows, ...accountRows, ...externalRows]
     .sort((a, b) => (parseDisplayDate(a.fecha)?.getTime() || 0) - (parseDisplayDate(b.fecha)?.getTime() || 0));
   renderCommissionistRows();
   $("#commissionist-message").textContent = state.commissionistRows.length
@@ -3397,7 +3464,7 @@ async function loadCommissionistOperations() {
 async function generateCommissionistMovement() {
   const client = $("#commissionist-client").value.trim();
   const percent = percentValue("#commissionist-percent");
-  const selected = state.commissionistRows.filter((row) => row.selected);
+  const selected = state.commissionistRows.filter((row) => row.selected && !row.noGenerate);
   const base = selected.reduce((sum, row) => sum + Number(row.base || 0), 0);
   const amount = selected.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
   if (!client || !selected.length || !amount) {
@@ -3449,6 +3516,42 @@ async function generateCommissionistMovement() {
   } catch (error) {
     $("#commissionist-message").textContent = error.message;
     $("#commissionist-message").className = "form-message error";
+  }
+}
+
+async function generateCommissionistInvoice() {
+  const client = $("#commissionist-client").value.trim();
+  const number = $("#commissionist-invoice-number").value.trim();
+  const selected = state.commissionistRows.filter((row) => row.invoiceSelected && row.invoiceCandidate);
+  if (!client || !number || !selected.length) {
+    $("#commissionist-invoice-message").textContent = "Falta comisionista, numero de factura o comisiones seleccionadas.";
+    $("#commissionist-invoice-message").className = "form-message error";
+    return;
+  }
+  try {
+    const response = await fetchJson("/api/comisionistas/facturas", {
+      method: "POST",
+      body: JSON.stringify({
+        cliente: client,
+        numero: number,
+        fecha: $("#commissionist-invoice-date").value || new Date().toISOString().slice(0, 10),
+        periodoDesde: $("#commissionist-from").value,
+        periodoHasta: $("#commissionist-to").value,
+        observacion: $("#commissionist-invoice-note").value,
+        movimientos: selected.map((row) => ({ movementId: row.id }))
+      })
+    });
+    await reloadCurrentAccount();
+    renderCommissionistStatus();
+    await loadCommissionistOperations();
+    const saved = response.item || {};
+    $("#commissionist-invoice-message").textContent = `Factura registrada: ${saved.numero || number} por ${moneyValue(saved.total || 0)}. No se duplico cuenta corriente.`;
+    $("#commissionist-invoice-message").className = "form-message ok";
+    $("#commissionist-invoice-number").value = "";
+    $("#commissionist-invoice-note").value = "";
+  } catch (error) {
+    $("#commissionist-invoice-message").textContent = error.message;
+    $("#commissionist-invoice-message").className = "form-message error";
   }
 }
 
@@ -5889,14 +5992,22 @@ async function init() {
   });
   $("#commissionist-load").addEventListener("click", loadCommissionistOperations);
   $("#commissionist-generate").addEventListener("click", generateCommissionistMovement);
+  $("#commissionist-invoice-generate").addEventListener("click", generateCommissionistInvoice);
   $("#commissionist-percent").addEventListener("input", renderCommissionistRows);
   $("#commissionist-client").addEventListener("input", renderCommissionistStatus);
   $("#commissionist-client").addEventListener("change", renderCommissionistStatus);
   $("#commissionist-body").addEventListener("change", (event) => {
     const checkbox = event.target.closest("[data-commissionist-row]");
-    if (!checkbox) return;
-    const row = state.commissionistRows.find((item) => String(item.id) === String(checkbox.dataset.commissionistRow));
-    if (row) row.selected = checkbox.checked;
+    const invoiceCheckbox = event.target.closest("[data-commissionist-invoice-row]");
+    if (!checkbox && !invoiceCheckbox) return;
+    if (checkbox) {
+      const row = state.commissionistRows.find((item) => String(item.id) === String(checkbox.dataset.commissionistRow));
+      if (row && !row.noGenerate) row.selected = checkbox.checked;
+    }
+    if (invoiceCheckbox) {
+      const row = state.commissionistRows.find((item) => String(item.id) === String(invoiceCheckbox.dataset.commissionistInvoiceRow));
+      if (row && row.invoiceCandidate) row.invoiceSelected = invoiceCheckbox.checked;
+    }
     renderCommissionistRows();
   });
 
@@ -6352,6 +6463,7 @@ async function init() {
   $("#commissionist-from").value = today.slice(0, 8) + "01";
   $("#commissionist-to").value = today;
   $("#commissionist-due").value = today;
+  $("#commissionist-invoice-date").value = today;
   renderOperationSearch();
   renderRealCommissionSummary();
   renderCommissionistStatus();
