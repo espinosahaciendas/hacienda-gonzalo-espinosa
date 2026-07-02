@@ -439,6 +439,7 @@ function pushMovement(list, movement) {
     vendedor: movement.vendedor || "",
     comprador: movement.comprador || "",
     consignataria: movement.consignataria || "",
+    liquidacionConsignatariaA: movement.liquidacionConsignatariaA || "",
     tipoOperacion: movement.tipoOperacion || "",
     destinoOperacion: movement.destinoOperacion || "",
     consignatariaCuenta: Boolean(movement.consignatariaCuenta),
@@ -749,6 +750,7 @@ function buildOperationAccountMovements(operation) {
       parte: "CONSIGNATARIA",
       contraparte: consigneeCounterpart,
       consignataria: operationConsignee,
+      liquidacionConsignatariaA: settledByConsignee,
       consignatariaCuenta: true,
       importe: Math.abs(totalCobrarConsignataria),
       estado: "PENDIENTE"
