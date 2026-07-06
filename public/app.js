@@ -4868,9 +4868,43 @@ function renderLiquidationDetail(detail) {
           <td><input class="liq-detail-input money-input" data-detail-field="importeNeto" inputmode="decimal" value="${escapeHtml(moneyValue(item.importeNeto || 0))}"></td>
           <td><input class="liq-detail-input money-input" data-detail-field="iva" inputmode="decimal" value="${escapeHtml(moneyValue(item.iva || 0))}"></td>
           <td data-detail-total>${moneyValue(item.importeBruto || Number(item.importeNeto || 0) + Number(item.iva || 0))}</td>
+          <td class="actions-cell"><button type="button" class="small-button" data-liq-detail-copy>Duplicar</button> <button type="button" class="small-button danger-button" data-liq-detail-remove>Eliminar</button></td>
         </tr>
       `).join("")
-    : `<tr><td colspan="6">Sin detalle para liquidar.</td></tr>`;
+    : `<tr><td colspan="7">Sin detalle para liquidar.</td></tr>`;
+}
+
+function liquidationDetailRowValues(row) {
+  const get = (field) => {
+    const input = row?.querySelector(`[data-detail-field="${field}"]`);
+    return input ? input.value : "";
+  };
+  const importeNeto = parseMoneyInput(get("importeNeto"));
+  const iva = parseMoneyInput(get("iva"));
+  return {
+    cantidad: Number(get("cantidad") || 0),
+    categoria: get("categoria"),
+    precioCabeza: parseMoneyInput(get("precioCabeza")),
+    importeNeto,
+    iva,
+    importeBruto: importeNeto + iva
+  };
+}
+
+function appendLiquidationDetailLine(source = {}) {
+  const rows = collectLiquidationDetail();
+  rows.push({
+    cantidad: Number(source.cantidad || 0),
+    categoria: source.categoria || "",
+    precioCabeza: Number(source.precioCabeza || 0),
+    importeNeto: Number(source.importeNeto || 0),
+    iva: Number(source.iva || 0),
+    importeBruto: Number(source.importeBruto || Number(source.importeNeto || 0) + Number(source.iva || 0))
+  });
+  renderLiquidationDetail(rows);
+  const lastRow = $("#liq-detail-body tr:last-child");
+  lastRow?.querySelector('[data-detail-field="categoria"]')?.focus();
+  renderReport();
 }
 
 function recalculateLiquidationDetailRow(input) {
@@ -4907,22 +4941,9 @@ function setMoneyInputValue(input, value) {
 }
 
 function collectLiquidationDetail() {
-  return Array.from($("#liq-detail-body").querySelectorAll("tr")).map((row) => {
-    const get = (field) => {
-      const input = row.querySelector(`[data-detail-field="${field}"]`);
-      return input ? input.value : "";
-    };
-    const importeNeto = parseMoneyInput(get("importeNeto"));
-    const iva = parseMoneyInput(get("iva"));
-    return {
-      cantidad: Number(get("cantidad") || 0),
-      categoria: get("categoria"),
-      precioCabeza: parseMoneyInput(get("precioCabeza")),
-      importeNeto,
-      iva,
-      importeBruto: importeNeto + iva
-    };
-  }).filter((item) => item.categoria || item.cantidad || item.importeNeto);
+  return Array.from($("#liq-detail-body").querySelectorAll("tr"))
+    .map((row) => liquidationDetailRowValues(row))
+    .filter((item) => item.categoria || item.cantidad || item.importeNeto);
 }
 
 function setOperationModeNew() {
@@ -6571,6 +6592,22 @@ async function init() {
   });
   $("#liq-rebuild-detail").addEventListener("click", () => {
     renderLiquidationDetail(buildDetailFromSaleLines());
+    renderReport();
+  });
+  $("#liq-add-detail-line").addEventListener("click", () => appendLiquidationDetailLine());
+  $("#liq-detail-body").addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-liq-detail-remove]");
+    const copyButton = event.target.closest("[data-liq-detail-copy]");
+    if (!removeButton && !copyButton) return;
+    const row = event.target.closest("tr");
+    if (copyButton) {
+      appendLiquidationDetailLine(liquidationDetailRowValues(row));
+      return;
+    }
+    row?.remove();
+    if (!$("#liq-detail-body").querySelector("tr")) {
+      $("#liq-detail-body").innerHTML = `<tr><td colspan="7">Sin detalle para liquidar.</td></tr>`;
+    }
     renderReport();
   });
   $("#liq-detail-body").addEventListener("input", renderReport);

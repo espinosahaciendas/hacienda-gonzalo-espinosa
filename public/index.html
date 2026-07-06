@@ -1151,7 +1151,10 @@
                 <div class="party-block">
                   <div class="panel-head">
                     <h2>Detalle para liquidar</h2>
-                    <button type="button" class="ghost-button" id="liq-rebuild-detail">Recalcular detalle</button>
+                    <div class="button-row">
+                      <button type="button" class="ghost-button" id="liq-add-detail-line">Agregar linea</button>
+                      <button type="button" class="ghost-button" id="liq-rebuild-detail">Recalcular detalle</button>
+                    </div>
                   </div>
                   <p class="subtle">Sale del importe facturado comun. Sirve para informar al comprador como tiene que salir facturado al vendedor.</p>
                   <div class="table-wrap compact-table">
@@ -1164,6 +1167,7 @@
                           <th>Neto</th>
                           <th>IVA</th>
                           <th>Bruto</th>
+                          <th>Accion</th>
                         </tr>
                       </thead>
                       <tbody id="liq-detail-body"></tbody>
@@ -1920,6 +1924,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260706-factura-comision-montaldo-ajuste"></script>
+    <script src="/app.js?v=20260706-detalle-liquidar-lineas-manuales"></script>
   </body>
 </html>
