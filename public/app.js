@@ -206,7 +206,7 @@ async function reloadAppData() {
 
   state.clientes = clientes.items || [];
   state.operaciones = operaciones.items || [];
-  state.cuenta = cuenta;
+  state.cuenta = applyCommissionInvoiceMarks(cuenta);
   state.categorias = categorias.items || [];
   state.tabRules = tabs.items || [];
   state.caja = caja || { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 };
@@ -1569,11 +1569,41 @@ function commissionKind(movement) {
   return text.includes("efectivo") ? "efectivo" : "facturado";
 }
 
+function sameCommissionInvoiceMovement(movement, item, invoice) {
+  if (!movement || !item) return false;
+  if (String(movement.id || "") === String(item.movementId || item.id || "")) return true;
+  if (invoice?.cliente && normalizeAccountName(movement.cliente) !== normalizeAccountName(invoice.cliente)) return false;
+  const itemAmount = Number(item.importe || 0);
+  const movementAmount = Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
+  if (itemAmount && Math.abs(Math.abs(movementAmount) - Math.abs(itemAmount)) > 0.01) return false;
+  const sameOperation = item.operacion && movement.operacion && String(item.operacion) === String(movement.operacion);
+  const sameReceipt = item.comprobante && movement.comprobante && normalizeSearch(item.comprobante) === normalizeSearch(movement.comprobante);
+  const sameConcept = item.concepto && movement.concepto && normalizeSearch(item.concepto) === normalizeSearch(movement.concepto);
+  return Boolean((sameOperation && sameReceipt) || (sameOperation && sameConcept) || (sameReceipt && sameConcept));
+}
+
+function applyCommissionInvoiceMarks(cuenta) {
+  if (!cuenta || !Array.isArray(cuenta.movimientos)) return cuenta;
+  const invoices = Array.isArray(cuenta.commissionInvoices) ? cuenta.commissionInvoices.filter((invoice) => !invoice.anulado) : [];
+  invoices.forEach((invoice) => {
+    (invoice.movimientos || []).forEach((item) => {
+      const movement = cuenta.movimientos.find((candidate) => sameCommissionInvoiceMovement(candidate, item, invoice));
+      if (!movement) return;
+      movement.facturaComisionId = invoice.id;
+      movement.facturaComision = invoice.numero;
+      movement.fechaFacturaComision = invoice.fecha;
+      movement.estadoFacturacionComision = "FACTURADO";
+    });
+  });
+  return cuenta;
+}
+
 function commissionSplitSummary(movements, viewMode = "CLIENTE") {
   const byClient = new Map();
   (movements || []).forEach((movement) => {
     const status = String(movement?.estado || "").toUpperCase();
     if (movement?.paymentId || status === "IMPUTADO" || status === "ANULADO") return;
+    if (movement?.facturaComisionId || movement?.facturaComision) return;
     if (!isCommissionPendingMovement(movement, viewMode)) return;
     const client = movement?.cliente || "Sin cliente";
     const row = byClient.get(client) || { cliente: client, facturado: 0, efectivo: 0, total: 0 };
@@ -1821,6 +1851,7 @@ function renderCuentaCorriente() {
   });
   const balance = viewMode === "CONSIGNATARIA"
     ? movements
+      .filter((movement) => !movement.facturaComisionId && !movement.facturaComision)
       .filter((movement) => isConsigneeOwnCharge(movement) || movementCommissionistAccountKey(movement))
       .reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
     : movements.reduce((sum, movement) => sum + Number(movement.importe || 0), 0);
@@ -1996,7 +2027,7 @@ function populateCommissionistClients() {
 }
 
 async function reloadCurrentAccount() {
-  state.cuenta = await fetchJson("/api/cuenta-corriente/resumen");
+  state.cuenta = applyCommissionInvoiceMarks(await fetchJson("/api/cuenta-corriente/resumen"));
   renderMetrics();
   renderCuentaCorriente();
 }
@@ -2370,6 +2401,50 @@ function getPaymentPendingMovements(clientSelector = "#cc-payment-client", typeS
   });
 }
 
+function commissionInvoicePaymentGroups(movements, type = $("#cc-payment-type")?.value || "") {
+  if (type !== "COBRO") return [];
+  const groups = new Map();
+  (movements || []).forEach((movement) => {
+    if (!movement.facturaComisionId && !movement.facturaComision) return;
+    const pending = Number(movement.importePendiente ?? Math.abs(movement.importe || 0));
+    const signedPending = Math.sign(Number(movement.importe || 0)) * pending;
+    if (signedPending <= 0.01) return;
+    const id = movement.facturaComisionId || movement.facturaComision;
+    if (!groups.has(id)) {
+      groups.set(id, {
+        id,
+        numero: movement.facturaComision || id,
+        fecha: movement.fechaFacturaComision || movement.fecha || "",
+        vencimiento: movement.vencimiento || "",
+        cliente: movement.cliente || "",
+        comprobantes: new Set(),
+        operaciones: new Set(),
+        items: [],
+        total: 0
+      });
+    }
+    const group = groups.get(id);
+    if (movement.comprobante) group.comprobantes.add(movement.comprobante);
+    if (movement.operacion) group.operaciones.add(movement.operacion);
+    group.items.push({
+      movementId: movement.id,
+      pending,
+      signedPending,
+      concepto: movement.concepto || "",
+      comprobante: movement.comprobante || ""
+    });
+    group.total += pending;
+    if (movement.vencimiento && (!group.vencimiento || (parseDisplayDate(movement.vencimiento)?.getTime() || 0) < (parseDisplayDate(group.vencimiento)?.getTime() || 0))) {
+      group.vencimiento = movement.vencimiento;
+    }
+  });
+  return Array.from(groups.values()).sort((a, b) => String(a.numero).localeCompare(String(b.numero), "es"));
+}
+
+function commissionInvoiceGroupedMovementIds(groups) {
+  return new Set((groups || []).flatMap((group) => group.items.map((item) => String(item.movementId))));
+}
+
 function isExpenseOrDiscountMovement(movement) {
   const origin = String(movement?.origen || "").toUpperCase();
   const text = normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.observacion || ""}`);
@@ -2400,13 +2475,26 @@ function renderCurrentAccountCounterpartyImputations() {
 
 function renderCurrentAccountImputations() {
   const movements = getPaymentPendingMovements();
-  $("#cc-imputation-summary").textContent = movements.length ? `${movements.length} pendiente/s disponibles` : "Sin pendientes para imputar";
-  $("#cc-imputation-body").innerHTML = movements.length
-    ? movements.map((movement) => {
+  const invoiceGroups = commissionInvoicePaymentGroups(movements);
+  const groupedIds = commissionInvoiceGroupedMovementIds(invoiceGroups);
+  const visibleMovements = movements.filter((movement) => !groupedIds.has(String(movement.id)));
+  const availableCount = invoiceGroups.length + visibleMovements.length;
+  $("#cc-imputation-summary").textContent = availableCount ? `${availableCount} pendiente/s disponibles` : "Sin pendientes para imputar";
+  const invoiceRows = invoiceGroups.map((group) => {
+    const items = encodeURIComponent(JSON.stringify(group.items));
+    const detail = [
+      Array.from(group.comprobantes).filter(Boolean).join(" / "),
+      Array.from(group.operaciones).filter(Boolean).join(" / ")
+    ].filter(Boolean).join(" - ");
+    return `<tr class="cc-detail-row"><td><input type="checkbox" data-cc-impute-group="${escapeHtml(group.id)}" data-cc-group-items="${items}" data-cc-pending="${group.total}" data-cc-signed-pending="${group.total}" data-cc-concepto="${escapeHtml(`Factura comision ${group.numero}`)}" data-cc-comprobante="${escapeHtml(group.numero)}"></td><td>${escapeHtml(group.vencimiento || group.fecha || "-")}</td><td>Factura de comisiones ${escapeHtml(group.numero)}${detail ? `<br><small>${escapeHtml(detail)}</small>` : ""}</td><td>${escapeHtml(group.numero || "-")}</td><td>${moneyValue(group.total)}</td></tr>`;
+  }).join("");
+  const movementRows = visibleMovements.map((movement) => {
         const pending = Number(movement.importePendiente ?? Math.abs(movement.importe));
         const signedPending = Math.sign(Number(movement.importe || 0)) * pending;
         return `<tr><td><input type="checkbox" data-cc-impute="${escapeHtml(movement.id)}" data-cc-pending="${pending}" data-cc-signed-pending="${signedPending}" data-cc-concepto="${escapeHtml(movement.concepto || "")}" data-cc-comprobante="${escapeHtml(movement.comprobante || "")}"></td><td>${escapeHtml(movement.vencimiento || "-")}</td><td>${escapeHtml(movement.concepto || "-")}</td><td>${escapeHtml(movement.comprobante || "-")}</td><td>${moneyValue(pending)}</td></tr>`;
-      }).join("")
+      }).join("");
+  $("#cc-imputation-body").innerHTML = availableCount
+    ? `${invoiceRows}${movementRows}`
     : `<tr><td colspan="5">Sin pendientes para imputar.</td></tr>`;
 }
 
@@ -2423,14 +2511,14 @@ function updateCurrentAccountImputationSummary({ selector, summarySelector, avai
 
 function refreshPrimaryImputationSummary() {
   const available = getPaymentPendingMovements().length;
-  const selected = $all("[data-cc-impute]:checked");
+  const selected = $all("[data-cc-impute]:checked, [data-cc-impute-group]:checked");
   const signedTotal = selected.reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
   const positiveTotal = selected
     .filter((item) => Number(item.dataset.ccSignedPending || 0) > 0)
     .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccPending || 0), 0);
   const discountOnly = $("#cc-discount-only")?.checked;
   updateCurrentAccountImputationSummary({
-    selector: "[data-cc-impute]:checked",
+    selector: "[data-cc-impute]:checked, [data-cc-impute-group]:checked",
     summarySelector: "#cc-imputation-summary",
     availableText: available ? `${available} pendiente/s disponibles` : "Sin pendientes para imputar",
     updatePaymentAmount: true
@@ -3213,7 +3301,7 @@ function exportCurrentAccountCalendar() {
 async function saveCurrentAccountPayment(printReceipt = false) {
   try {
     const amount = numberValue("#cc-payment-amount");
-    const selectedSignedTotal = $all("[data-cc-impute]:checked")
+    const selectedSignedTotal = $all("[data-cc-impute]:checked, [data-cc-impute-group]:checked")
       .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
     const paymentType = $("#cc-payment-type").value;
     const compensationOrigin = paymentType === "COMPENSACION" ? selectedCompensationOrigin() : null;
@@ -3231,7 +3319,7 @@ async function saveCurrentAccountPayment(printReceipt = false) {
         compensationOriginId: compensationOrigin?.id,
         compensationOriginLabel: compensationOrigin?.label,
         instrumentos: currentPaymentInstruments,
-        imputaciones: collectSelectedCurrentAccountImputations("[data-cc-impute]:checked", amount, paymentType),
+        imputaciones: collectSelectedCurrentAccountImputations("[data-cc-impute]:checked, [data-cc-impute-group]:checked", amount, paymentType),
         contrapartida: $("#cc-counterparty-enabled").checked ? {
           tipo: $("#cc-counterparty-type").value,
           cliente: $("#cc-counterparty-client").value,
@@ -3607,11 +3695,24 @@ async function generateCommissionistInvoice() {
 
 function collectSelectedCurrentAccountImputations(selector, availableAmount, paymentType = "") {
   const selected = $all(selector);
-  const rows = selected.map((checkbox) => ({
-    movementId: checkbox.dataset.ccImpute || checkbox.dataset.ccCounterpartyImpute,
-    pending: Number(checkbox.dataset.ccPending || 0),
-    signedPending: Number(checkbox.dataset.ccSignedPending || 0)
-  })).filter((item) => item.movementId && item.pending > 0);
+  const rows = selected.flatMap((checkbox) => {
+    if (checkbox.dataset.ccGroupItems) {
+      try {
+        return JSON.parse(decodeURIComponent(checkbox.dataset.ccGroupItems)).map((item) => ({
+          movementId: item.movementId,
+          pending: Number(item.pending || 0),
+          signedPending: Number(item.signedPending || item.pending || 0)
+        }));
+      } catch (error) {
+        return [];
+      }
+    }
+    return [{
+      movementId: checkbox.dataset.ccImpute || checkbox.dataset.ccCounterpartyImpute,
+      pending: Number(checkbox.dataset.ccPending || 0),
+      signedPending: Number(checkbox.dataset.ccSignedPending || 0)
+    }];
+  }).filter((item) => item.movementId && item.pending > 0);
   const hasPositive = rows.some((item) => item.signedPending > 0);
   const hasNegative = rows.some((item) => item.signedPending < 0);
   if (paymentType === "COMPENSACION") return rows.map((item) => ({ movementId: item.movementId, importe: item.pending }));
@@ -5926,7 +6027,7 @@ async function applyClientMaintenance() {
     ]);
     state.clientes = clientes.items || [];
     state.operaciones = operaciones.items || [];
-    state.cuenta = cuenta;
+    state.cuenta = applyCommissionInvoiceMarks(cuenta);
     resetClientForm();
     renderClientes();
     renderOperaciones();
@@ -6227,7 +6328,7 @@ async function init() {
     renderCurrentAccountInstruments();
   });
   $("#cc-imputation-body").addEventListener("change", (event) => {
-    if (event.target.matches("[data-cc-impute]")) refreshPrimaryImputationSummary();
+    if (event.target.matches("[data-cc-impute], [data-cc-impute-group]")) refreshPrimaryImputationSummary();
   });
   $("#cc-discount-only").addEventListener("change", refreshPrimaryImputationSummary);
   $("#cc-counterparty-body").addEventListener("change", (event) => {
