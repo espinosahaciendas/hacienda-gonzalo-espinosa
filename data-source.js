@@ -2211,6 +2211,18 @@ class BackupDataSource {
       hectareas: parseMoney(input.hectareas),
       inicio: input.inicio ? formatDateForDisplay(input.inicio) : "",
       fin: input.fin ? formatDateForDisplay(input.fin) : "",
+      frecuencia: normalizeText(input.frecuencia || "MENSUAL").toUpperCase(),
+      vencimientoHabitual: normalizeText(input.vencimientoHabitual),
+      proximoVencimiento: input.proximoVencimiento ? formatDateForDisplay(input.proximoVencimiento) : "",
+      criterioCotizacion: normalizeText(input.criterioCotizacion),
+      facturadoModo: normalizeText(input.facturadoModo || "HECTAREAS").toUpperCase(),
+      facturadoValor: parseMoney(input.facturadoValor),
+      facturadoBase: normalizeText(input.facturadoBase || "KG_SOJA").toUpperCase(),
+      facturadoTasa: parseMoney(input.facturadoTasa),
+      efectivoModo: normalizeText(input.efectivoModo || "NINGUNO").toUpperCase(),
+      efectivoValor: parseMoney(input.efectivoValor),
+      efectivoBase: normalizeText(input.efectivoBase || "MISMA_FACTURADA").toUpperCase(),
+      efectivoTasa: parseMoney(input.efectivoTasa),
       condiciones: normalizeText(input.condiciones),
       creadoEn: input.creadoEn || new Date().toISOString(),
       actualizadoEn: new Date().toISOString()
@@ -2255,7 +2267,12 @@ class BackupDataSource {
     const totalKg = hectareas * kgPorHa;
     const totalTn = totalKg / 1000;
     const cotizacionPesos = moneda === "USD" ? cotizacion * tipoCambio : cotizacion;
-    const totalPesos = unidadCotizacion === "TN" ? totalTn * cotizacionPesos : totalKg * cotizacionPesos;
+    const calculatedTotal = unidadCotizacion === "TN" ? totalTn * cotizacionPesos : totalKg * cotizacionPesos;
+    const providedFacturado = parseMoney(input.facturadoTotal);
+    const providedEfectivo = parseMoney(input.efectivoTotal);
+    const totalPesos = providedFacturado || providedEfectivo
+      ? providedFacturado + providedEfectivo
+      : parseMoney(input.totalPesos) || calculatedTotal;
     const importeCuota = cuotas ? totalPesos / cuotas : totalPesos;
     return {
       id: normalizeText(input.id) || `ARR-${Date.now()}`,
@@ -2265,8 +2282,11 @@ class BackupDataSource {
       fecha: input.fecha ? formatDateForDisplay(input.fecha) : formatDateLocal(new Date()),
       periodoDesde: input.periodoDesde ? formatDateForDisplay(input.periodoDesde) : "",
       periodoHasta: input.periodoHasta ? formatDateForDisplay(input.periodoHasta) : "",
+      vencimiento: input.vencimiento ? formatDateForDisplay(input.vencimiento) : "",
+      proximoVencimiento: input.proximoVencimiento ? formatDateForDisplay(input.proximoVencimiento) : "",
       hectareas,
       cereal: normalizeText(input.cereal || "SOJA").toUpperCase(),
+      mercado: normalizeText(input.mercado),
       kgPorHa,
       unidadCotizacion,
       moneda,
@@ -2274,7 +2294,20 @@ class BackupDataSource {
       tipoCambio,
       cuotas,
       frecuencia: normalizeText(input.frecuencia || "MENSUAL").toUpperCase(),
+      vencimientoHabitual: normalizeText(input.vencimientoHabitual),
+      criterioCotizacion: normalizeText(input.criterioCotizacion),
       observaciones: normalizeText(input.observaciones),
+      cotizaciones: asArray(input.cotizaciones).map((item) => ({
+        id: normalizeText(item.id) || `COT-${Date.now()}`,
+        fecha: item.fecha ? formatDateForDisplay(item.fecha) : "",
+        mercado: normalizeText(item.mercado),
+        producto: normalizeText(item.producto),
+        cotizacion: parseMoney(item.cotizacion)
+      })),
+      facturadoDetalle: input.facturadoDetalle || {},
+      efectivoDetalle: input.efectivoDetalle || {},
+      facturadoTotal: parseMoney(input.facturadoTotal),
+      efectivoTotal: parseMoney(input.efectivoTotal),
       totalKg,
       totalTn,
       cotizacionPesos,
