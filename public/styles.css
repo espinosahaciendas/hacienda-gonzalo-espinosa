@@ -238,8 +238,9 @@ h2 {
 }
 
 .module-card-logo-wide {
-  height: 72px;
-  max-width: 320px;
+  height: 104px;
+  justify-self: center;
+  max-width: 430px;
   width: 100%;
 }
 
