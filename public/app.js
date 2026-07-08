@@ -5,6 +5,8 @@
   caja: { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 },
   cajaConciliaciones: { items: [], totalRecibido: 0, totalAplicado: 0, saldo: 0, abiertas: 0 },
   documentos: [],
+  fieldContracts: [],
+  fieldLeases: [],
   vista: "tablero",
   selectedClientId: "",
   showAllClients: false,
@@ -31,7 +33,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260701-compensacion-por-origen";
+const APP_BUILD = "20260707-campos-arrendamientos-base";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -120,6 +122,7 @@ function setView(view) {
   $all(".view").forEach((section) => section.classList.toggle("active", section.id === view));
   $all("nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   const titles = {
+    inicio: "Inicio",
     tablero: "Tablero",
     consulta: "Consulta movil",
     clientes: "Clientes",
@@ -129,7 +132,8 @@ function setView(view) {
     caja: "Caja",
     archivo: "Archivo documental",
     resumenes: "Resumenes",
-    comisionistas: "Comisionistas"
+    comisionistas: "Comisionistas",
+    campos: "Campos"
   };
   $("#view-title").textContent = titles[view] || "Sistema";
   if (!state.restoringHistory && previousView !== view) {
@@ -138,7 +142,7 @@ function setView(view) {
 }
 
 function preferredInitialView() {
-  return window.matchMedia && window.matchMedia("(max-width: 720px)").matches ? "consulta" : "tablero";
+  return "inicio";
 }
 
 function applyUserRole(user) {
@@ -193,7 +197,7 @@ async function logout() {
 }
 
 async function reloadAppData() {
-  const [clientes, operaciones, cuenta, categorias, tabs, caja, cajaConciliaciones, documentos] = await Promise.all([
+  const [clientes, operaciones, cuenta, categorias, tabs, caja, cajaConciliaciones, documentos, fieldContracts, fieldLeases] = await Promise.all([
     fetchJson("/api/clientes"),
     fetchJson("/api/operaciones"),
     fetchJson("/api/cuenta-corriente/resumen"),
@@ -201,7 +205,9 @@ async function reloadAppData() {
     fetchJson("/api/tabs"),
     fetchJson("/api/caja-diaria"),
     fetchJson("/api/caja-conciliaciones"),
-    fetchJson("/api/documentos")
+    fetchJson("/api/documentos"),
+    fetchJson("/api/campos/contratos"),
+    fetchJson("/api/campos/arrendamientos")
   ]);
 
   state.clientes = clientes.items || [];
@@ -212,11 +218,15 @@ async function reloadAppData() {
   state.caja = caja || { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 };
   state.cajaConciliaciones = cajaConciliaciones || { items: [], totalRecibido: 0, totalAplicado: 0, saldo: 0, abiertas: 0 };
   state.documentos = documentos.items || [];
+  state.fieldContracts = fieldContracts.items || [];
+  state.fieldLeases = fieldLeases.items || [];
 
   renderMetrics();
   renderCajaDiaria();
   renderCashReconciliations();
   renderDocumentos();
+  renderFieldContracts();
+  renderFieldLeases();
   renderClientes();
   renderOperaciones();
   renderCategories();
@@ -267,7 +277,8 @@ function documentPartyLabel(value) {
   if (key === "VENDEDOR") return "Vendedor / productor";
   if (key === "COMPRADOR") return "Comprador";
   if (key === "CONSIGNATARIA") return "Consignataria";
-  return "General / interno";
+  if (key === "INTERNO") return "Interno administrativo";
+  return "General / comun";
 }
 
 function movementDocumentParty(movement) {
@@ -293,11 +304,20 @@ function documentMatchesMovement(documento, movement) {
   const movementParty = movementDocumentParty(movement);
   const documentParty = normalizeSearch(documento.parte || "").toUpperCase();
   const sameClient = !documento.cliente || !movement.cliente || normalizeSearch(documento.cliente) === normalizeSearch(movement.cliente);
+  const commonDocument = !documentParty || documentParty === "GENERAL" || documentParty === "COMUN";
+  const internalDocument = documentParty === "INTERNO";
   if (movementId && (documentMovement === movementId || (documento.entidadTipo === "MOVIMIENTO" && documentEntity === movementId))) return true;
-  if (paymentId && (documentPayment === paymentId || (documento.entidadTipo === "PAGO" && documentEntity === paymentId))) return sameClient;
+  if (paymentId && (documentPayment === paymentId || (documento.entidadTipo === "PAGO" && documentEntity === paymentId))) {
+    if (internalDocument) return sameClient;
+    if (commonDocument) return true;
+    if (documentParty && movementParty && documentParty !== movementParty) return false;
+    return true;
+  }
   if (!operationId) return false;
   const sameOperation = documentOperation === operationId || (documento.entidadTipo === "OPERACION" && documentEntity === operationId);
   if (!sameOperation) return false;
+  if (internalDocument) return sameClient;
+  if (commonDocument) return true;
   if (documentParty && movementParty && documentParty !== movementParty) return false;
   return sameClient;
 }
@@ -995,6 +1015,304 @@ function printCashReconciliationSummaryReport() {
         <table><thead><tr class="out-title"><th>Fecha</th><th>Concepto</th><th>Destino</th><th>Importe</th></tr></thead><tbody>${summaryColumnRows(outcomes, "out")}</tbody><tfoot><tr><td colspan="3">Total egresos</td><td class="amount negative">${moneyValue(totalOut)}</td></tr><tr><td colspan="3" class="balance">Saldo del periodo</td><td class="amount balance">${moneyValue(balance)}</td></tr></tfoot></table>
       </section>
     </div>
+    <button onclick="window.print()">Imprimir / guardar PDF</button>
+  </body></html>`);
+  popup.document.close();
+}
+
+function setFieldLeaseMessage(message, type = "") {
+  const node = $("#field-lease-message");
+  if (!node) return;
+  node.textContent = message || "";
+  node.className = `form-message ${type}`.trim();
+}
+
+function setFieldContractMessage(message, type = "") {
+  const node = $("#field-contract-message");
+  if (!node) return;
+  node.textContent = message || "";
+  node.className = `form-message ${type}`.trim();
+}
+
+function fieldContractPayload() {
+  return {
+    id: $("#field-contract-id")?.value || "",
+    nombre: $("#field-contract-name")?.value || "",
+    arrendador: $("#field-contract-owner")?.value || "",
+    arrendatario: $("#field-contract-tenant")?.value || "",
+    campo: $("#field-contract-farm")?.value || "",
+    hectareas: parseMoneyInput($("#field-contract-hectares")?.value || 0),
+    inicio: $("#field-contract-start")?.value || "",
+    fin: $("#field-contract-end")?.value || "",
+    condiciones: $("#field-contract-notes")?.value || ""
+  };
+}
+
+function renderFieldContracts() {
+  if (!$("#field-contract-list")) return;
+  $("#field-contract-list").innerHTML = (state.fieldContracts || [])
+    .map((item) => {
+      const label = [item.nombre, item.arrendador, item.campo].filter(Boolean).join(" - ");
+      return `<option value="${escapeHtml(label)}" data-contract-id="${escapeHtml(item.id)}"></option>`;
+    }).join("");
+}
+
+function findFieldContractBySearch() {
+  const query = normalizeSearch($("#field-contract-search")?.value || "");
+  if (!query) return null;
+  return (state.fieldContracts || []).find((item) => {
+    const label = normalizeSearch([item.nombre, item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" "));
+    return label === query || label.includes(query);
+  }) || null;
+}
+
+function fillFieldContractForm(item) {
+  if (!item) return;
+  $("#field-contract-id").value = item.id || "";
+  $("#field-contract-search").value = [item.nombre, item.arrendador, item.campo].filter(Boolean).join(" - ");
+  $("#field-contract-name").value = item.nombre || "";
+  $("#field-contract-owner").value = item.arrendador || "";
+  $("#field-contract-tenant").value = item.arrendatario || "";
+  $("#field-contract-farm").value = item.campo || "";
+  $("#field-contract-hectares").value = item.hectareas || "";
+  $("#field-contract-start").value = formatDateForInput(item.inicio);
+  $("#field-contract-end").value = formatDateForInput(item.fin);
+  $("#field-contract-notes").value = item.condiciones || "";
+}
+
+function resetFieldContractForm() {
+  $("#field-contract-form")?.reset();
+  $("#field-contract-id").value = "";
+  setFieldContractMessage("");
+}
+
+function useFieldContractInCalculation(item = findFieldContractBySearch()) {
+  if (!item) {
+    setFieldContractMessage("Seleccione o guarde un contrato para usarlo en el calculo.", "error");
+    return;
+  }
+  fillFieldContractForm(item);
+  $("#field-lease-contract").value = item.nombre || "";
+  $("#field-lease-client").value = item.arrendador || "";
+  $("#field-lease-farm").value = item.campo || "";
+  $("#field-lease-hectares").value = item.hectareas || "";
+  $("#field-lease-from").value = formatDateForInput(item.inicio);
+  $("#field-lease-to").value = formatDateForInput(item.fin);
+  $("#field-lease-notes").value = item.condiciones || "";
+  updateFieldLeasePreview();
+  setFieldContractMessage("Contrato cargado en el calculo.", "ok");
+}
+
+async function saveFieldContract(event) {
+  event.preventDefault();
+  const payload = fieldContractPayload();
+  if (!payload.nombre && !payload.arrendador && !payload.campo) {
+    setFieldContractMessage("Cargue al menos referencia, arrendador o campo.", "error");
+    return;
+  }
+  try {
+    const saved = await fetchJson("/api/campos/contratos", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    state.fieldContracts = saved.items || [];
+    renderFieldContracts();
+    const current = state.fieldContracts.find((item) => item.id === (saved.item && saved.item.id));
+    if (current) fillFieldContractForm(current);
+    setFieldContractMessage("Contrato guardado correctamente.", "ok");
+  } catch (error) {
+    setFieldContractMessage(error.message, "error");
+  }
+}
+
+function fieldLeaseCurrentInput() {
+  const hectares = parseMoneyInput($("#field-lease-hectares")?.value || 0);
+  const kgPerHa = parseMoneyInput($("#field-lease-kg-ha")?.value || 0);
+  const price = parseMoneyInput($("#field-lease-price")?.value || 0);
+  const exchange = parseMoneyInput($("#field-lease-exchange")?.value || 0);
+  const currencyType = $("#field-lease-currency")?.value || "ARS";
+  const unit = $("#field-lease-unit")?.value || "KG";
+  const installments = Math.max(Number($("#field-lease-installments")?.value || 1), 1);
+  const totalKg = hectares * kgPerHa;
+  const totalTn = totalKg / 1000;
+  const priceInPesos = currencyType === "USD" ? price * exchange : price;
+  const totalPesos = unit === "TN" ? totalTn * priceInPesos : totalKg * priceInPesos;
+  const installmentAmount = installments ? totalPesos / installments : totalPesos;
+  return {
+    contrato: $("#field-lease-contract")?.value || "",
+    cliente: $("#field-lease-client")?.value || "",
+    campo: $("#field-lease-farm")?.value || "",
+    fecha: $("#field-lease-date")?.value || new Date().toISOString().slice(0, 10),
+    periodoDesde: $("#field-lease-from")?.value || "",
+    periodoHasta: $("#field-lease-to")?.value || "",
+    hectareas: hectares,
+    cereal: $("#field-lease-cereal")?.value || "SOJA",
+    kgPorHa: kgPerHa,
+    unidadCotizacion: unit,
+    moneda: currencyType,
+    cotizacion: price,
+    tipoCambio: exchange,
+    cuotas: installments,
+    frecuencia: $("#field-lease-frequency")?.value || "MENSUAL",
+    observaciones: $("#field-lease-notes")?.value || "",
+    totalKg,
+    totalTn,
+    cotizacionPesos: priceInPesos,
+    totalPesos,
+    importeCuota: installmentAmount,
+    detalleCuotas: buildFieldLeaseInstallments({
+      fecha: $("#field-lease-date")?.value || new Date().toISOString().slice(0, 10),
+      cuotas: installments,
+      frecuencia: $("#field-lease-frequency")?.value || "MENSUAL",
+      importeCuota: installmentAmount
+    })
+  };
+}
+
+function fieldLeaseFrequencyDays(frequency) {
+  const key = String(frequency || "").toUpperCase();
+  if (key === "TRIMESTRAL") return 90;
+  if (key === "SEMESTRAL") return 180;
+  if (key === "ANUAL") return 365;
+  return 30;
+}
+
+function buildFieldLeaseInstallments({ fecha, cuotas, frecuencia, importeCuota }) {
+  const count = Math.max(Number(cuotas || 1), 1);
+  const manual = String(frecuencia || "").toUpperCase() === "MANUAL";
+  const days = fieldLeaseFrequencyDays(frecuencia);
+  return Array.from({ length: count }, (_, index) => ({
+    numero: index + 1,
+    fecha: manual ? "-" : addDisplayDays(formatDateForInput(fecha) || new Date().toISOString().slice(0, 10), days * index),
+    importe: Number(importeCuota || 0)
+  }));
+}
+
+function updateFieldLeasePreview() {
+  if (!$("#field-lease-total")) return;
+  const calc = fieldLeaseCurrentInput();
+  $("#field-lease-total-cereal").textContent = `${plainNumberValue(calc.totalKg)} kg`;
+  $("#field-lease-total-tn").textContent = `${plainNumberValue(calc.totalTn)} tn`;
+  $("#field-lease-total").textContent = moneyValue(calc.totalPesos);
+  $("#field-lease-installment").textContent = moneyValue(calc.importeCuota);
+  $("#field-lease-installment-count").textContent = String(calc.cuotas || 1);
+}
+
+function resetFieldLeaseForm() {
+  $("#field-lease-form")?.reset();
+  const today = new Date().toISOString().slice(0, 10);
+  $("#field-lease-date").value = today;
+  $("#field-lease-installments").value = "1";
+  $("#field-lease-currency").value = "ARS";
+  $("#field-lease-unit").value = "KG";
+  updateFieldLeasePreview();
+  setFieldLeaseMessage("");
+}
+
+function renderFieldLeases() {
+  if (!$("#field-lease-body")) return;
+  const rows = state.fieldLeases || [];
+  $("#field-lease-summary").textContent = rows.length ? `${rows.length} calculo/s guardado/s.` : "Sin calculos cargados.";
+  $("#field-lease-body").innerHTML = rows.length
+    ? rows.map((item) => `<tr>
+        <td>${escapeHtml(item.fecha || "-")}</td>
+        <td>${escapeHtml(item.cliente || "-")}</td>
+        <td>${escapeHtml(item.campo || "-")}</td>
+        <td>${escapeHtml(item.cereal || "-")}</td>
+        <td>${plainNumberValue(item.hectareas)}</td>
+        <td>${moneyValue(item.totalPesos)}</td>
+        <td>${escapeHtml(item.cuotas || "1")} ${escapeHtml(item.frecuencia || "")}</td>
+        <td><button type="button" class="small-button" data-field-lease-open="${escapeHtml(item.id)}">Abrir</button> <button type="button" class="small-button" data-field-lease-print="${escapeHtml(item.id)}">Imprimir</button> <button type="button" class="small-button danger-button" data-field-lease-delete="${escapeHtml(item.id)}">Eliminar</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="8">Sin calculos de arrendamiento cargados.</td></tr>`;
+  updateFieldLeasePreview();
+}
+
+function fillFieldLeaseForm(item) {
+  if (!item) return;
+  $("#field-lease-contract").value = item.contrato || "";
+  $("#field-lease-client").value = item.cliente || "";
+  $("#field-lease-farm").value = item.campo || "";
+  $("#field-lease-date").value = formatDateForInput(item.fecha);
+  $("#field-lease-from").value = formatDateForInput(item.periodoDesde);
+  $("#field-lease-to").value = formatDateForInput(item.periodoHasta);
+  $("#field-lease-hectares").value = item.hectareas || "";
+  $("#field-lease-cereal").value = item.cereal || "SOJA";
+  $("#field-lease-kg-ha").value = item.kgPorHa || item.qqPorHa || "";
+  $("#field-lease-unit").value = item.unidadCotizacion || "KG";
+  $("#field-lease-currency").value = item.moneda || "ARS";
+  setMoneyInput("#field-lease-price", item.cotizacion || 0);
+  setMoneyInput("#field-lease-exchange", item.tipoCambio || 0);
+  $("#field-lease-installments").value = item.cuotas || 1;
+  $("#field-lease-frequency").value = item.frecuencia || "MENSUAL";
+  $("#field-lease-notes").value = item.observaciones || "";
+  updateFieldLeasePreview();
+}
+
+async function saveFieldLease(event) {
+  event.preventDefault();
+  const payload = fieldLeaseCurrentInput();
+  if (!payload.cliente && !payload.contrato && !payload.campo) {
+    setFieldLeaseMessage("Cargue al menos contrato, cliente o campo.", "error");
+    return;
+  }
+  if (!payload.hectareas || !payload.kgPorHa || !payload.cotizacion || (payload.moneda === "USD" && !payload.tipoCambio)) {
+    setFieldLeaseMessage("Faltan hectareas, kilos por hectarea, cotizacion o tipo de cambio si es en dolares.", "error");
+    return;
+  }
+  try {
+    const saved = await fetchJson("/api/campos/arrendamientos", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    state.fieldLeases = saved.items || [];
+    renderFieldLeases();
+    setFieldLeaseMessage("Calculo guardado correctamente.", "ok");
+  } catch (error) {
+    setFieldLeaseMessage(error.message, "error");
+  }
+}
+
+async function deleteFieldLease(id) {
+  if (!window.confirm("Se eliminara este calculo de arrendamiento. ¿Continuar?")) return;
+  const saved = await fetchJson(`/api/campos/arrendamientos/${encodeURIComponent(id)}`, { method: "DELETE" });
+  state.fieldLeases = saved.items || [];
+  renderFieldLeases();
+}
+
+function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
+  const detail = item.detalleCuotas || buildFieldLeaseInstallments(item);
+  const title = safePdfTitle("Calculo_arrendamiento", item.cliente || item.campo || "campos", item.fecha || "");
+  const popup = window.open("", "_blank", "width=1000,height=800");
+  if (!popup) return;
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
+    body{font-family:Arial,sans-serif;margin:12mm;color:#173632}
+    header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px;margin-bottom:12px}
+    img{width:74px;height:74px;object-fit:contain;background:#173632;padding:6px}
+    h1{font-size:18px;margin:0} h2{font-size:13px;margin:12px 0 5px} p{margin:3px 0;font-size:11px}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border:1px solid #cbd7d4;margin-bottom:10px}
+    .grid span,.grid strong{border-bottom:1px solid #cbd7d4;padding:5px;font-size:10px}.grid span{background:#edf3f1;color:#52706b}.grid strong{font-size:11px}
+    table{width:100%;border-collapse:collapse;font-size:10px;margin-top:5px}th,td{border:1px solid #cbd7d4;padding:5px;text-align:left}th{background:#edf3f1}.amount{text-align:right;font-weight:700}
+    .total{background:#fff3e8;font-weight:700}.note{border:1px solid #cbd7d4;padding:7px;margin-top:10px;font-size:10px}
+    button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:10mm}body{margin:0}button{display:none}}
+  </style></head><body>
+    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Campos - Calculo de arrendamiento</h1><p>Hugo Pinna - Contratos y Campos</p><p>Fecha: ${escapeHtml(item.fecha || "-")}</p></div></header>
+    <div class="grid">
+      <span>Contrato / referencia</span><strong>${escapeHtml(item.contrato || "-")}</strong>
+      <span>Cliente / arrendador</span><strong>${escapeHtml(item.cliente || "-")}</strong>
+      <span>Campo</span><strong>${escapeHtml(item.campo || "-")}</strong>
+      <span>Periodo</span><strong>${escapeHtml(item.periodoDesde || "-")} a ${escapeHtml(item.periodoHasta || "-")}</strong>
+      <span>Hectareas</span><strong>${plainNumberValue(item.hectareas)}</strong>
+      <span>Cereal</span><strong>${escapeHtml(item.cereal || "-")}</strong>
+      <span>Kg por hectarea</span><strong>${plainNumberValue(item.kgPorHa || item.qqPorHa)}</strong>
+      <span>Total kg</span><strong>${plainNumberValue(item.totalKg)} kg</strong>
+      <span>Total toneladas</span><strong>${plainNumberValue(item.totalTn)} tn</strong>
+      <span>Cotizacion por ${item.unidadCotizacion === "TN" ? "tonelada" : "kg"}</span><strong>${item.moneda === "USD" ? `USD ${plainNumberValue(item.cotizacion)} x TC ${moneyValue(item.tipoCambio)}` : moneyValue(item.cotizacion)}</strong>
+      <span>Total calculado</span><strong>${moneyValue(item.totalPesos)}</strong>
+    </div>
+    <h2>Cuotas</h2>
+    <table><thead><tr><th>Cuota</th><th>Fecha estimada</th><th>Importe</th></tr></thead><tbody>${detail.map((row) => `<tr><td>${row.numero}</td><td>${escapeHtml(row.fecha || "-")}</td><td class="amount">${moneyValue(row.importe)}</td></tr>`).join("")}<tr class="total"><td colspan="2">Total</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr></tbody></table>
+    ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
     <button onclick="window.print()">Imprimir / guardar PDF</button>
   </body></html>`);
   popup.document.close();
@@ -4342,6 +4660,19 @@ function parseDisplayDate(value) {
   return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
 }
 
+function parseAnyLocalDate(value) {
+  const text = String(value || "");
+  const inputMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (inputMatch) return new Date(Number(inputMatch[1]), Number(inputMatch[2]) - 1, Number(inputMatch[3]));
+  return parseDisplayDate(text);
+}
+
+function formatDateForInput(value) {
+  const date = parseAnyLocalDate(value);
+  if (!date || Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function dateOnly(date = new Date()) {
   const result = new Date(date);
   result.setHours(0, 0, 0, 0);
@@ -4360,7 +4691,7 @@ function formatDisplayDate(date) {
 }
 
 function addDisplayDays(value, days) {
-  const date = parseDisplayDate(value);
+  const date = parseAnyLocalDate(value);
   if (!date) return value || "-";
   date.setDate(date.getDate() + Number(days || 0));
   return formatDisplayDate(date);
@@ -6126,6 +6457,9 @@ async function init() {
   $all("nav button").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
+  $all("[data-go-view]").forEach((card) => {
+    card.addEventListener("click", () => setView(card.dataset.goView));
+  });
   $("#mobile-refresh").addEventListener("click", reloadAppData);
   $("#download-backup").addEventListener("click", downloadBackup);
   $("#dashboard-period-run").addEventListener("click", renderPeriodStats);
@@ -6299,6 +6633,34 @@ async function init() {
     }
     const deleteButton = event.target.closest("[data-document-delete]");
     if (deleteButton) deleteDocument(deleteButton.dataset.documentDelete);
+  });
+  $("#field-contract-form").addEventListener("submit", saveFieldContract);
+  $("#field-contract-clear").addEventListener("click", resetFieldContractForm);
+  $("#field-contract-use").addEventListener("click", () => useFieldContractInCalculation());
+  $("#field-contract-search").addEventListener("change", () => {
+    const item = findFieldContractBySearch();
+    if (item) fillFieldContractForm(item);
+  });
+  $("#field-lease-form").addEventListener("submit", saveFieldLease);
+  $("#field-lease-clear").addEventListener("click", resetFieldLeaseForm);
+  $("#field-lease-print").addEventListener("click", () => printFieldLeaseReport(fieldLeaseCurrentInput()));
+  $all("#field-lease-form input, #field-lease-form select, #field-lease-form textarea").forEach((node) => {
+    node.addEventListener("input", updateFieldLeasePreview);
+    node.addEventListener("change", updateFieldLeasePreview);
+  });
+  $("#field-lease-body").addEventListener("click", (event) => {
+    const openButton = event.target.closest("[data-field-lease-open]");
+    const printButton = event.target.closest("[data-field-lease-print]");
+    const deleteButton = event.target.closest("[data-field-lease-delete]");
+    if (openButton) {
+      const item = (state.fieldLeases || []).find((row) => row.id === openButton.dataset.fieldLeaseOpen);
+      fillFieldLeaseForm(item);
+    }
+    if (printButton) {
+      const item = (state.fieldLeases || []).find((row) => row.id === printButton.dataset.fieldLeasePrint);
+      if (item) printFieldLeaseReport(item);
+    }
+    if (deleteButton) deleteFieldLease(deleteButton.dataset.fieldLeaseDelete);
   });
   $("#cc-open-external").addEventListener("click", () => openCurrentAccountPanel("#cc-external-panel"));
   $("#cc-close-external").addEventListener("click", () => {

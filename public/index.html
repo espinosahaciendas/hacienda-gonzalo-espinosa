@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20260619-tablero-pendientes-vencidos">
+    <link rel="stylesheet" href="/styles.css?v=20260708-documentos-comunes-logos">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -35,9 +35,11 @@
         </div>
       </div>
       <nav>
-        <button class="active" data-view="tablero">Tablero</button>
+        <button class="active" data-view="inicio">Inicio</button>
+        <button data-view="tablero">Tablero</button>
         <button data-view="consulta">Consulta movil</button>
         <button data-view="resumenes">Resumenes</button>
+        <button data-view="campos">Campos</button>
         <button data-view="calendario">Calendario</button>
         <button data-view="clientes">Clientes</button>
         <button data-view="operaciones">Operaciones</button>
@@ -59,6 +61,25 @@
           <button type="button" class="ghost-button" id="logout-button" hidden>Salir</button>
         </div>
       </header>
+
+      <section id="inicio" class="view active">
+        <div class="module-grid">
+          <article class="module-card" data-go-view="tablero">
+            <img class="module-card-logo module-card-logo-square" src="/logo-espinosa-blanco.png" alt="Gonzalo Espinosa Haciendas">
+            <span>Modulo operativo</span>
+            <h2>Hacienda</h2>
+            <p>Operaciones, ventas, liquidaciones, cuenta corriente, vencimientos, comisiones y documentos.</p>
+            <button type="button" class="primary-button">Entrar a Hacienda</button>
+          </article>
+          <article class="module-card" data-go-view="campos">
+            <img class="module-card-logo module-card-logo-wide" src="/logo-hugo-pinna-horizontal.png" alt="Hugo Pinna Contratos y Campos">
+            <span>Modulo separado</span>
+            <h2>Campos</h2>
+            <p>Contratos de arrendamiento, calculos por hectareas, cereal, cotizaciones, cuotas y reportes.</p>
+            <button type="button" class="ghost-button">Entrar a Campos</button>
+          </article>
+        </div>
+      </section>
 
       <section id="consulta" class="view mobile-summary-view">
         <div class="mobile-summary-head">
@@ -377,6 +398,134 @@
             </div>
           </div>
           <p class="form-message" id="real-commission-message"></p>
+        </div>
+      </section>
+
+      <section id="campos" class="view">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Contratos de campos</h2>
+              <p class="subtle">Guarde los datos fijos del contrato para no cargarlos cada vez que genere una cuota.</p>
+            </div>
+            <button type="button" class="ghost-button" id="field-contract-clear">Nuevo contrato</button>
+          </div>
+          <form id="field-contract-form">
+            <input id="field-contract-id" type="hidden">
+            <div class="form-grid">
+              <label>Buscar contrato<input id="field-contract-search" list="field-contract-list" autocomplete="off" placeholder="Escriba cliente, campo o referencia"></label>
+              <datalist id="field-contract-list"></datalist>
+              <label>Referencia / nombre contrato<input id="field-contract-name" placeholder="Ej.: LA BALBINA 2026-2029"></label>
+              <label>Arrendador / cliente<input id="field-contract-owner"></label>
+              <label>Arrendatario<input id="field-contract-tenant"></label>
+              <label>Campo / establecimiento<input id="field-contract-farm"></label>
+              <label>Hectareas totales<input id="field-contract-hectares" inputmode="decimal"></label>
+              <label>Inicio contrato<input id="field-contract-start" type="date"></label>
+              <label>Fin contrato<input id="field-contract-end" type="date"></label>
+            </div>
+            <label>Condiciones base<textarea id="field-contract-notes" rows="3" placeholder="Ej.: 60 has a 600 kg soja/ha. Pago mensual vto. 05-10 de cada mes."></textarea></label>
+            <div class="form-actions">
+              <button type="button" class="ghost-button" id="field-contract-use">Usar en calculo</button>
+              <button type="submit" class="primary-button">Guardar contrato</button>
+            </div>
+            <p class="form-message" id="field-contract-message"></p>
+          </form>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Campos - calculo de arrendamientos</h2>
+              <p class="subtle">Modulo independiente de Hacienda. No impacta cuenta corriente ni operaciones.</p>
+            </div>
+            <button type="button" class="ghost-button" id="field-lease-clear">Nuevo calculo</button>
+          </div>
+          <form id="field-lease-form">
+            <div class="form-grid">
+              <label>Contrato / referencia<input id="field-lease-contract" placeholder="Ej.: Arrendamiento campo La Esperanza"></label>
+              <label>Cliente / arrendador<input id="field-lease-client" autocomplete="off"></label>
+              <label>Campo / establecimiento<input id="field-lease-farm" autocomplete="off"></label>
+              <label>Fecha de calculo<input id="field-lease-date" type="date"></label>
+              <label>Periodo desde<input id="field-lease-from" type="date"></label>
+              <label>Periodo hasta<input id="field-lease-to" type="date"></label>
+              <label>Hectareas<input id="field-lease-hectares" inputmode="decimal" placeholder="0"></label>
+              <label>Cereal
+                <select id="field-lease-cereal">
+                  <option value="SOJA">Soja</option>
+                  <option value="MAIZ">Maiz</option>
+                  <option value="TRIGO">Trigo</option>
+                  <option value="GIRASOL">Girasol</option>
+                  <option value="CEBADA">Cebada</option>
+                  <option value="OTRO">Otro</option>
+                </select>
+              </label>
+              <label>Kg por hectarea<input id="field-lease-kg-ha" inputmode="decimal" placeholder="0"></label>
+              <label>Unidad de cotizacion
+                <select id="field-lease-unit">
+                  <option value="KG">Por kg</option>
+                  <option value="TN">Por tonelada</option>
+                </select>
+              </label>
+              <label>Moneda cotizacion
+                <select id="field-lease-currency">
+                  <option value="ARS">Pesos</option>
+                  <option value="USD">Dolares</option>
+                </select>
+              </label>
+              <label>Cotizacion<input id="field-lease-price" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+              <label>Tipo de cambio<input id="field-lease-exchange" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+              <label>Cantidad de cuotas<input id="field-lease-installments" type="number" min="1" step="1" value="1"></label>
+              <label>Frecuencia
+                <select id="field-lease-frequency">
+                  <option value="MENSUAL">Mensual</option>
+                  <option value="TRIMESTRAL">Trimestral</option>
+                  <option value="SEMESTRAL">Semestral</option>
+                  <option value="ANUAL">Anual</option>
+                  <option value="MANUAL">Manual / a definir</option>
+                </select>
+              </label>
+            </div>
+            <label>Observaciones<textarea id="field-lease-notes" rows="3" placeholder="Condiciones, ajustes, cotizacion usada, observaciones del contrato."></textarea></label>
+            <div class="cc-grid">
+              <div><span>Total cereal / carne</span><strong id="field-lease-total-cereal">0 kg</strong></div>
+              <div><span>Total toneladas</span><strong id="field-lease-total-tn">0 tn</strong></div>
+              <div><span>Total en pesos</span><strong id="field-lease-total">$ 0,00</strong></div>
+              <div><span>Valor por cuota</span><strong id="field-lease-installment">$ 0,00</strong></div>
+              <div><span>Cuotas</span><strong id="field-lease-installment-count">1</strong></div>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="ghost-button" id="field-lease-print">Ver / imprimir calculo</button>
+              <button type="submit" class="primary-button">Guardar calculo</button>
+            </div>
+            <p class="form-message" id="field-lease-message"></p>
+          </form>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Historial de calculos</h2>
+              <p class="subtle">Base inicial para contratos de campos. Se puede abrir, imprimir o eliminar cada calculo.</p>
+            </div>
+            <span class="subtle" id="field-lease-summary">Sin calculos cargados.</span>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Cliente</th>
+                  <th>Campo</th>
+                  <th>Cereal</th>
+                  <th>Has.</th>
+                  <th>Total</th>
+                  <th>Cuotas</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="field-lease-body"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -1770,7 +1919,8 @@
               </label>
               <label>Parte
                 <select id="document-party">
-                  <option value="">General / interno</option>
+                  <option value="">General / comun</option>
+                  <option value="INTERNO">Interno administrativo</option>
                   <option value="VENDEDOR">Vendedor / productor</option>
                   <option value="COMPRADOR">Comprador</option>
                   <option value="CONSIGNATARIA">Consignataria</option>
@@ -1924,6 +2074,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260706-detalle-liquidar-lineas-manuales"></script>
+    <script src="/app.js?v=20260708-documentos-comunes-logos"></script>
   </body>
 </html>
