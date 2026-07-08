@@ -1056,12 +1056,44 @@ function fieldContractPayload() {
 }
 
 function renderFieldContracts() {
-  if (!$("#field-contract-list")) return;
-  $("#field-contract-list").innerHTML = (state.fieldContracts || [])
-    .map((item) => {
-      const label = [item.nombre, item.arrendador, item.campo].filter(Boolean).join(" - ");
-      return `<option value="${escapeHtml(label)}" data-contract-id="${escapeHtml(item.id)}"></option>`;
-    }).join("");
+  renderFieldContractSuggestions();
+}
+
+function fieldContractSearchLabel(item) {
+  return [item.nombre, item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" - ");
+}
+
+function fieldContractMatchesQuery(item, query) {
+  const words = normalizeSearch(query).split(" ").filter(Boolean);
+  if (!words.length) return false;
+  const haystack = normalizeSearch(fieldContractSearchLabel(item));
+  return words.every((word) => haystack.includes(word));
+}
+
+function renderFieldContractSuggestions() {
+  const node = $("#field-contract-suggestions");
+  if (!node) return;
+  const query = $("#field-contract-search")?.value || "";
+  if (normalizeSearch(query).length < 2) {
+    node.hidden = true;
+    node.innerHTML = "";
+    return;
+  }
+  const matches = (state.fieldContracts || [])
+    .filter((item) => fieldContractMatchesQuery(item, query))
+    .slice(0, 8);
+  node.hidden = false;
+  node.innerHTML = matches.length
+    ? matches.map((item) => `
+        <div class="suggestion-row">
+          <div>
+            <strong>${escapeHtml(item.nombre || item.campo || "Contrato sin referencia")}</strong>
+            <span>${escapeHtml([item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" / ") || "Sin partes cargadas")} · ${plainNumberValue(item.hectareas)} has.</span>
+          </div>
+          <button type="button" class="small-button" data-field-contract-pick="${escapeHtml(item.id)}">Elegir</button>
+        </div>
+      `).join("")
+    : `<div class="suggestion-empty">No aparece un contrato guardado con esos datos.</div>`;
 }
 
 function findFieldContractBySearch() {
@@ -1088,7 +1120,7 @@ function currentFieldContractForCalculation() {
 function fillFieldContractForm(item) {
   if (!item) return;
   $("#field-contract-id").value = item.id || "";
-  $("#field-contract-search").value = [item.nombre, item.arrendador, item.campo].filter(Boolean).join(" - ");
+  $("#field-contract-search").value = fieldContractSearchLabel(item);
   $("#field-contract-name").value = item.nombre || "";
   $("#field-contract-owner").value = item.arrendador || "";
   $("#field-contract-tenant").value = item.arrendatario || "";
@@ -1102,6 +1134,8 @@ function fillFieldContractForm(item) {
 function resetFieldContractForm() {
   $("#field-contract-form")?.reset();
   $("#field-contract-id").value = "";
+  $("#field-contract-suggestions").hidden = true;
+  $("#field-contract-suggestions").innerHTML = "";
   setFieldContractMessage("");
 }
 
@@ -6656,9 +6690,23 @@ async function init() {
   $("#field-contract-form").addEventListener("submit", saveFieldContract);
   $("#field-contract-clear").addEventListener("click", resetFieldContractForm);
   $("#field-contract-use").addEventListener("click", () => useFieldContractInCalculation());
+  $("#field-contract-search").addEventListener("input", renderFieldContractSuggestions);
   $("#field-contract-search").addEventListener("change", () => {
     const item = findFieldContractBySearch();
-    if (item) fillFieldContractForm(item);
+    if (item) {
+      fillFieldContractForm(item);
+      useFieldContractInCalculation(item);
+    }
+  });
+  $("#field-contract-suggestions").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-contract-pick]");
+    if (!button) return;
+    const item = (state.fieldContracts || []).find((row) => String(row.id) === String(button.dataset.fieldContractPick));
+    if (!item) return;
+    fillFieldContractForm(item);
+    $("#field-contract-suggestions").hidden = true;
+    $("#field-contract-suggestions").innerHTML = "";
+    useFieldContractInCalculation(item);
   });
   $("#field-lease-form").addEventListener("submit", saveFieldLease);
   $("#field-lease-clear").addEventListener("click", resetFieldLeaseForm);

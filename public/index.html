@@ -413,8 +413,8 @@
           <form id="field-contract-form">
             <input id="field-contract-id" type="hidden">
             <div class="form-grid">
-              <label>Buscar contrato<input id="field-contract-search" list="field-contract-list" autocomplete="off" placeholder="Escriba cliente, campo o referencia"></label>
-              <datalist id="field-contract-list"></datalist>
+              <label>Buscar contrato<input id="field-contract-search" autocomplete="off" placeholder="Escriba cliente, campo, arrendatario o referencia"></label>
+              <div class="suggestions" id="field-contract-suggestions" hidden></div>
               <label>Referencia / nombre contrato<input id="field-contract-name" placeholder="Ej.: LA BALBINA 2026-2029"></label>
               <label>Arrendador / cliente<input id="field-contract-owner"></label>
               <label>Arrendatario<input id="field-contract-tenant"></label>
@@ -2074,6 +2074,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260708-documentos-comunes-pago-cp"></script>
+    <script src="/app.js?v=20260708-campos-buscador-contratos"></script>
   </body>
 </html>
