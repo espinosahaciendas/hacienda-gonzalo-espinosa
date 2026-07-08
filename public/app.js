@@ -293,21 +293,27 @@ function movementDocumentParty(movement) {
   return "";
 }
 
+function documentPaymentRoot(value) {
+  return String(value || "").replace(/-CP$/i, "");
+}
+
 function documentMatchesMovement(documento, movement) {
   const movementId = String(movement.id || "");
   const operationId = String(movement.operacion || "");
   const paymentId = String(movement.paymentId || "");
+  const paymentRoot = documentPaymentRoot(paymentId);
   const documentMovement = String(documento.movimientoId || "");
   const documentEntity = String(documento.entidadId || "");
   const documentOperation = String(documento.operacion || "");
   const documentPayment = String(documento.pagoId || "");
+  const documentPaymentRootValue = documentPaymentRoot(documentPayment || (documento.entidadTipo === "PAGO" ? documentEntity : ""));
   const movementParty = movementDocumentParty(movement);
   const documentParty = normalizeSearch(documento.parte || "").toUpperCase();
   const sameClient = !documento.cliente || !movement.cliente || normalizeSearch(documento.cliente) === normalizeSearch(movement.cliente);
   const commonDocument = !documentParty || documentParty === "GENERAL" || documentParty === "COMUN";
   const internalDocument = documentParty === "INTERNO";
   if (movementId && (documentMovement === movementId || (documento.entidadTipo === "MOVIMIENTO" && documentEntity === movementId))) return true;
-  if (paymentId && (documentPayment === paymentId || (documento.entidadTipo === "PAGO" && documentEntity === paymentId))) {
+  if (paymentId && (documentPayment === paymentId || (documento.entidadTipo === "PAGO" && documentEntity === paymentId) || (commonDocument && paymentRoot && documentPaymentRootValue === paymentRoot))) {
     if (internalDocument) return sameClient;
     if (commonDocument) return true;
     if (documentParty && movementParty && documentParty !== movementParty) return false;
@@ -390,8 +396,9 @@ function fillDocumentFormFromMovement(movement) {
   documentFilterIds = [];
   clearDocumentPreview();
   const isPayment = Boolean(movement.pagoId);
+  const paymentReference = isPayment ? documentPaymentRoot(movement.pagoId) : "";
   $("#document-entity-type").value = isPayment ? "PAGO" : "MOVIMIENTO";
-  $("#document-entity-id").value = isPayment ? movement.pagoId : movement.id || movement.operacion || "";
+  $("#document-entity-id").value = isPayment ? paymentReference : movement.id || movement.operacion || "";
   $("#document-client").value = movement.cliente || "";
   $("#document-party").value = movement.parte || movementDocumentParty(movement) || "";
   $("#document-title").value = movement.comprobante ? `${movement.comprobante} - ${movement.cliente || ""}`.trim() : movement.concepto || "";
@@ -1062,8 +1069,20 @@ function findFieldContractBySearch() {
   if (!query) return null;
   return (state.fieldContracts || []).find((item) => {
     const label = normalizeSearch([item.nombre, item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" "));
-    return label === query || label.includes(query);
+    const compactLabel = normalizeSearch([item.nombre, item.arrendador, item.campo].filter(Boolean).join(" - "));
+    return label === query || compactLabel === query || label.includes(query) || compactLabel.includes(query);
   }) || null;
+}
+
+function currentFieldContractForCalculation() {
+  const formId = $("#field-contract-id")?.value || "";
+  const saved = formId
+    ? (state.fieldContracts || []).find((item) => String(item.id) === String(formId))
+    : findFieldContractBySearch();
+  if (saved) return saved;
+  const payload = fieldContractPayload();
+  if (payload.nombre || payload.arrendador || payload.campo || payload.hectareas || payload.condiciones) return payload;
+  return null;
 }
 
 function fillFieldContractForm(item) {
@@ -1086,12 +1105,12 @@ function resetFieldContractForm() {
   setFieldContractMessage("");
 }
 
-function useFieldContractInCalculation(item = findFieldContractBySearch()) {
+function useFieldContractInCalculation(item = currentFieldContractForCalculation()) {
   if (!item) {
-    setFieldContractMessage("Seleccione o guarde un contrato para usarlo en el calculo.", "error");
+    setFieldContractMessage("Seleccione un contrato guardado o complete los datos del contrato para usarlo en el calculo.", "error");
     return;
   }
-  fillFieldContractForm(item);
+  if (item.id) fillFieldContractForm(item);
   $("#field-lease-contract").value = item.nombre || "";
   $("#field-lease-client").value = item.arrendador || "";
   $("#field-lease-farm").value = item.campo || "";
