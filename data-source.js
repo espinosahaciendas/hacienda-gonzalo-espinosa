@@ -1402,6 +1402,8 @@ class BackupDataSource {
       commissionInvoices: asArray(backup.commissionInvoices),
       cajaDiaria: asArray(backup.cajaDiaria),
       cajaConciliaciones: asArray(backup.cajaConciliaciones),
+      fieldContracts: asArray(backup.fieldContracts),
+      fieldLeases: asArray(backup.fieldLeases),
       documentos: asArray(backup.documentos)
     });
   }
@@ -2199,6 +2201,123 @@ class BackupDataSource {
     return saved;
   }
 
+  normalizeFieldContract(input = {}) {
+    return {
+      id: normalizeText(input.id) || `CAMPOS-CONTR-${Date.now()}`,
+      nombre: normalizeText(input.nombre),
+      arrendador: normalizeText(input.arrendador),
+      arrendatario: normalizeText(input.arrendatario),
+      campo: normalizeText(input.campo),
+      hectareas: parseMoney(input.hectareas),
+      inicio: input.inicio ? formatDateForDisplay(input.inicio) : "",
+      fin: input.fin ? formatDateForDisplay(input.fin) : "",
+      condiciones: normalizeText(input.condiciones),
+      creadoEn: input.creadoEn || new Date().toISOString(),
+      actualizadoEn: new Date().toISOString()
+    };
+  }
+
+  async getFieldContracts() {
+    const data = this.readData();
+    return asArray(data.fieldContracts)
+      .map((item) => this.normalizeFieldContract(item))
+      .sort((a, b) => String(a.nombre || a.arrendador || "").localeCompare(String(b.nombre || b.arrendador || ""), "es"));
+  }
+
+  async saveFieldContract(input) {
+    const data = this.readData();
+    const items = asArray(data.fieldContracts);
+    const saved = this.normalizeFieldContract(input);
+    const index = items.findIndex((item) => String(item.id) === String(saved.id));
+    if (index >= 0) items[index] = { ...items[index], ...saved, creadoEn: items[index].creadoEn || saved.creadoEn };
+    else items.unshift(saved);
+    data.fieldContracts = items;
+    this.saveData(data);
+    return saved;
+  }
+
+  async deleteFieldContract(itemId) {
+    const data = this.readData();
+    const id = normalizeText(itemId);
+    data.fieldContracts = asArray(data.fieldContracts).filter((item) => String(item.id) !== id);
+    this.saveData(data);
+    return { id };
+  }
+
+  normalizeFieldLease(input = {}) {
+    const hectareas = parseMoney(input.hectareas);
+    const kgPorHa = parseMoney(input.kgPorHa ?? input.qqPorHa);
+    const unidadCotizacion = normalizeText(input.unidadCotizacion || "KG").toUpperCase() === "TN" ? "TN" : "KG";
+    const moneda = normalizeText(input.moneda || "ARS").toUpperCase();
+    const cotizacion = parseMoney(input.cotizacion);
+    const tipoCambio = parseMoney(input.tipoCambio);
+    const cuotas = Math.max(Number(input.cuotas || 1), 1);
+    const totalKg = hectareas * kgPorHa;
+    const totalTn = totalKg / 1000;
+    const cotizacionPesos = moneda === "USD" ? cotizacion * tipoCambio : cotizacion;
+    const totalPesos = unidadCotizacion === "TN" ? totalTn * cotizacionPesos : totalKg * cotizacionPesos;
+    const importeCuota = cuotas ? totalPesos / cuotas : totalPesos;
+    return {
+      id: normalizeText(input.id) || `ARR-${Date.now()}`,
+      contrato: normalizeText(input.contrato),
+      cliente: normalizeText(input.cliente),
+      campo: normalizeText(input.campo),
+      fecha: input.fecha ? formatDateForDisplay(input.fecha) : formatDateLocal(new Date()),
+      periodoDesde: input.periodoDesde ? formatDateForDisplay(input.periodoDesde) : "",
+      periodoHasta: input.periodoHasta ? formatDateForDisplay(input.periodoHasta) : "",
+      hectareas,
+      cereal: normalizeText(input.cereal || "SOJA").toUpperCase(),
+      kgPorHa,
+      unidadCotizacion,
+      moneda,
+      cotizacion,
+      tipoCambio,
+      cuotas,
+      frecuencia: normalizeText(input.frecuencia || "MENSUAL").toUpperCase(),
+      observaciones: normalizeText(input.observaciones),
+      totalKg,
+      totalTn,
+      cotizacionPesos,
+      totalPesos,
+      importeCuota,
+      actualizadoEn: new Date().toISOString()
+    };
+  }
+
+  async getFieldLeases() {
+    const data = this.readData();
+    return asArray(data.fieldLeases)
+      .map((item) => this.normalizeFieldLease(item))
+      .sort((a, b) => {
+        const dateA = parseDateLoose(a.fecha)?.getTime() || 0;
+        const dateB = parseDateLoose(b.fecha)?.getTime() || 0;
+        return dateB - dateA;
+      });
+  }
+
+  async saveFieldLease(input) {
+    const data = this.readData();
+    const items = asArray(data.fieldLeases);
+    const saved = {
+      ...this.normalizeFieldLease(input),
+      creadoEn: input.creadoEn || new Date().toISOString()
+    };
+    const index = items.findIndex((item) => String(item.id) === String(saved.id));
+    if (index >= 0) items[index] = { ...items[index], ...saved, creadoEn: items[index].creadoEn || saved.creadoEn };
+    else items.unshift(saved);
+    data.fieldLeases = items;
+    this.saveData(data);
+    return saved;
+  }
+
+  async deleteFieldLease(itemId) {
+    const data = this.readData();
+    const id = normalizeText(itemId);
+    data.fieldLeases = asArray(data.fieldLeases).filter((item) => String(item.id) !== id);
+    this.saveData(data);
+    return { id };
+  }
+
   async getCajaDiaria() {
     const data = this.readData();
     const items = asArray(data.cajaDiaria)
@@ -2818,6 +2937,12 @@ class PostgresJsonDataSource extends BackupDataSource {
   async getOperaciones() { return this.withRemoteData(() => super.getOperaciones()); }
   async getCuentaCorrienteResumen() { return this.withRemoteData(() => super.getCuentaCorrienteResumen()); }
   async saveCommissionInvoice(input) { return this.withRemoteData(() => super.saveCommissionInvoice(input), true); }
+  async getFieldContracts() { return this.withRemoteData(() => super.getFieldContracts()); }
+  async saveFieldContract(input) { return this.withRemoteData(() => super.saveFieldContract(input), true); }
+  async deleteFieldContract(itemId) { return this.withRemoteData(() => super.deleteFieldContract(itemId), true); }
+  async getFieldLeases() { return this.withRemoteData(() => super.getFieldLeases()); }
+  async saveFieldLease(input) { return this.withRemoteData(() => super.saveFieldLease(input), true); }
+  async deleteFieldLease(itemId) { return this.withRemoteData(() => super.deleteFieldLease(itemId), true); }
   async getCajaDiaria() { return this.withRemoteData(() => super.getCajaDiaria()); }
   async saveCajaDiaria(input) { return this.withRemoteData(() => super.saveCajaDiaria(input), true); }
   async deleteCajaDiaria(itemId) { return this.withRemoteData(() => super.deleteCajaDiaria(itemId), true); }

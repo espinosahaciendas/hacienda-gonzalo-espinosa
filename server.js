@@ -356,7 +356,9 @@ async function handleApi(req, res) {
         "/api/cuenta-corriente/resumen",
         "/api/caja-diaria",
         "/api/caja-conciliaciones",
-        "/api/documentos"
+        "/api/documentos",
+        "/api/campos/contratos",
+        "/api/campos/arrendamientos"
       ]
     });
     return;
@@ -472,6 +474,46 @@ async function handleApi(req, res) {
       sendJson(res, 200, { item: await dataSource.saveEstablecimiento(clienteId, body) });
       return;
     }
+    return;
+  }
+
+  if (parsed.pathname === "/api/campos/contratos") {
+    if (req.method === "GET") {
+      sendJson(res, 200, { items: await dataSource.getFieldContracts() });
+      return;
+    }
+    if (req.method === "POST") {
+      const body = await readBody(req);
+      const item = await dataSource.saveFieldContract(body);
+      sendJson(res, 200, { item, items: await dataSource.getFieldContracts() });
+      return;
+    }
+  }
+
+  const fieldContractMatch = parsed.pathname.match(/^\/api\/campos\/contratos\/([^/]+)$/);
+  if (fieldContractMatch && req.method === "DELETE") {
+    await dataSource.deleteFieldContract(decodeURIComponent(fieldContractMatch[1]));
+    sendJson(res, 200, { items: await dataSource.getFieldContracts() });
+    return;
+  }
+
+  if (parsed.pathname === "/api/campos/arrendamientos") {
+    if (req.method === "GET") {
+      sendJson(res, 200, { items: await dataSource.getFieldLeases() });
+      return;
+    }
+    if (req.method === "POST") {
+      const body = await readBody(req);
+      await dataSource.saveFieldLease(body);
+      sendJson(res, 200, { items: await dataSource.getFieldLeases() });
+      return;
+    }
+  }
+
+  const fieldLeaseMatch = parsed.pathname.match(/^\/api\/campos\/arrendamientos\/([^/]+)$/);
+  if (fieldLeaseMatch && req.method === "DELETE") {
+    await dataSource.deleteFieldLease(decodeURIComponent(fieldLeaseMatch[1]));
+    sendJson(res, 200, { items: await dataSource.getFieldLeases() });
     return;
   }
 
