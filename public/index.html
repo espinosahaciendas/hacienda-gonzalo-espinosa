@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20260708-documentos-comunes-logos-2">
+    <link rel="stylesheet" href="/styles.css?v=20260708-campos-cuota-cotizaciones">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -402,6 +402,14 @@
       </section>
 
       <section id="campos" class="view">
+        <div class="fields-hero">
+          <img src="/logo-hugo-pinna-horizontal.png" alt="Hugo Pinna Contratos y Campos">
+          <div>
+            <p class="eyebrow">Modulo Campos</p>
+            <h2>Contratos y calculo de cuotas</h2>
+            <p>Base independiente de Hacienda para contratos rurales, cotizaciones, vencimientos y reportes de calculo.</p>
+          </div>
+        </div>
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -422,6 +430,69 @@
               <label>Hectareas totales<input id="field-contract-hectares" inputmode="decimal"></label>
               <label>Inicio contrato<input id="field-contract-start" type="date"></label>
               <label>Fin contrato<input id="field-contract-end" type="date"></label>
+              <label>Frecuencia base
+                <select id="field-contract-frequency">
+                  <option value="MENSUAL">Mensual</option>
+                  <option value="TRIMESTRAL">Trimestral</option>
+                  <option value="SEMESTRAL">Semestral</option>
+                  <option value="ANUAL">Anual</option>
+                  <option value="UNICO">Unico pago</option>
+                  <option value="MANUAL">Manual / sin vencimiento fijo</option>
+                </select>
+              </label>
+              <label>Vencimiento habitual<input id="field-contract-due-text" placeholder="Ej.: del 5 al 10 de cada mes"></label>
+              <label>Proximo vencimiento informativo<input id="field-contract-next-due" type="date"></label>
+              <label>Criterio de cotizacion<input id="field-contract-quote-criteria" placeholder="Ej.: promedio semana anterior Quequen"></label>
+            </div>
+            <div class="field-contract-rules">
+              <div class="advanced-subpanel">
+                <h3>Parte facturada / contrato</h3>
+                <div class="form-grid">
+                  <label>Modo facturado
+                    <select id="field-contract-billed-mode">
+                      <option value="HECTAREAS">Cantidad de hectareas</option>
+                      <option value="PORCENTAJE">Porcentaje del total</option>
+                      <option value="IMPORTE_FIJO">Importe fijo por cuota</option>
+                    </select>
+                  </label>
+                  <label>Valor facturado<input id="field-contract-billed-value" inputmode="decimal" placeholder="Has., % o importe"></label>
+                  <label>Base facturada
+                    <select id="field-contract-billed-base">
+                      <option value="KG_SOJA">Kg soja/ha</option>
+                      <option value="KG_CARNE">Kg carne/ha</option>
+                      <option value="PESOS_HA">Pesos por ha</option>
+                      <option value="DOLARES_HA">Dolares por ha</option>
+                      <option value="IMPORTE_FIJO">Importe fijo</option>
+                    </select>
+                  </label>
+                  <label>Kg/ha o importe base<input id="field-contract-billed-rate" inputmode="decimal"></label>
+                </div>
+              </div>
+              <div class="advanced-subpanel">
+                <h3>Parte efectivo</h3>
+                <div class="form-grid">
+                  <label>Modo efectivo
+                    <select id="field-contract-cash-mode">
+                      <option value="NINGUNO">Sin efectivo</option>
+                      <option value="HECTAREAS">Cantidad de hectareas</option>
+                      <option value="PORCENTAJE">Porcentaje del total</option>
+                      <option value="IMPORTE_FIJO">Importe fijo por cuota</option>
+                    </select>
+                  </label>
+                  <label>Valor efectivo<input id="field-contract-cash-value" inputmode="decimal" placeholder="Has., % o importe"></label>
+                  <label>Base efectivo
+                    <select id="field-contract-cash-base">
+                      <option value="MISMA_FACTURADA">Misma base facturada</option>
+                      <option value="KG_SOJA">Kg soja/ha</option>
+                      <option value="KG_CARNE">Kg carne/ha</option>
+                      <option value="PESOS_HA">Pesos por ha</option>
+                      <option value="DOLARES_HA">Dolares por ha</option>
+                      <option value="IMPORTE_FIJO">Importe fijo</option>
+                    </select>
+                  </label>
+                  <label>Kg/ha o importe base<input id="field-contract-cash-rate" inputmode="decimal"></label>
+                </div>
+              </div>
             </div>
             <label>Condiciones base<textarea id="field-contract-notes" rows="3" placeholder="Ej.: 60 has a 600 kg soja/ha. Pago mensual vto. 05-10 de cada mes."></textarea></label>
             <div class="form-actions">
@@ -448,22 +519,17 @@
               <label>Fecha de calculo<input id="field-lease-date" type="date"></label>
               <label>Periodo desde<input id="field-lease-from" type="date"></label>
               <label>Periodo hasta<input id="field-lease-to" type="date"></label>
-              <label>Hectareas<input id="field-lease-hectares" inputmode="decimal" placeholder="0"></label>
-              <label>Cereal
-                <select id="field-lease-cereal">
-                  <option value="SOJA">Soja</option>
-                  <option value="MAIZ">Maiz</option>
-                  <option value="TRIGO">Trigo</option>
-                  <option value="GIRASOL">Girasol</option>
-                  <option value="CEBADA">Cebada</option>
-                  <option value="OTRO">Otro</option>
-                </select>
+              <label>Vencimiento cuota<input id="field-lease-due-date" type="date"></label>
+              <label>Proximo vencimiento informativo<input id="field-lease-next-due" type="date"></label>
+              <label>Producto / indice
+                <input id="field-lease-cereal" placeholder="Ej.: Soja Quequen, Carne, Dolar">
               </label>
-              <label>Kg por hectarea<input id="field-lease-kg-ha" inputmode="decimal" placeholder="0"></label>
+              <label>Mercado / referencia<input id="field-lease-market" placeholder="Ej.: Quequen"></label>
               <label>Unidad de cotizacion
                 <select id="field-lease-unit">
                   <option value="KG">Por kg</option>
                   <option value="TN">Por tonelada</option>
+                  <option value="FIJO">Importe fijo</option>
                 </select>
               </label>
               <label>Moneda cotizacion
@@ -472,26 +538,37 @@
                   <option value="USD">Dolares</option>
                 </select>
               </label>
-              <label>Cotizacion<input id="field-lease-price" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+              <label>Promedio / cotizacion aplicada<input id="field-lease-price" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
               <label>Tipo de cambio<input id="field-lease-exchange" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
-              <label>Cantidad de cuotas<input id="field-lease-installments" type="number" min="1" step="1" value="1"></label>
-              <label>Frecuencia
-                <select id="field-lease-frequency">
-                  <option value="MENSUAL">Mensual</option>
-                  <option value="TRIMESTRAL">Trimestral</option>
-                  <option value="SEMESTRAL">Semestral</option>
-                  <option value="ANUAL">Anual</option>
-                  <option value="MANUAL">Manual / a definir</option>
-                </select>
-              </label>
+            </div>
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Cotizaciones para promedio</h3>
+                  <p class="subtle">Opcional. Si cargas varias cotizaciones, el promedio se aplica automaticamente al calculo de esta cuota.</p>
+                </div>
+                <button type="button" class="ghost-button" id="field-quote-add">Agregar cotizacion</button>
+              </div>
+              <div class="form-grid">
+                <label>Fecha cotizacion<input id="field-quote-date" type="date"></label>
+                <label>Mercado<input id="field-quote-market" placeholder="Quequen"></label>
+                <label>Producto<input id="field-quote-product" placeholder="Soja"></label>
+                <label>Cotizacion<input id="field-quote-price" class="money-input" inputmode="decimal"></label>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th><th>Accion</th></tr></thead>
+                  <tbody id="field-quote-body"></tbody>
+                </table>
+              </div>
             </div>
             <label>Observaciones<textarea id="field-lease-notes" rows="3" placeholder="Condiciones, ajustes, cotizacion usada, observaciones del contrato."></textarea></label>
             <div class="cc-grid">
-              <div><span>Total cereal / carne</span><strong id="field-lease-total-cereal">0 kg</strong></div>
-              <div><span>Total toneladas</span><strong id="field-lease-total-tn">0 tn</strong></div>
-              <div><span>Total en pesos</span><strong id="field-lease-total">$ 0,00</strong></div>
-              <div><span>Valor por cuota</span><strong id="field-lease-installment">$ 0,00</strong></div>
-              <div><span>Cuotas</span><strong id="field-lease-installment-count">1</strong></div>
+              <div><span>Promedio aplicado</span><strong id="field-lease-average">$ 0,00</strong></div>
+              <div><span>Facturado / contrato</span><strong id="field-lease-billed-total">$ 0,00</strong></div>
+              <div><span>Efectivo</span><strong id="field-lease-cash-total">$ 0,00</strong></div>
+              <div><span>Total cuota</span><strong id="field-lease-total">$ 0,00</strong></div>
+              <div><span>Vencimiento</span><strong id="field-lease-due-preview">-</strong></div>
             </div>
             <div class="form-actions">
               <button type="button" class="ghost-button" id="field-lease-print">Ver / imprimir calculo</button>
@@ -2074,6 +2151,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260708-campos-buscador-contratos"></script>
+    <script src="/app.js?v=20260708-campos-cuota-cotizaciones"></script>
   </body>
 </html>

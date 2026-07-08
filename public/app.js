@@ -24,6 +24,7 @@
   frigoBrutoSinIvaTouched: false,
   externalDueRows: [],
   commissionistRows: [],
+  fieldQuoteRows: [],
   usuario: null,
   weightTickets: [],
   reportRefreshInFlight: false
@@ -1051,6 +1052,18 @@ function fieldContractPayload() {
     hectareas: parseMoneyInput($("#field-contract-hectares")?.value || 0),
     inicio: $("#field-contract-start")?.value || "",
     fin: $("#field-contract-end")?.value || "",
+    frecuencia: $("#field-contract-frequency")?.value || "MENSUAL",
+    vencimientoHabitual: $("#field-contract-due-text")?.value || "",
+    proximoVencimiento: $("#field-contract-next-due")?.value || "",
+    criterioCotizacion: $("#field-contract-quote-criteria")?.value || "",
+    facturadoModo: $("#field-contract-billed-mode")?.value || "HECTAREAS",
+    facturadoValor: parseMoneyInput($("#field-contract-billed-value")?.value || 0),
+    facturadoBase: $("#field-contract-billed-base")?.value || "KG_SOJA",
+    facturadoTasa: parseMoneyInput($("#field-contract-billed-rate")?.value || 0),
+    efectivoModo: $("#field-contract-cash-mode")?.value || "NINGUNO",
+    efectivoValor: parseMoneyInput($("#field-contract-cash-value")?.value || 0),
+    efectivoBase: $("#field-contract-cash-base")?.value || "MISMA_FACTURADA",
+    efectivoTasa: parseMoneyInput($("#field-contract-cash-rate")?.value || 0),
     condiciones: $("#field-contract-notes")?.value || ""
   };
 }
@@ -1128,6 +1141,18 @@ function fillFieldContractForm(item) {
   $("#field-contract-hectares").value = item.hectareas || "";
   $("#field-contract-start").value = formatDateForInput(item.inicio);
   $("#field-contract-end").value = formatDateForInput(item.fin);
+  $("#field-contract-frequency").value = item.frecuencia || "MENSUAL";
+  $("#field-contract-due-text").value = item.vencimientoHabitual || "";
+  $("#field-contract-next-due").value = formatDateForInput(item.proximoVencimiento);
+  $("#field-contract-quote-criteria").value = item.criterioCotizacion || "";
+  $("#field-contract-billed-mode").value = item.facturadoModo || "HECTAREAS";
+  $("#field-contract-billed-value").value = item.facturadoValor || "";
+  $("#field-contract-billed-base").value = item.facturadoBase || "KG_SOJA";
+  $("#field-contract-billed-rate").value = item.facturadoTasa || "";
+  $("#field-contract-cash-mode").value = item.efectivoModo || "NINGUNO";
+  $("#field-contract-cash-value").value = item.efectivoValor || "";
+  $("#field-contract-cash-base").value = item.efectivoBase || "MISMA_FACTURADA";
+  $("#field-contract-cash-rate").value = item.efectivoTasa || "";
   $("#field-contract-notes").value = item.condiciones || "";
 }
 
@@ -1148,12 +1173,25 @@ function useFieldContractInCalculation(item = currentFieldContractForCalculation
   $("#field-lease-contract").value = item.nombre || "";
   $("#field-lease-client").value = item.arrendador || "";
   $("#field-lease-farm").value = item.campo || "";
-  $("#field-lease-hectares").value = item.hectareas || "";
   $("#field-lease-from").value = formatDateForInput(item.inicio);
   $("#field-lease-to").value = formatDateForInput(item.fin);
+  $("#field-lease-due-date").value = formatDateForInput(item.proximoVencimiento);
+  $("#field-lease-next-due").value = "";
+  $("#field-lease-cereal").value = fieldContractProductLabel(item.facturadoBase) || "";
+  $("#field-lease-market").value = item.criterioCotizacion || "";
+  $("#field-lease-unit").value = item.facturadoBase === "IMPORTE_FIJO" || item.facturadoBase === "PESOS_HA" || item.facturadoBase === "DOLARES_HA" ? "FIJO" : "KG";
   $("#field-lease-notes").value = item.condiciones || "";
   updateFieldLeasePreview();
   setFieldContractMessage("Contrato cargado en el calculo.", "ok");
+}
+
+function fieldContractProductLabel(base) {
+  const key = String(base || "").toUpperCase();
+  if (key.includes("SOJA")) return "Soja";
+  if (key.includes("CARNE")) return "Carne";
+  if (key.includes("DOLAR")) return "Dolar";
+  if (key.includes("PESO")) return "Pesos";
+  return "";
 }
 
 async function saveFieldContract(event) {
@@ -1179,18 +1217,15 @@ async function saveFieldContract(event) {
 }
 
 function fieldLeaseCurrentInput() {
-  const hectares = parseMoneyInput($("#field-lease-hectares")?.value || 0);
-  const kgPerHa = parseMoneyInput($("#field-lease-kg-ha")?.value || 0);
   const price = parseMoneyInput($("#field-lease-price")?.value || 0);
   const exchange = parseMoneyInput($("#field-lease-exchange")?.value || 0);
   const currencyType = $("#field-lease-currency")?.value || "ARS";
   const unit = $("#field-lease-unit")?.value || "KG";
-  const installments = Math.max(Number($("#field-lease-installments")?.value || 1), 1);
-  const totalKg = hectares * kgPerHa;
-  const totalTn = totalKg / 1000;
   const priceInPesos = currencyType === "USD" ? price * exchange : price;
-  const totalPesos = unit === "TN" ? totalTn * priceInPesos : totalKg * priceInPesos;
-  const installmentAmount = installments ? totalPesos / installments : totalPesos;
+  const contract = currentFieldContractForCalculation() || {};
+  const billed = calculateFieldContractComponent(contract, "FACTURADO", priceInPesos, unit);
+  const cash = calculateFieldContractComponent(contract, "EFECTIVO", priceInPesos, unit);
+  const totalPesos = billed.total + cash.total;
   return {
     contrato: $("#field-lease-contract")?.value || "",
     cliente: $("#field-lease-client")?.value || "",
@@ -1198,28 +1233,91 @@ function fieldLeaseCurrentInput() {
     fecha: $("#field-lease-date")?.value || new Date().toISOString().slice(0, 10),
     periodoDesde: $("#field-lease-from")?.value || "",
     periodoHasta: $("#field-lease-to")?.value || "",
-    hectareas: hectares,
-    cereal: $("#field-lease-cereal")?.value || "SOJA",
-    kgPorHa: kgPerHa,
+    vencimiento: $("#field-lease-due-date")?.value || "",
+    proximoVencimiento: $("#field-lease-next-due")?.value || "",
+    hectareas: Number(contract.hectareas || 0),
+    cereal: $("#field-lease-cereal")?.value || "",
+    mercado: $("#field-lease-market")?.value || "",
     unidadCotizacion: unit,
     moneda: currencyType,
     cotizacion: price,
     tipoCambio: exchange,
-    cuotas: installments,
-    frecuencia: $("#field-lease-frequency")?.value || "MENSUAL",
+    frecuencia: contract.frecuencia || "",
+    vencimientoHabitual: contract.vencimientoHabitual || "",
+    criterioCotizacion: contract.criterioCotizacion || "",
     observaciones: $("#field-lease-notes")?.value || "",
-    totalKg,
-    totalTn,
+    cotizaciones: state.fieldQuoteRows || [],
     cotizacionPesos: priceInPesos,
+    facturadoDetalle: billed,
+    efectivoDetalle: cash,
+    facturadoTotal: billed.total,
+    efectivoTotal: cash.total,
     totalPesos,
-    importeCuota: installmentAmount,
-    detalleCuotas: buildFieldLeaseInstallments({
-      fecha: $("#field-lease-date")?.value || new Date().toISOString().slice(0, 10),
-      cuotas: installments,
-      frecuencia: $("#field-lease-frequency")?.value || "MENSUAL",
-      importeCuota: installmentAmount
-    })
+    importeCuota: totalPesos
   };
+}
+
+function calculateFieldContractComponent(contract, type, priceInPesos, unit) {
+  const totalHectares = Number(contract.hectareas || 0);
+  const prefix = type === "EFECTIVO" ? "efectivo" : "facturado";
+  const mode = String(contract[`${prefix}Modo`] || (type === "EFECTIVO" ? "NINGUNO" : "HECTAREAS")).toUpperCase();
+  if (mode === "NINGUNO") return { tipo: type, modo: mode, hectareas: 0, tasa: 0, base: "", cantidad: 0, total: 0 };
+  const value = Number(contract[`${prefix}Valor`] || 0);
+  let base = String(contract[`${prefix}Base`] || "KG_SOJA").toUpperCase();
+  if (type === "EFECTIVO" && base === "MISMA_FACTURADA") base = String(contract.facturadoBase || "KG_SOJA").toUpperCase();
+  const rate = Number(contract[`${prefix}Tasa`] || 0) || (type === "EFECTIVO" ? Number(contract.facturadoTasa || 0) : 0);
+  let hectares = totalHectares;
+  if (mode === "HECTAREAS") hectares = value || totalHectares;
+  if (mode === "PORCENTAJE") hectares = totalHectares * value / 100;
+  if (mode === "IMPORTE_FIJO" || base === "IMPORTE_FIJO") {
+    return { tipo: type, modo: mode, hectareas: 0, tasa: value || rate, base, cantidad: 1, total: value || rate };
+  }
+  if (base === "PESOS_HA" || base === "DOLARES_HA") {
+    const total = hectares * rate * (base === "DOLARES_HA" ? Number($("#field-lease-exchange")?.value ? parseMoneyInput($("#field-lease-exchange").value) : 0) : 1);
+    return { tipo: type, modo: mode, hectareas, tasa: rate, base, cantidad: hectares, total };
+  }
+  const kg = hectares * rate;
+  const tn = kg / 1000;
+  const total = unit === "TN" ? tn * priceInPesos : kg * priceInPesos;
+  return { tipo: type, modo: mode, hectareas, tasa: rate, base, cantidad: kg, toneladas: tn, total };
+}
+
+function fieldQuoteAverage() {
+  const rows = state.fieldQuoteRows || [];
+  if (!rows.length) return 0;
+  return rows.reduce((sum, item) => sum + Number(item.cotizacion || 0), 0) / rows.length;
+}
+
+function renderFieldQuoteRows() {
+  const body = $("#field-quote-body");
+  if (!body) return;
+  const rows = state.fieldQuoteRows || [];
+  body.innerHTML = rows.length
+    ? rows.map((item) => `<tr>
+        <td>${escapeHtml(item.fecha || "-")}</td>
+        <td>${escapeHtml(item.mercado || "-")}</td>
+        <td>${escapeHtml(item.producto || "-")}</td>
+        <td>${moneyValue(item.cotizacion)}</td>
+        <td><button type="button" class="small-button danger-button" data-field-quote-remove="${escapeHtml(item.id)}">Quitar</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="5">Sin cotizaciones cargadas para promedio.</td></tr>`;
+}
+
+function addFieldQuoteRow() {
+  const cotizacion = parseMoneyInput($("#field-quote-price")?.value || 0);
+  if (!cotizacion) return;
+  state.fieldQuoteRows.push({
+    id: `COT-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    fecha: $("#field-quote-date")?.value || "",
+    mercado: $("#field-quote-market")?.value || $("#field-lease-market")?.value || "",
+    producto: $("#field-quote-product")?.value || $("#field-lease-cereal")?.value || "",
+    cotizacion
+  });
+  $("#field-quote-price").value = "";
+  renderFieldQuoteRows();
+  const average = fieldQuoteAverage();
+  if (average) setMoneyInput("#field-lease-price", average);
+  updateFieldLeasePreview();
 }
 
 function fieldLeaseFrequencyDays(frequency) {
@@ -1244,20 +1342,21 @@ function buildFieldLeaseInstallments({ fecha, cuotas, frecuencia, importeCuota }
 function updateFieldLeasePreview() {
   if (!$("#field-lease-total")) return;
   const calc = fieldLeaseCurrentInput();
-  $("#field-lease-total-cereal").textContent = `${plainNumberValue(calc.totalKg)} kg`;
-  $("#field-lease-total-tn").textContent = `${plainNumberValue(calc.totalTn)} tn`;
+  $("#field-lease-average").textContent = moneyValue(calc.cotizacionPesos);
+  $("#field-lease-billed-total").textContent = moneyValue(calc.facturadoTotal);
+  $("#field-lease-cash-total").textContent = moneyValue(calc.efectivoTotal);
   $("#field-lease-total").textContent = moneyValue(calc.totalPesos);
-  $("#field-lease-installment").textContent = moneyValue(calc.importeCuota);
-  $("#field-lease-installment-count").textContent = String(calc.cuotas || 1);
+  $("#field-lease-due-preview").textContent = calc.vencimiento ? formatDateForDisplay(calc.vencimiento) : "-";
 }
 
 function resetFieldLeaseForm() {
   $("#field-lease-form")?.reset();
   const today = new Date().toISOString().slice(0, 10);
   $("#field-lease-date").value = today;
-  $("#field-lease-installments").value = "1";
   $("#field-lease-currency").value = "ARS";
   $("#field-lease-unit").value = "KG";
+  state.fieldQuoteRows = [];
+  renderFieldQuoteRows();
   updateFieldLeasePreview();
   setFieldLeaseMessage("");
 }
@@ -1274,7 +1373,7 @@ function renderFieldLeases() {
         <td>${escapeHtml(item.cereal || "-")}</td>
         <td>${plainNumberValue(item.hectareas)}</td>
         <td>${moneyValue(item.totalPesos)}</td>
-        <td>${escapeHtml(item.cuotas || "1")} ${escapeHtml(item.frecuencia || "")}</td>
+        <td>${escapeHtml(item.vencimiento || item.fecha || "-")}</td>
         <td><button type="button" class="small-button" data-field-lease-open="${escapeHtml(item.id)}">Abrir</button> <button type="button" class="small-button" data-field-lease-print="${escapeHtml(item.id)}">Imprimir</button> <button type="button" class="small-button danger-button" data-field-lease-delete="${escapeHtml(item.id)}">Eliminar</button></td>
       </tr>`).join("")
     : `<tr><td colspan="8">Sin calculos de arrendamiento cargados.</td></tr>`;
@@ -1289,16 +1388,17 @@ function fillFieldLeaseForm(item) {
   $("#field-lease-date").value = formatDateForInput(item.fecha);
   $("#field-lease-from").value = formatDateForInput(item.periodoDesde);
   $("#field-lease-to").value = formatDateForInput(item.periodoHasta);
-  $("#field-lease-hectares").value = item.hectareas || "";
-  $("#field-lease-cereal").value = item.cereal || "SOJA";
-  $("#field-lease-kg-ha").value = item.kgPorHa || item.qqPorHa || "";
+  $("#field-lease-due-date").value = formatDateForInput(item.vencimiento);
+  $("#field-lease-next-due").value = formatDateForInput(item.proximoVencimiento);
+  $("#field-lease-cereal").value = item.cereal || "";
+  $("#field-lease-market").value = item.mercado || "";
   $("#field-lease-unit").value = item.unidadCotizacion || "KG";
   $("#field-lease-currency").value = item.moneda || "ARS";
   setMoneyInput("#field-lease-price", item.cotizacion || 0);
   setMoneyInput("#field-lease-exchange", item.tipoCambio || 0);
-  $("#field-lease-installments").value = item.cuotas || 1;
-  $("#field-lease-frequency").value = item.frecuencia || "MENSUAL";
   $("#field-lease-notes").value = item.observaciones || "";
+  state.fieldQuoteRows = Array.isArray(item.cotizaciones) ? item.cotizaciones : [];
+  renderFieldQuoteRows();
   updateFieldLeasePreview();
 }
 
@@ -1309,8 +1409,8 @@ async function saveFieldLease(event) {
     setFieldLeaseMessage("Cargue al menos contrato, cliente o campo.", "error");
     return;
   }
-  if (!payload.hectareas || !payload.kgPorHa || !payload.cotizacion || (payload.moneda === "USD" && !payload.tipoCambio)) {
-    setFieldLeaseMessage("Faltan hectareas, kilos por hectarea, cotizacion o tipo de cambio si es en dolares.", "error");
+  if (!payload.cotizacion && !payload.totalPesos) {
+    setFieldLeaseMessage("Falta cargar cotizacion/promedio o una regla fija del contrato.", "error");
     return;
   }
   try {
@@ -1334,19 +1434,22 @@ async function deleteFieldLease(id) {
 }
 
 function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
-  const detail = item.detalleCuotas || buildFieldLeaseInstallments(item);
   const title = safePdfTitle("Calculo_arrendamiento", item.cliente || item.campo || "campos", item.fecha || "");
   const popup = window.open("", "_blank", "width=1000,height=800");
   if (!popup) return;
+  const quoteRows = Array.isArray(item.cotizaciones) && item.cotizaciones.length
+    ? item.cotizaciones.map((row) => `<tr><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${moneyValue(row.cotizacion)}</td></tr>`).join("")
+    : `<tr><td colspan="4">Sin detalle de cotizaciones. Se informa la cotizacion/promedio cargado manualmente.</td></tr>`;
+  const componentRow = (label, detail) => `<tr><td>${label}</td><td>${escapeHtml(detail?.base || "-")}</td><td>${plainNumberValue(detail?.hectareas || 0)}</td><td>${plainNumberValue(detail?.tasa || 0)}</td><td>${plainNumberValue(detail?.cantidad || 0)}</td><td class="amount">${moneyValue(detail?.total || 0)}</td></tr>`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
-    body{font-family:Arial,sans-serif;margin:12mm;color:#173632}
-    header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px;margin-bottom:12px}
-    img{width:74px;height:74px;object-fit:contain;background:#173632;padding:6px}
+    body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22}
+    header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:12px}
+    img{width:160px;height:58px;object-fit:contain}
     h1{font-size:18px;margin:0} h2{font-size:13px;margin:12px 0 5px} p{margin:3px 0;font-size:11px}
-    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border:1px solid #cbd7d4;margin-bottom:10px}
-    .grid span,.grid strong{border-bottom:1px solid #cbd7d4;padding:5px;font-size:10px}.grid span{background:#edf3f1;color:#52706b}.grid strong{font-size:11px}
-    table{width:100%;border-collapse:collapse;font-size:10px;margin-top:5px}th,td{border:1px solid #cbd7d4;padding:5px;text-align:left}th{background:#edf3f1}.amount{text-align:right;font-weight:700}
-    .total{background:#fff3e8;font-weight:700}.note{border:1px solid #cbd7d4;padding:7px;margin-top:10px;font-size:10px}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border:1px solid #dbcbb8;margin-bottom:10px}
+    .grid span,.grid strong{border-bottom:1px solid #dbcbb8;padding:5px;font-size:10px}.grid span{background:#f8f2ea;color:#7b5a32}.grid strong{font-size:11px}
+    table{width:100%;border-collapse:collapse;font-size:10px;margin-top:5px}th,td{border:1px solid #dbcbb8;padding:5px;text-align:left}th{background:#f8f2ea}.amount{text-align:right;font-weight:700}
+    .total{background:#fff3e8;font-weight:700}.cash{background:#fff8ed}.note{border:1px solid #dbcbb8;padding:7px;margin-top:10px;font-size:10px}
     button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:10mm}body{margin:0}button{display:none}}
   </style></head><body>
     <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Campos - Calculo de arrendamiento</h1><p>Hugo Pinna - Contratos y Campos</p><p>Fecha: ${escapeHtml(item.fecha || "-")}</p></div></header>
@@ -1355,16 +1458,21 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
       <span>Cliente / arrendador</span><strong>${escapeHtml(item.cliente || "-")}</strong>
       <span>Campo</span><strong>${escapeHtml(item.campo || "-")}</strong>
       <span>Periodo</span><strong>${escapeHtml(item.periodoDesde || "-")} a ${escapeHtml(item.periodoHasta || "-")}</strong>
+      <span>Vencimiento cuota</span><strong>${escapeHtml(item.vencimiento || "-")}</strong>
+      <span>Proximo vencimiento</span><strong>${escapeHtml(item.proximoVencimiento || "-")}</strong>
       <span>Hectareas</span><strong>${plainNumberValue(item.hectareas)}</strong>
-      <span>Cereal</span><strong>${escapeHtml(item.cereal || "-")}</strong>
-      <span>Kg por hectarea</span><strong>${plainNumberValue(item.kgPorHa || item.qqPorHa)}</strong>
-      <span>Total kg</span><strong>${plainNumberValue(item.totalKg)} kg</strong>
-      <span>Total toneladas</span><strong>${plainNumberValue(item.totalTn)} tn</strong>
+      <span>Producto / referencia</span><strong>${escapeHtml([item.cereal, item.mercado].filter(Boolean).join(" - ") || "-")}</strong>
       <span>Cotizacion por ${item.unidadCotizacion === "TN" ? "tonelada" : "kg"}</span><strong>${item.moneda === "USD" ? `USD ${plainNumberValue(item.cotizacion)} x TC ${moneyValue(item.tipoCambio)}` : moneyValue(item.cotizacion)}</strong>
-      <span>Total calculado</span><strong>${moneyValue(item.totalPesos)}</strong>
+      <span>Total cuota</span><strong>${moneyValue(item.totalPesos)}</strong>
     </div>
-    <h2>Cuotas</h2>
-    <table><thead><tr><th>Cuota</th><th>Fecha estimada</th><th>Importe</th></tr></thead><tbody>${detail.map((row) => `<tr><td>${row.numero}</td><td>${escapeHtml(row.fecha || "-")}</td><td class="amount">${moneyValue(row.importe)}</td></tr>`).join("")}<tr class="total"><td colspan="2">Total</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr></tbody></table>
+    <h2>Cotizaciones utilizadas</h2>
+    <table><thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th></tr></thead><tbody>${quoteRows}<tr class="total"><td colspan="3">Promedio / cotizacion aplicada</td><td class="amount">${moneyValue(item.cotizacionPesos || item.cotizacion)}</td></tr></tbody></table>
+    <h2>Detalle de calculo de la cuota</h2>
+    <table><thead><tr><th>Bloque</th><th>Base</th><th>Has.</th><th>Kg/ha o importe</th><th>Cantidad kg</th><th>Importe</th></tr></thead><tbody>
+      ${componentRow("Facturado / contrato", item.facturadoDetalle || {})}
+      ${item.efectivoTotal ? componentRow("Efectivo", item.efectivoDetalle || {}) : ""}
+      <tr class="total"><td colspan="5">Total cuota</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr>
+    </tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
     <button onclick="window.print()">Imprimir / guardar PDF</button>
   </body></html>`);
@@ -6711,6 +6819,16 @@ async function init() {
   $("#field-lease-form").addEventListener("submit", saveFieldLease);
   $("#field-lease-clear").addEventListener("click", resetFieldLeaseForm);
   $("#field-lease-print").addEventListener("click", () => printFieldLeaseReport(fieldLeaseCurrentInput()));
+  $("#field-quote-add").addEventListener("click", addFieldQuoteRow);
+  $("#field-quote-body").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-quote-remove]");
+    if (!button) return;
+    state.fieldQuoteRows = state.fieldQuoteRows.filter((item) => String(item.id) !== String(button.dataset.fieldQuoteRemove));
+    renderFieldQuoteRows();
+    const average = fieldQuoteAverage();
+    if (average) setMoneyInput("#field-lease-price", average);
+    updateFieldLeasePreview();
+  });
   $all("#field-lease-form input, #field-lease-form select, #field-lease-form textarea").forEach((node) => {
     node.addEventListener("input", updateFieldLeasePreview);
     node.addEventListener("change", updateFieldLeasePreview);
