@@ -26,6 +26,7 @@
   commissionistRows: [],
   fieldQuoteRows: [],
   fieldLeasePaymentRows: [],
+  fieldContractPartyRows: [],
   activeFieldContract: null,
   fieldDataLoaded: false,
   usuario: null,
@@ -1078,6 +1079,97 @@ function updateFieldContractPdfSummary(contractId = $("#field-contract-id")?.val
   summary.textContent = docs.length ? `${docs.length} PDF asociado/s.` : "Sin PDF asociado.";
 }
 
+function fieldContractPartyTypeLabel(value) {
+  const key = String(value || "").toUpperCase();
+  return key === "ARRENDATARIO" ? "Arrendatario / paga" : "Arrendador / cobra";
+}
+
+function normalizeFieldContractParty(row = {}) {
+  return {
+    id: row.id || `PARTE-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    tipo: String(row.tipo || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR",
+    nombre: String(row.nombre || "").trim(),
+    cuit: String(row.cuit || "").trim(),
+    porcentaje: parseMoneyInput(row.porcentaje || 0),
+    observaciones: String(row.observaciones || "").trim()
+  };
+}
+
+function fieldContractPartyRowsFromContract(contract = {}) {
+  const rows = Array.isArray(contract.partes)
+    ? contract.partes.map(normalizeFieldContractParty).filter((row) => row.nombre || row.porcentaje)
+    : [];
+  if (rows.length) return rows;
+  const fallback = [];
+  if (contract.arrendador) {
+    fallback.push(normalizeFieldContractParty({
+      tipo: "ARRENDADOR",
+      nombre: contract.arrendador,
+      porcentaje: 100
+    }));
+  }
+  if (contract.arrendatario) {
+    fallback.push(normalizeFieldContractParty({
+      tipo: "ARRENDATARIO",
+      nombre: contract.arrendatario,
+      porcentaje: 100
+    }));
+  }
+  return fallback;
+}
+
+function fieldContractPartyTotals(rows = state.fieldContractPartyRows || []) {
+  return rows.reduce((acc, row) => {
+    const type = String(row.tipo || "").toUpperCase();
+    const percent = parseMoneyInput(row.porcentaje || 0);
+    if (type === "ARRENDATARIO") acc.arrendatarios += percent;
+    else acc.arrendadores += percent;
+    return acc;
+  }, { arrendadores: 0, arrendatarios: 0 });
+}
+
+function renderFieldContractPartyRows() {
+  const body = $("#field-contract-party-body");
+  if (!body) return;
+  const rows = state.fieldContractPartyRows || [];
+  body.innerHTML = rows.length
+    ? rows.map((row) => `<tr>
+        <td>${escapeHtml(fieldContractPartyTypeLabel(row.tipo))}</td>
+        <td>${escapeHtml(row.nombre || "-")}</td>
+        <td>${escapeHtml(row.cuit || "-")}</td>
+        <td>${plainNumberValue(row.porcentaje || 0)}%</td>
+        <td>${escapeHtml(row.observaciones || "-")}</td>
+        <td><button type="button" class="small-button danger-button" data-field-contract-party-remove="${escapeHtml(row.id)}">Quitar</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="6">Sin partes cargadas. Se usaran arrendador y arrendatario principal al 100%.</td></tr>`;
+  const totals = fieldContractPartyTotals(rows);
+  if ($("#field-contract-landlord-percent")) $("#field-contract-landlord-percent").textContent = `${plainNumberValue(totals.arrendadores)}%`;
+  if ($("#field-contract-tenant-percent")) $("#field-contract-tenant-percent").textContent = `${plainNumberValue(totals.arrendatarios)}%`;
+}
+
+function addFieldContractPartyRow() {
+  const name = $("#field-contract-party-name")?.value || "";
+  const percent = parseMoneyInput($("#field-contract-party-percent")?.value || 0);
+  if (!name || !percent) {
+    setFieldContractMessage("Cargue nombre y porcentaje para agregar una parte del contrato.", "error");
+    return;
+  }
+  state.fieldContractPartyRows.push(normalizeFieldContractParty({
+    tipo: $("#field-contract-party-type")?.value || "ARRENDADOR",
+    nombre: name,
+    cuit: $("#field-contract-party-cuit")?.value || "",
+    porcentaje: percent,
+    observaciones: $("#field-contract-party-notes")?.value || ""
+  }));
+  $("#field-contract-party-name").value = "";
+  $("#field-contract-party-cuit").value = "";
+  $("#field-contract-party-percent").value = "";
+  $("#field-contract-party-notes").value = "";
+  renderFieldContractPartyRows();
+  syncFieldContractFormToActive();
+  setFieldContractMessage("");
+}
+
 function fieldContractPayload() {
   return {
     id: $("#field-contract-id")?.value || "",
@@ -1100,7 +1192,8 @@ function fieldContractPayload() {
     efectivoValor: parseMoneyInput($("#field-contract-cash-value")?.value || 0),
     efectivoBase: $("#field-contract-cash-base")?.value || "MISMA_FACTURADA",
     efectivoTasa: parseMoneyInput($("#field-contract-cash-rate")?.value || 0),
-    condiciones: $("#field-contract-notes")?.value || ""
+    condiciones: $("#field-contract-notes")?.value || "",
+    partes: state.fieldContractPartyRows || []
   };
 }
 
@@ -1140,10 +1233,15 @@ function fieldContractSearchLabel(item) {
   return [item.nombre, item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" - ");
 }
 
+function fieldContractSearchHaystack(item) {
+  const partyNames = fieldContractPartyRowsFromContract(item).map((row) => row.nombre).filter(Boolean).join(" ");
+  return [item.nombre, item.arrendador, item.arrendatario, item.campo, partyNames].filter(Boolean).join(" ");
+}
+
 function fieldContractMatchesQuery(item, query) {
   const words = normalizeSearch(query).split(" ").filter(Boolean);
   if (!words.length) return false;
-  const haystack = normalizeSearch(fieldContractSearchLabel(item));
+  const haystack = normalizeSearch(fieldContractSearchHaystack(item));
   return words.every((word) => haystack.includes(word));
 }
 
@@ -1165,7 +1263,7 @@ function renderFieldContractSuggestions() {
         <div class="suggestion-row">
           <div>
             <strong>${escapeHtml(item.nombre || item.campo || "Contrato sin referencia")}</strong>
-            <span>${escapeHtml([item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" / ") || "Sin partes cargadas")} · ${plainNumberValue(item.hectareas)} has.</span>
+            <span>${escapeHtml([item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" / ") || "Sin partes cargadas")} · ${plainNumberValue(item.hectareas)} has. · ${fieldContractPartyRowsFromContract(item).length} parte/s</span>
           </div>
           <button type="button" class="small-button" data-field-contract-pick="${escapeHtml(item.id)}">Elegir</button>
         </div>
@@ -1177,7 +1275,7 @@ function findFieldContractBySearch() {
   const query = normalizeSearch($("#field-contract-search")?.value || "");
   if (!query) return null;
   return (state.fieldContracts || []).find((item) => {
-    const label = normalizeSearch([item.nombre, item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" "));
+    const label = normalizeSearch(fieldContractSearchHaystack(item));
     const compactLabel = normalizeSearch([item.nombre, item.arrendador, item.campo].filter(Boolean).join(" - "));
     return label === query || compactLabel === query || label.includes(query) || compactLabel.includes(query);
   }) || null;
@@ -1208,6 +1306,7 @@ function currentFieldContractForCalculation() {
   if (
     payload.nombre || payload.arrendador || payload.campo || payload.hectareas
     || payload.facturadoValor || payload.facturadoTasa || payload.efectivoValor || payload.efectivoTasa
+    || (Array.isArray(payload.partes) && payload.partes.length)
   ) {
     state.activeFieldContract = payload;
     return payload;
@@ -1229,6 +1328,7 @@ function fieldContractPayloadForCalculation() {
   const hasVisibleRule = Boolean(
     visible.nombre || visible.arrendador || visible.campo || visible.hectareas
     || visible.facturadoValor || visible.facturadoTasa || visible.efectivoValor || visible.efectivoTasa
+    || (Array.isArray(visible.partes) && visible.partes.length)
   );
   if (!hasVisibleRule) return active;
   return {
@@ -1242,7 +1342,8 @@ function fieldContractPayloadForCalculation() {
     facturadoBase: visible.facturadoBase || active.facturadoBase || "KG_SOJA",
     efectivoBase: visible.efectivoBase || active.efectivoBase || "MISMA_FACTURADA",
     facturadoModo: visible.facturadoModo || active.facturadoModo || "HECTAREAS",
-    efectivoModo: visible.efectivoModo || active.efectivoModo || "NINGUNO"
+    efectivoModo: visible.efectivoModo || active.efectivoModo || "NINGUNO",
+    partes: Array.isArray(visible.partes) && visible.partes.length ? visible.partes : (active.partes || [])
   };
 }
 
@@ -1251,6 +1352,7 @@ function syncFieldContractFormToActive() {
   if (
     payload.nombre || payload.arrendador || payload.campo || payload.hectareas
     || payload.facturadoValor || payload.facturadoTasa || payload.efectivoValor || payload.efectivoTasa
+    || (Array.isArray(payload.partes) && payload.partes.length)
   ) {
     state.activeFieldContract = payload;
   }
@@ -1281,6 +1383,8 @@ function fillFieldContractForm(item) {
   $("#field-contract-cash-base").value = item.efectivoBase || "MISMA_FACTURADA";
   $("#field-contract-cash-rate").value = item.efectivoTasa || "";
   $("#field-contract-notes").value = item.condiciones || "";
+  state.fieldContractPartyRows = Array.isArray(item.partes) ? item.partes.map(normalizeFieldContractParty) : [];
+  renderFieldContractPartyRows();
   updateFieldContractPdfSummary(item.id || "");
 }
 
@@ -1291,6 +1395,8 @@ function resetFieldContractForm() {
   $("#field-contract-pdf").value = "";
   $("#field-contract-suggestions").hidden = true;
   $("#field-contract-suggestions").innerHTML = "";
+  state.fieldContractPartyRows = [];
+  renderFieldContractPartyRows();
   updateFieldContractPdfSummary("");
   setFieldContractMessage("");
 }
@@ -1443,6 +1549,8 @@ function fieldLeaseCurrentInput() {
   const cash = fieldLeaseComponentForInstallment(cashAnnual, frequencyDivisor);
   const totalPesos = billed.total + cash.total;
   const commission = calculateFieldLeaseCommission(totalPesos, billed.total, cash.total);
+  const partes = fieldContractPartyRowsFromContract(contract);
+  const distribucionPartes = calculateFieldLeasePartyDistribution(partes, billed.total, cash.total, commission.total);
   return {
     id: leaseId,
     contrato: $("#field-lease-contract")?.value || "",
@@ -1468,6 +1576,8 @@ function fieldLeaseCurrentInput() {
     observaciones: $("#field-lease-notes")?.value || "",
     cotizaciones: state.fieldQuoteRows || [],
     pagos: state.fieldLeasePaymentRows || [],
+    partes,
+    distribucionPartes,
     cotizacionPesos: priceInPesos,
     facturadoDetalle: billed,
     efectivoDetalle: cash,
@@ -1525,6 +1635,29 @@ function calculateFieldLeaseCommission(total, billed, cash) {
   const cashTotal = Number(cash || 0) * cashRate / 100;
   const commissionTotal = generalTotal + billedTotal + cashTotal;
   return { base, rate, baseAmount, generalTotal, billedRate, billedTotal, cashRate, cashTotal, total: commissionTotal };
+}
+
+function calculateFieldLeasePartyDistribution(partes = [], billedTotal = 0, cashTotal = 0, commissionTotal = 0) {
+  const rows = (partes || []).map(normalizeFieldContractParty).filter((row) => row.nombre || row.porcentaje);
+  const totals = fieldContractPartyTotals(rows);
+  return rows.map((row) => {
+    const type = String(row.tipo || "").toUpperCase();
+    const typeTotal = type === "ARRENDATARIO" ? totals.arrendatarios : totals.arrendadores;
+    const percent = parseMoneyInput(row.porcentaje || 0);
+    const factor = typeTotal > 0 ? percent / typeTotal : percent / 100;
+    const facturado = Number(billedTotal || 0) * factor;
+    const efectivo = Number(cashTotal || 0) * factor;
+    const comision = Number(commissionTotal || 0) * factor;
+    return {
+      ...row,
+      porcentajeNormalizado: factor * 100,
+      facturado,
+      efectivo,
+      totalCuota: facturado + efectivo,
+      comision,
+      totalConComision: facturado + efectivo + comision
+    };
+  });
 }
 
 function calculateFieldContractComponent(contract, type, priceInPesos, unit) {
@@ -1639,11 +1772,29 @@ function updateFieldLeasePreview() {
   setPreview("#field-lease-commission-total", moneyValue(calc.comisionImporte));
   setPreview("#field-lease-grand-total", moneyValue(calc.totalConComision));
   setPreview("#field-lease-due-preview", calc.vencimiento ? formatDisplayDate(calc.vencimiento) : "-");
+  renderFieldLeasePartyDistributionRows(calc.distribucionPartes || []);
   renderFieldLeasePaymentRows(calc.totalConComision);
   const messageNode = $("#field-lease-message");
   if (messageNode && calc.totalPesos && /Falta|promedio esta cargado/i.test(messageNode.textContent || "")) {
     setFieldLeaseMessage("");
   }
+}
+
+function renderFieldLeasePartyDistributionRows(rows = []) {
+  const body = $("#field-lease-party-distribution-body");
+  if (!body) return;
+  body.innerHTML = rows.length
+    ? rows.map((row) => `<tr>
+        <td>${escapeHtml(fieldContractPartyTypeLabel(row.tipo))}</td>
+        <td>${escapeHtml(row.nombre || "-")}</td>
+        <td>${plainNumberValue(row.porcentaje || 0)}%</td>
+        <td class="amount">${moneyValue(row.facturado || 0)}</td>
+        <td class="amount">${moneyValue(row.efectivo || 0)}</td>
+        <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
+        <td class="amount">${moneyValue(row.comision || 0)}</td>
+        <td class="amount">${moneyValue(row.totalConComision || row.totalCuota || 0)}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="8">Sin distribucion especial. Se usaran las partes principales del contrato.</td></tr>`;
 }
 
 function fieldLeaseMissingRuleMessage(payload) {
@@ -1677,6 +1828,85 @@ function fieldLeasePaymentsTotal() {
   return (state.fieldLeasePaymentRows || []).reduce((sum, item) => sum + parseMoneyInput(item.importe || 0), 0);
 }
 
+function isFieldLeaseCommissionPayment(item) {
+  const concept = String(item?.concepto || "").toUpperCase();
+  return concept === "COMISION_COBRADA" || concept === "COMISION_DESCONTADA";
+}
+
+function fieldLeasePaymentTotals() {
+  return (state.fieldLeasePaymentRows || []).reduce((acc, item) => {
+    const amount = parseMoneyInput(item.importe || 0);
+    acc.aplicado += amount;
+    if (isFieldLeaseCommissionPayment(item)) acc.comision += amount;
+    else acc.pagado += amount;
+    return acc;
+  }, { pagado: 0, comision: 0, aplicado: 0 });
+}
+
+function fieldLeasePaymentConceptLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "PAGO_FACTURADO") return "Pago facturado / contrato";
+  if (key === "PAGO_EFECTIVO") return "Pago efectivo";
+  if (key === "COMISION_COBRADA") return "Comision cobrada";
+  if (key === "COMISION_DESCONTADA") return "Comision descontada";
+  if (key === "OTRO") return "Otro ajuste";
+  return "Pago de cuota";
+}
+
+function fieldLeasePaymentPartyLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "ARRENDADOR") return "Arrendador";
+  if (key === "ARRENDATARIO") return "Arrendatario";
+  if (key === "AMBAS") return "Ambas partes";
+  return "General";
+}
+
+function fieldLeaseCommissionApplicationLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "SUMA_PAGADOR") return "Se suma al que paga";
+  if (key === "DESCUENTA_COBRADOR") return "Se descuenta al que cobra";
+  if (key === "FACTURA_APARTE") return "Factura aparte";
+  return "No aplica";
+}
+
+function fieldLeasePaymentStatusLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "FACTURADA") return "Facturada";
+  if (key === "PAGADA") return "Pagada";
+  if (key === "DESCONTADA") return "Descontada";
+  if (key === "INFORMADA") return "Informada";
+  return "Pendiente";
+}
+
+function fieldLeasePaymentAppliesToParty(item, party) {
+  const itemParty = String(item?.parte || "GENERAL").toUpperCase();
+  return itemParty === "GENERAL" || itemParty === "AMBAS" || itemParty === party;
+}
+
+function fieldLeasePartySummary(rows, baseTotal, party) {
+  return (rows || []).reduce((acc, item) => {
+    if (!fieldLeasePaymentAppliesToParty(item, party)) return acc;
+    const amount = parseMoneyInput(item.importe || 0);
+    const application = String(item.aplicacionComision || "NO_APLICA").toUpperCase();
+    if (isFieldLeaseCommissionPayment(item)) {
+      if (application === "DESCUENTA_COBRADOR" && party === "ARRENDADOR") acc.comisionDescontada += amount;
+      else if (application === "SUMA_PAGADOR" && party === "ARRENDATARIO") acc.comisionSumada += amount;
+      else if (application === "FACTURA_APARTE") acc.comisionFacturaAparte += amount;
+      else acc.comisionInformada += amount;
+    } else {
+      acc.pagos += amount;
+    }
+    return acc;
+  }, {
+    base: Number(baseTotal || 0),
+    pagos: 0,
+    comisionSumada: 0,
+    comisionDescontada: 0,
+    comisionFacturaAparte: 0,
+    comisionInformada: 0
+  });
+}
+
 function renderFieldLeasePaymentRows(totalDue = fieldLeaseCurrentInput().totalConComision) {
   const body = $("#field-payment-body");
   if (!body) return;
@@ -1684,15 +1914,20 @@ function renderFieldLeasePaymentRows(totalDue = fieldLeaseCurrentInput().totalCo
   body.innerHTML = rows.length
     ? rows.map((item) => `<tr>
         <td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(item.fecha)) || item.fecha || "-")}</td>
+        <td>${escapeHtml(fieldLeasePaymentConceptLabel(item.concepto))}</td>
+        <td>${escapeHtml(fieldLeasePaymentPartyLabel(item.parte))}</td>
+        <td>${escapeHtml(fieldLeaseCommissionApplicationLabel(item.aplicacionComision))}</td>
+        <td>${escapeHtml(fieldLeasePaymentStatusLabel(item.estado))}</td>
         <td>${escapeHtml(item.medio || "-")}</td>
         <td>${escapeHtml(item.referencia || "-")}</td>
         <td class="amount">${moneyValue(item.importe || 0)}</td>
         <td><button type="button" class="small-button danger-button" data-field-payment-remove="${escapeHtml(item.id)}">Quitar</button></td>
       </tr>`).join("")
-    : `<tr><td colspan="5">Sin pagos registrados para esta cuota.</td></tr>`;
-  const paid = fieldLeasePaymentsTotal();
-  const balance = Number(totalDue || 0) - paid;
-  if ($("#field-payment-paid")) $("#field-payment-paid").textContent = moneyValue(paid);
+    : `<tr><td colspan="9">Sin pagos registrados para esta cuota.</td></tr>`;
+  const totals = fieldLeasePaymentTotals();
+  const balance = Number(totalDue || 0) - totals.aplicado;
+  if ($("#field-payment-paid")) $("#field-payment-paid").textContent = moneyValue(totals.pagado);
+  if ($("#field-payment-commission")) $("#field-payment-commission").textContent = moneyValue(totals.comision);
   if ($("#field-payment-balance")) $("#field-payment-balance").textContent = moneyValue(balance);
 }
 
@@ -1705,6 +1940,10 @@ function addFieldLeasePaymentRow() {
   state.fieldLeasePaymentRows.push({
     id: `PAGO-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     fecha: $("#field-payment-date")?.value || new Date().toISOString().slice(0, 10),
+    concepto: $("#field-payment-concept")?.value || "PAGO_CUOTA",
+    parte: $("#field-payment-party")?.value || "GENERAL",
+    aplicacionComision: $("#field-payment-commission-application")?.value || "NO_APLICA",
+    estado: $("#field-payment-status")?.value || "PENDIENTE",
     medio: $("#field-payment-method")?.value || "Transferencia",
     referencia: $("#field-payment-reference")?.value || "",
     importe: amount
@@ -1810,9 +2049,28 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
   const billedTotal = Number(item.facturadoTotal || 0);
   const commissionTotal = Number(item.comisionImporte || 0);
   const finalTotal = Number(item.totalConComision || item.totalPesos || 0);
+  const distributionRowsData = Array.isArray(item.distribucionPartes) && item.distribucionPartes.length
+    ? item.distribucionPartes
+    : calculateFieldLeasePartyDistribution(
+        Array.isArray(item.partes) && item.partes.length ? item.partes : fieldContractPartyRowsFromContract({
+          arrendador: item.cliente,
+          arrendatario: item.arrendatario
+        }),
+        billedTotal,
+        cashTotal,
+        commissionTotal
+      );
   const paymentRowsData = Array.isArray(item.pagos) ? item.pagos : [];
-  const paymentsTotal = paymentRowsData.reduce((sum, payment) => sum + parseMoneyInput(payment.importe || 0), 0);
-  const paymentBalance = finalTotal - paymentsTotal;
+  const landlordSummary = fieldLeasePartySummary(paymentRowsData, finalTotal, "ARRENDADOR");
+  const tenantSummary = fieldLeasePartySummary(paymentRowsData, finalTotal, "ARRENDATARIO");
+  const paymentsTotals = paymentRowsData.reduce((acc, payment) => {
+    const amount = parseMoneyInput(payment.importe || 0);
+    acc.aplicado += amount;
+    if (isFieldLeaseCommissionPayment(payment)) acc.comision += amount;
+    else acc.pagado += amount;
+    return acc;
+  }, { pagado: 0, comision: 0, aplicado: 0 });
+  const paymentBalance = finalTotal - paymentsTotals.aplicado;
   const divisorText = item.frecuenciaDivisor && item.frecuenciaDivisor > 1
     ? `Importes de la cuota calculados sobre base anual / ${plainNumberValue(item.frecuenciaDivisor)}.`
     : "Importes calculados para el vencimiento informado.";
@@ -1834,8 +2092,28 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     ? `<h2>Comision</h2><table><thead><tr><th>Concepto</th><th>Aplica sobre</th><th>%</th><th>Base</th><th>Importe</th></tr></thead><tbody>${commissionRows}<tr class="total"><td colspan="4">Total comision</td><td class="amount">${moneyValue(commissionTotal)}</td></tr></tbody></table>`
     : "";
   const paymentRows = paymentRowsData.length
-    ? paymentRowsData.map((payment) => `<tr><td>${fieldReportDate(payment.fecha)}</td><td>${escapeHtml(payment.medio || "-")}</td><td>${escapeHtml(payment.referencia || "-")}</td><td class="amount">${moneyValue(payment.importe || 0)}</td></tr>`).join("")
-    : `<tr><td colspan="4">Sin pagos registrados para esta cuota.</td></tr>`;
+    ? paymentRowsData.map((payment) => `<tr><td>${fieldReportDate(payment.fecha)}</td><td>${escapeHtml(fieldLeasePaymentConceptLabel(payment.concepto))}</td><td>${escapeHtml(fieldLeasePaymentPartyLabel(payment.parte))}</td><td>${escapeHtml(fieldLeaseCommissionApplicationLabel(payment.aplicacionComision))}</td><td>${escapeHtml(fieldLeasePaymentStatusLabel(payment.estado))}</td><td>${escapeHtml(payment.medio || "-")}</td><td>${escapeHtml(payment.referencia || "-")}</td><td class="amount">${moneyValue(payment.importe || 0)}</td></tr>`).join("")
+    : `<tr><td colspan="8">Sin pagos registrados para esta cuota.</td></tr>`;
+  const distributionRows = distributionRowsData.length
+    ? distributionRowsData.map((row) => `<tr>
+        <td>${escapeHtml(fieldContractPartyTypeLabel(row.tipo))}</td>
+        <td>${escapeHtml(row.nombre || "-")}</td>
+        <td>${escapeHtml(row.cuit || "-")}</td>
+        <td class="amount">${plainNumberValue(row.porcentaje || 0)}%</td>
+        <td class="amount">${moneyValue(row.facturado || 0)}</td>
+        <td class="amount">${moneyValue(row.efectivo || 0)}</td>
+        <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
+        <td class="amount">${moneyValue(row.comision || 0)}</td>
+        <td class="amount">${moneyValue(row.totalConComision || row.totalCuota || 0)}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="9">Sin distribucion por partes cargada.</td></tr>`;
+  const partySummaryRow = (label, summary, role) => {
+    const partyTotal = role === "PAGADOR"
+      ? summary.base + summary.comisionSumada
+      : summary.base - summary.comisionDescontada;
+    const balance = partyTotal - summary.pagos;
+    return `<tr><td>${label}</td><td class="amount">${moneyValue(summary.base)}</td><td class="amount">${moneyValue(summary.comisionSumada)}</td><td class="amount">${moneyValue(summary.comisionDescontada)}</td><td class="amount">${moneyValue(summary.comisionFacturaAparte)}</td><td class="amount">${moneyValue(summary.pagos)}</td><td class="amount">${moneyValue(balance)}</td></tr>`;
+  };
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
     body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22;font-size:10.5px}
     header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:10px}
@@ -1856,7 +2134,8 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
       <div class="box"><span>Facturado / contrato</span><strong>${moneyValue(billedTotal)}</strong></div>
       <div class="box"><span>Efectivo</span><strong>${moneyValue(cashTotal)}</strong></div>
       <div class="box main"><span>${commissionTotal ? "Total con comision" : "Total cuota"}</span><strong>${moneyValue(finalTotal)}</strong></div>
-      <div class="box"><span>Pagado</span><strong>${moneyValue(paymentsTotal)}</strong></div>
+      <div class="box"><span>Pagado</span><strong>${moneyValue(paymentsTotals.pagado)}</strong></div>
+      <div class="box"><span>Comision/descuento</span><strong>${moneyValue(paymentsTotals.comision)}</strong></div>
       <div class="box main"><span>Saldo</span><strong>${moneyValue(paymentBalance)}</strong></div>
     </section>
     <div class="grid">
@@ -1881,8 +2160,17 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
       <tr class="total"><td colspan="7">Total cuota</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr>
     </tbody></table>
     ${commissionBlock}
+    <h2>Distribucion por partes del contrato</h2>
+    <table><thead><tr><th>Tipo</th><th>Parte</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision proporcional</th><th>Total con comision</th></tr></thead><tbody>
+      ${distributionRows}
+    </tbody></table>
+    <h2>Aplicacion general de pagos/comisiones</h2>
+    <table><thead><tr><th>Parte</th><th>Base cuota</th><th>Comision sumada</th><th>Comision descontada</th><th>Factura aparte</th><th>Pagos registrados</th><th>Saldo informado</th></tr></thead><tbody>
+      ${partySummaryRow(`Arrendador - ${escapeHtml(item.cliente || "-")}`, landlordSummary, "COBRADOR")}
+      ${partySummaryRow(`Arrendatario - ${escapeHtml(item.arrendatario || "-")}`, tenantSummary, "PAGADOR")}
+    </tbody></table>
     <h2>Pagos registrados de la cuota</h2>
-    <table><thead><tr><th>Fecha</th><th>Medio</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="3">Total pagado</td><td class="amount">${moneyValue(paymentsTotal)}</td></tr><tr class="total"><td colspan="3">Saldo pendiente</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Aplicacion</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="7">Total pagado</td><td class="amount">${moneyValue(paymentsTotals.pagado)}</td></tr><tr class="total"><td colspan="7">Comision/descuento aplicado</td><td class="amount">${moneyValue(paymentsTotals.comision)}</td></tr><tr class="total"><td colspan="7">Saldo pendiente general</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>
     <h2>Cotizaciones utilizadas</h2>
     <table><thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th></tr></thead><tbody>${quoteRows}<tr class="total"><td colspan="3">Promedio / cotizacion aplicada</td><td class="amount">${moneyValue(item.cotizacionPesos || item.cotizacion)}</td></tr></tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
@@ -7228,6 +7516,7 @@ async function init() {
   $("#field-contract-use").addEventListener("click", () => useFieldContractInCalculation());
   $("#field-contract-pdf-upload").addEventListener("click", uploadFieldContractPdf);
   $("#field-contract-pdf-open").addEventListener("click", () => openFieldContractPdf());
+  $("#field-contract-party-add").addEventListener("click", addFieldContractPartyRow);
   $all("#field-contract-form input, #field-contract-form select, #field-contract-form textarea").forEach((node) => {
     node.addEventListener("input", syncFieldContractFormToActive);
     node.addEventListener("change", syncFieldContractFormToActive);
@@ -7268,6 +7557,13 @@ async function init() {
     if (useButton && item) useFieldContractInCalculation(item);
     if (docButton) openFieldContractPdf(id);
     if (deleteButton) deleteFieldContract(id);
+  });
+  $("#field-contract-party-body").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-contract-party-remove]");
+    if (!button) return;
+    state.fieldContractPartyRows = state.fieldContractPartyRows.filter((item) => String(item.id) !== String(button.dataset.fieldContractPartyRemove));
+    renderFieldContractPartyRows();
+    syncFieldContractFormToActive();
   });
   $("#field-lease-form").addEventListener("submit", saveFieldLease);
   $("#field-lease-clear").addEventListener("click", resetFieldLeaseForm);
