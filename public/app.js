@@ -62,6 +62,15 @@ async function fetchJson(path, options = {}) {
   return response.json();
 }
 
+async function fetchJsonOptional(path, fallback) {
+  try {
+    return await fetchJson(path);
+  } catch (error) {
+    console.warn(`No se pudo cargar ${path}:`, error.message);
+    return fallback;
+  }
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -198,17 +207,19 @@ async function logout() {
 }
 
 async function reloadAppData() {
-  const [clientes, operaciones, cuenta, categorias, tabs, caja, cajaConciliaciones, documentos, fieldContracts, fieldLeases] = await Promise.all([
+  const [clientes, operaciones, cuenta, categorias, tabs] = await Promise.all([
     fetchJson("/api/clientes"),
     fetchJson("/api/operaciones"),
     fetchJson("/api/cuenta-corriente/resumen"),
     fetchJson("/api/categorias"),
-    fetchJson("/api/tabs"),
-    fetchJson("/api/caja-diaria"),
-    fetchJson("/api/caja-conciliaciones"),
-    fetchJson("/api/documentos"),
-    fetchJson("/api/campos/contratos"),
-    fetchJson("/api/campos/arrendamientos")
+    fetchJson("/api/tabs")
+  ]);
+  const [caja, cajaConciliaciones, documentos, fieldContracts, fieldLeases] = await Promise.all([
+    fetchJsonOptional("/api/caja-diaria", { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 }),
+    fetchJsonOptional("/api/caja-conciliaciones", { items: [], totalRecibido: 0, totalAplicado: 0, saldo: 0, abiertas: 0 }),
+    fetchJsonOptional("/api/documentos", { items: [] }),
+    fetchJsonOptional("/api/campos/contratos", { items: [] }),
+    fetchJsonOptional("/api/campos/arrendamientos", { items: [] })
   ]);
 
   state.clientes = clientes.items || [];
