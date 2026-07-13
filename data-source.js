@@ -2224,6 +2224,14 @@ class BackupDataSource {
       efectivoBase: normalizeText(input.efectivoBase || "MISMA_FACTURADA").toUpperCase(),
       efectivoTasa: parseMoney(input.efectivoTasa),
       condiciones: normalizeText(input.condiciones),
+      partes: asArray(input.partes).map((item, index) => ({
+        id: normalizeText(item.id) || `PARTE-CAMPO-${Date.now()}-${index}`,
+        tipo: normalizeText(item.tipo || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR",
+        nombre: normalizeText(item.nombre),
+        cuit: normalizeText(item.cuit),
+        porcentaje: parseMoney(item.porcentaje),
+        observaciones: normalizeText(item.observaciones)
+      })).filter((item) => item.nombre || item.porcentaje),
       creadoEn: input.creadoEn || new Date().toISOString(),
       actualizadoEn: new Date().toISOString()
     };
@@ -2328,10 +2336,42 @@ class BackupDataSource {
       pagos: asArray(input.pagos).map((item, index) => ({
         id: normalizeText(item.id) || `PAGO-CAMPO-${Date.now()}-${index}`,
         fecha: item.fecha ? fieldDate(item.fecha) : "",
+        concepto: normalizeText(item.concepto || "PAGO_CUOTA").toUpperCase(),
+        parte: normalizeText(item.parte || "GENERAL").toUpperCase(),
+        aplicacionComision: normalizeText(item.aplicacionComision || "NO_APLICA").toUpperCase(),
+        estado: normalizeText(item.estado || "PENDIENTE").toUpperCase(),
         medio: normalizeText(item.medio || "Transferencia"),
         referencia: normalizeText(item.referencia),
         importe: Math.abs(parseMoney(item.importe))
       })).filter((item) => item.importe > 0),
+      partes: asArray(input.partes).map((item, index) => ({
+        id: normalizeText(item.id) || `PARTE-CAMPO-${Date.now()}-${index}`,
+        tipo: normalizeText(item.tipo || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR",
+        nombre: normalizeText(item.nombre),
+        cuit: normalizeText(item.cuit),
+        porcentaje: parseMoney(item.porcentaje),
+        porcentajeNormalizado: parseMoney(item.porcentajeNormalizado),
+        observaciones: normalizeText(item.observaciones),
+        facturado: parseMoney(item.facturado),
+        efectivo: parseMoney(item.efectivo),
+        totalCuota: parseMoney(item.totalCuota),
+        comision: parseMoney(item.comision),
+        totalConComision: parseMoney(item.totalConComision)
+      })).filter((item) => item.nombre || item.porcentaje),
+      distribucionPartes: asArray(input.distribucionPartes).map((item, index) => ({
+        id: normalizeText(item.id) || `DIST-CAMPO-${Date.now()}-${index}`,
+        tipo: normalizeText(item.tipo || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR",
+        nombre: normalizeText(item.nombre),
+        cuit: normalizeText(item.cuit),
+        porcentaje: parseMoney(item.porcentaje),
+        porcentajeNormalizado: parseMoney(item.porcentajeNormalizado),
+        observaciones: normalizeText(item.observaciones),
+        facturado: parseMoney(item.facturado),
+        efectivo: parseMoney(item.efectivo),
+        totalCuota: parseMoney(item.totalCuota),
+        comision: parseMoney(item.comision),
+        totalConComision: parseMoney(item.totalConComision)
+      })).filter((item) => item.nombre || item.porcentaje || item.totalCuota),
       facturadoDetalle: input.facturadoDetalle || {},
       efectivoDetalle: input.efectivoDetalle || {},
       facturadoAnualDetalle: input.facturadoAnualDetalle || {},
