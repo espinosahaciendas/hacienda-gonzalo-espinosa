@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="es">
   <head>
     <meta charset="utf-8">
@@ -21,7 +21,7 @@
         <h1>Gonzalo Espinosa</h1>
         <p>Hacienda y Liquidaciones</p>
         <label>Correo<input id="login-email" type="email" autocomplete="username" required></label>
-        <label>Contraseña<input id="login-password" type="password" autocomplete="current-password" required></label>
+        <label>ContraseÃ±a<input id="login-password" type="password" autocomplete="current-password" required></label>
         <button type="submit" class="primary-button">Ingresar</button>
         <p class="form-message" id="login-message"></p>
       </form>
@@ -230,7 +230,7 @@
         <div class="panel">
           <h2>Sistema operativo</h2>
           <p>
-            Gestión de operaciones, ventas, liquidaciones, cuenta corriente y vencimientos.
+            GestiÃ³n de operaciones, ventas, liquidaciones, cuenta corriente y vencimientos.
           </p>
           <div class="form-actions">
             <button type="button" class="ghost-button" id="download-backup">Descargar backup de datos</button>
@@ -441,7 +441,6 @@
                 </select>
               </label>
               <label>Vencimiento habitual<input id="field-contract-due-text" placeholder="Ej.: del 5 al 10 de cada mes"></label>
-              <label>Proximo vencimiento informativo<input id="field-contract-next-due" type="date"></label>
               <label>Criterio de cotizacion<input id="field-contract-quote-criteria" placeholder="Ej.: promedio semana anterior Quequen"></label>
             </div>
             <div class="field-contract-rules">
@@ -562,7 +561,7 @@
               <label>Periodo desde<input id="field-lease-from" type="date"></label>
               <label>Periodo hasta<input id="field-lease-to" type="date"></label>
               <label>Vencimiento cuota<input id="field-lease-due-date" type="date"></label>
-              <label>Proximo vencimiento informativo<input id="field-lease-next-due" type="date"></label>
+              <label>Proximo vencimiento informativo de la cuota<input id="field-lease-next-due" type="date"></label>
               <label>Producto / indice
                 <input id="field-lease-cereal" placeholder="Ej.: Soja Quequen, Carne, Dolar">
               </label>
@@ -582,6 +581,20 @@
               </label>
               <label>Promedio / cotizacion aplicada<input id="field-lease-price" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
               <label>Tipo de cambio<input id="field-lease-exchange" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+            </div>
+            <div class="advanced-subpanel">
+              <h3>Comision</h3>
+              <div class="form-grid">
+                <label>Aplicar comision sobre
+                  <select id="field-lease-commission-base">
+                    <option value="NINGUNA">Sin comision</option>
+                    <option value="TOTAL">Total cuota</option>
+                    <option value="FACTURADO">Facturado / contrato</option>
+                    <option value="EFECTIVO">Efectivo</option>
+                  </select>
+                </label>
+                <label>% comision<input id="field-lease-commission-rate" inputmode="decimal" placeholder="Ej.: 3"></label>
+              </div>
             </div>
             <div class="advanced-subpanel">
               <div class="panel-head">
@@ -610,6 +623,8 @@
               <div><span>Facturado / contrato</span><strong id="field-lease-billed-total">$ 0,00</strong></div>
               <div><span>Efectivo</span><strong id="field-lease-cash-total">$ 0,00</strong></div>
               <div><span>Total cuota</span><strong id="field-lease-total">$ 0,00</strong></div>
+              <div><span>Comision</span><strong id="field-lease-commission-total">$ 0,00</strong></div>
+              <div><span>Total con comision</span><strong id="field-lease-grand-total">$ 0,00</strong></div>
               <div><span>Vencimiento</span><strong id="field-lease-due-preview">-</strong></div>
             </div>
             <div class="form-actions">
@@ -740,7 +755,7 @@
                   Accion
                   <select id="client-maintenance-action">
                     <option value="MERGE">Fusionar con cliente correcto</option>
-                    <option value="DELETE">Eliminar sólo si no tiene movimientos</option>
+                    <option value="DELETE">Eliminar sÃ³lo si no tiene movimientos</option>
                   </select>
                 </label>
               </div>
@@ -929,7 +944,7 @@
           <div class="operation-list-block">
             <div class="panel workflow-empty" id="operation-workflow-empty">
               <h2>Alta guiada</h2>
-              <p>Complete los datos principales y continúe a la carga de venta.</p>
+              <p>Complete los datos principales y continÃºe a la carga de venta.</p>
             </div>
             <div class="workflow-steps" id="operation-workflow-steps" hidden>
               <button type="button" class="workflow-step" data-operation-step="operation"><strong>1</strong><span>Operacion</span></button>
@@ -1088,7 +1103,7 @@
                 </div>
                 <div class="advanced-subpanel sale-not-faena">
                   <h3>Correccion excepcional del calculo</h3>
-                  <p class="subtle">Usar sólo si la liquidación recibida toma otros kilos, promedio, precio final o importe. Si queda vacío, calcula automático.</p>
+                  <p class="subtle">Usar sÃ³lo si la liquidaciÃ³n recibida toma otros kilos, promedio, precio final o importe. Si queda vacÃ­o, calcula automÃ¡tico.</p>
                   <div class="form-grid">
                     <label class="check-line"><input id="sale-use-real-kg-vend" type="checkbox"> Usar kg reales con desbaste vendedor</label>
                     <label>Kg usado vendedor<input id="sale-kg-calc-vend" inputmode="decimal" placeholder="Automatico"></label>
@@ -1561,9 +1576,9 @@
                 <option>Venta a Feria</option>
                 <option>Flete</option>
                 <option>Gastos DTe</option>
-                <option>Gastos Guías</option>
+                <option>Gastos GuÃ­as</option>
                 <option>Pesadas</option>
-                <option>Vacunación</option>
+                <option>VacunaciÃ³n</option>
                 <option>Gastos veterinarios</option>
                 <option>Otros gastos</option>
               </select></label>
@@ -1918,7 +1933,7 @@
               <div class="form-grid">
                 <label>Fecha recibido<input id="cash-rec-date" type="date" required></label>
                 <label>Recibido de<input id="cash-rec-client" list="cc-client-list" placeholder="Cliente / persona" required></label>
-                <label>Referencia<input id="cash-rec-reference" placeholder="Ej.: efectivo venta, sobre, operación"></label>
+                <label>Referencia<input id="cash-rec-reference" placeholder="Ej.: efectivo venta, sobre, operaciÃ³n"></label>
                 <label>Importe recibido<input id="cash-rec-amount" inputmode="decimal" placeholder="$ 0,00" required></label>
               </div>
               <label>Observaciones<textarea id="cash-rec-notes" rows="2" placeholder="Detalle interno"></textarea></label>
@@ -2063,7 +2078,7 @@
               <h2 id="document-preview-title">Vista del comprobante</h2>
               <p class="subtle" id="document-preview-subtitle">Selecciona un PDF para verlo en pantalla.</p>
             </div>
-            <a class="ghost-button" id="document-preview-open" href="#" target="_blank" rel="noopener">Abrir en otra pestaña</a>
+            <a class="ghost-button" id="document-preview-open" href="#" target="_blank" rel="noopener">Abrir en otra pestaÃ±a</a>
           </div>
           <iframe id="document-preview-frame" class="document-preview-frame" title="Vista previa PDF"></iframe>
         </div>
@@ -2193,6 +2208,12 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260713-campos-contratos-pdf-admin"></script>
+    <script src="/app.js?v=20260713-campos-calculo-directo-v5"></script>
   </body>
 </html>
+
+
+
+
+
+
