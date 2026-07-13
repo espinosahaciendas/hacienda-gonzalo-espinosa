@@ -584,6 +584,20 @@
               <label>Tipo de cambio<input id="field-lease-exchange" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
             </div>
             <div class="advanced-subpanel">
+              <h3>Comision</h3>
+              <div class="form-grid">
+                <label>Aplicar comision sobre
+                  <select id="field-lease-commission-base">
+                    <option value="NINGUNA">Sin comision</option>
+                    <option value="TOTAL">Total cuota</option>
+                    <option value="FACTURADO">Facturado / contrato</option>
+                    <option value="EFECTIVO">Efectivo</option>
+                  </select>
+                </label>
+                <label>% comision<input id="field-lease-commission-rate" inputmode="decimal" placeholder="Ej.: 3"></label>
+              </div>
+            </div>
+            <div class="advanced-subpanel">
               <div class="panel-head">
                 <div>
                   <h3>Cotizaciones para promedio</h3>
@@ -610,6 +624,8 @@
               <div><span>Facturado / contrato</span><strong id="field-lease-billed-total">$ 0,00</strong></div>
               <div><span>Efectivo</span><strong id="field-lease-cash-total">$ 0,00</strong></div>
               <div><span>Total cuota</span><strong id="field-lease-total">$ 0,00</strong></div>
+              <div><span>Comision</span><strong id="field-lease-commission-total">$ 0,00</strong></div>
+              <div><span>Total con comision</span><strong id="field-lease-grand-total">$ 0,00</strong></div>
               <div><span>Vencimiento</span><strong id="field-lease-due-preview">-</strong></div>
             </div>
             <div class="form-actions">
@@ -2193,6 +2209,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260713-campos-contratos-pdf-admin"></script>
+    <script src="/app.js?v=20260713-campos-calculo-comision"></script>
   </body>
 </html>
