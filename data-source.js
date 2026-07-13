@@ -2257,6 +2257,13 @@ class BackupDataSource {
   }
 
   normalizeFieldLease(input = {}) {
+    const fieldDate = (value) => {
+      if (!value) return "";
+      const text = String(value || "").trim();
+      const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+      return text;
+    };
     const hectareas = parseMoney(input.hectareas);
     const kgPorHa = parseMoney(input.kgPorHa ?? input.qqPorHa);
     const unidadCotizacion = normalizeText(input.unidadCotizacion || "KG").toUpperCase() === "TN" ? "TN" : "KG";
@@ -2291,12 +2298,13 @@ class BackupDataSource {
       id: normalizeText(input.id) || `ARR-${Date.now()}`,
       contrato: normalizeText(input.contrato),
       cliente: normalizeText(input.cliente),
+      arrendatario: normalizeText(input.arrendatario),
       campo: normalizeText(input.campo),
-      fecha: input.fecha ? formatDateForDisplay(input.fecha) : formatDateLocal(new Date()),
-      periodoDesde: input.periodoDesde ? formatDateForDisplay(input.periodoDesde) : "",
-      periodoHasta: input.periodoHasta ? formatDateForDisplay(input.periodoHasta) : "",
-      vencimiento: input.vencimiento ? formatDateForDisplay(input.vencimiento) : "",
-      proximoVencimiento: input.proximoVencimiento ? formatDateForDisplay(input.proximoVencimiento) : "",
+      fecha: input.fecha ? fieldDate(input.fecha) : formatDateLocal(new Date()),
+      periodoDesde: input.periodoDesde ? fieldDate(input.periodoDesde) : "",
+      periodoHasta: input.periodoHasta ? fieldDate(input.periodoHasta) : "",
+      vencimiento: input.vencimiento ? fieldDate(input.vencimiento) : "",
+      proximoVencimiento: input.proximoVencimiento ? fieldDate(input.proximoVencimiento) : "",
       hectareas,
       cereal: normalizeText(input.cereal || "SOJA").toUpperCase(),
       mercado: normalizeText(input.mercado),
@@ -2312,7 +2320,7 @@ class BackupDataSource {
       observaciones: normalizeText(input.observaciones),
       cotizaciones: asArray(input.cotizaciones).map((item) => ({
         id: normalizeText(item.id) || `COT-${Date.now()}`,
-        fecha: item.fecha ? formatDateForDisplay(item.fecha) : "",
+        fecha: item.fecha ? fieldDate(item.fecha) : "",
         mercado: normalizeText(item.mercado),
         producto: normalizeText(item.producto),
         cotizacion: parseMoney(item.cotizacion)
