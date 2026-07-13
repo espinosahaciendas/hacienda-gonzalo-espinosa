@@ -1745,27 +1745,51 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
   const title = safePdfTitle("Calculo_arrendamiento", item.cliente || item.campo || "campos", item.fecha || "");
   const popup = window.open("", "_blank", "width=1000,height=800");
   if (!popup) return;
+  const cashTotal = Number(item.efectivoTotal || 0);
+  const billedTotal = Number(item.facturadoTotal || 0);
+  const commissionTotal = Number(item.comisionImporte || 0);
+  const finalTotal = Number(item.totalConComision || item.totalPesos || 0);
+  const divisorText = item.frecuenciaDivisor && item.frecuenciaDivisor > 1
+    ? `Importes de la cuota calculados sobre base anual / ${plainNumberValue(item.frecuenciaDivisor)}.`
+    : "Importes calculados para el vencimiento informado.";
   const quoteRows = Array.isArray(item.cotizaciones) && item.cotizaciones.length
     ? item.cotizaciones.map((row) => `<tr><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${moneyValue(row.cotizacion)}</td></tr>`).join("")
     : `<tr><td colspan="4">Sin detalle de cotizaciones. Se informa la cotizacion/promedio cargado manualmente.</td></tr>`;
-  const componentRow = (label, detail) => `<tr><td>${label}</td><td>${escapeHtml(detail?.base || "-")}</td><td>${plainNumberValue(detail?.hectareas || 0)}</td><td>${plainNumberValue(detail?.tasa || 0)}</td><td>${plainNumberValue(detail?.cantidad || 0)}</td><td class="amount">${moneyValue(detail?.total || 0)}</td></tr>`;
+  const componentRow = (label, detail, cssClass = "") => {
+    const annualTotal = Number(detail?.totalAnual || 0);
+    const cuotaTotal = Number(detail?.total || 0);
+    const tons = detail?.toneladas ? `${plainNumberValue(detail.toneladas)} tn` : "-";
+    return `<tr class="${cssClass}"><td>${label}</td><td>${escapeHtml(detail?.base || "-")}</td><td>${plainNumberValue(detail?.hectareas || 0)}</td><td>${plainNumberValue(detail?.tasa || 0)}</td><td>${plainNumberValue(detail?.cantidad || 0)} kg</td><td>${tons}</td><td class="amount">${moneyValue(annualTotal)}</td><td class="amount">${moneyValue(cuotaTotal)}</td></tr>`;
+  };
   const commissionRows = [
-    item.comisionGeneralImporte ? `<tr><td>Comision general</td><td>${escapeHtml(item.comisionBase || "-")}</td><td colspan="3">${plainNumberValue(item.comisionPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionGeneralImporte)}</td></tr>` : "",
-    item.comisionFacturadoImporte ? `<tr><td>Comision sobre facturado</td><td>Facturado / contrato</td><td colspan="3">${plainNumberValue(item.comisionFacturadoPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionFacturadoImporte)}</td></tr>` : "",
-    item.comisionEfectivoImporte ? `<tr><td>Comision sobre efectivo</td><td>Efectivo</td><td colspan="3">${plainNumberValue(item.comisionEfectivoPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionEfectivoImporte)}</td></tr>` : ""
+    item.comisionGeneralImporte ? `<tr><td>Comision general</td><td>${escapeHtml(item.comisionBase || "-")}</td><td>${plainNumberValue(item.comisionPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionBaseImporte || 0)}</td><td class="amount">${moneyValue(item.comisionGeneralImporte)}</td></tr>` : "",
+    item.comisionFacturadoImporte ? `<tr><td>Comision sobre facturado</td><td>Facturado / contrato</td><td>${plainNumberValue(item.comisionFacturadoPorcentaje || 0)}%</td><td class="amount">${moneyValue(billedTotal)}</td><td class="amount">${moneyValue(item.comisionFacturadoImporte)}</td></tr>` : "",
+    item.comisionEfectivoImporte ? `<tr><td>Comision sobre efectivo</td><td>Efectivo</td><td>${plainNumberValue(item.comisionEfectivoPorcentaje || 0)}%</td><td class="amount">${moneyValue(cashTotal)}</td><td class="amount">${moneyValue(item.comisionEfectivoImporte)}</td></tr>` : ""
   ].join("");
+  const commissionBlock = commissionRows
+    ? `<h2>Comision</h2><table><thead><tr><th>Concepto</th><th>Aplica sobre</th><th>%</th><th>Base</th><th>Importe</th></tr></thead><tbody>${commissionRows}<tr class="total"><td colspan="4">Total comision</td><td class="amount">${moneyValue(commissionTotal)}</td></tr></tbody></table>`
+    : "";
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
-    body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22}
-    header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:12px}
-    img{width:160px;height:58px;object-fit:contain}
-    h1{font-size:18px;margin:0} h2{font-size:13px;margin:12px 0 5px} p{margin:3px 0;font-size:11px}
-    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border:1px solid #dbcbb8;margin-bottom:10px}
-    .grid span,.grid strong{border-bottom:1px solid #dbcbb8;padding:5px;font-size:10px}.grid span{background:#f8f2ea;color:#7b5a32}.grid strong{font-size:11px}
-    table{width:100%;border-collapse:collapse;font-size:10px;margin-top:5px}th,td{border:1px solid #dbcbb8;padding:5px;text-align:left}th{background:#f8f2ea}.amount{text-align:right;font-weight:700}
-    .total{background:#fff3e8;font-weight:700}.cash{background:#fff8ed}.note{border:1px solid #dbcbb8;padding:7px;margin-top:10px;font-size:10px}
-    button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:10mm}body{margin:0}button{display:none}}
+    body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22;font-size:10.5px}
+    header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:10px}
+    img{width:185px;height:68px;object-fit:contain}
+    h1{font-size:18px;margin:0 0 3px} h2{font-size:12px;margin:11px 0 5px;color:#3d2d22} p{margin:2px 0;font-size:10px}
+    .muted{color:#7b5a32}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0 10px}
+    .box{border:1px solid #dbcbb8;background:#fffaf4;padding:7px;min-height:42px}.box span{display:block;font-size:9px;color:#7b5a32;text-transform:uppercase}.box strong{display:block;font-size:15px;margin-top:4px;color:#1f160f}
+    .box.main{background:#fff3e8;border-color:#d4ac7a}.box.main strong{font-size:16px}
+    .grid{display:grid;grid-template-columns:155px 1fr 155px 1fr;border:1px solid #dbcbb8;margin-bottom:8px}
+    .grid span,.grid strong{border-bottom:1px solid #dbcbb8;padding:4px;font-size:9.5px}.grid span{background:#f8f2ea;color:#7b5a32}.grid strong{font-size:10px}
+    table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:5px}th,td{border:1px solid #dbcbb8;padding:4px;text-align:left;vertical-align:top}th{background:#f8f2ea}.amount{text-align:right;font-weight:700;white-space:nowrap}
+    .total{background:#fff3e8;font-weight:700}.cash{background:#fff8ed}.note{border:1px solid #dbcbb8;padding:7px;margin-top:9px;font-size:9.5px;line-height:1.25}
+    .print-actions{margin-top:14px}.print-actions button{padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}body{margin:0}.print-actions{display:none}h2{break-after:avoid}table{break-inside:auto}tr{break-inside:avoid}}
   </style></head><body>
-    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Campos - Calculo de arrendamiento</h1><p>Hugo Pinna - Contratos y Campos</p><p>Fecha: ${escapeHtml(item.fecha || "-")}</p></div></header>
+    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Calculo de arrendamiento</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.cliente || "-")} | ${escapeHtml(item.campo || "-")} | Fecha de calculo: ${escapeHtml(item.fecha || "-")}</p></div></header>
+    <section class="summary">
+      <div class="box"><span>Vencimiento</span><strong>${escapeHtml(item.vencimiento || "-")}</strong></div>
+      <div class="box"><span>Facturado / contrato</span><strong>${moneyValue(billedTotal)}</strong></div>
+      <div class="box"><span>Efectivo</span><strong>${moneyValue(cashTotal)}</strong></div>
+      <div class="box main"><span>${commissionTotal ? "Total con comision" : "Total cuota"}</span><strong>${moneyValue(finalTotal)}</strong></div>
+    </section>
     <div class="grid">
       <span>Contrato / referencia</span><strong>${escapeHtml(item.contrato || "-")}</strong>
       <span>Cliente / arrendador</span><strong>${escapeHtml(item.cliente || "-")}</strong>
@@ -1773,26 +1797,24 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
       <span>Periodo</span><strong>${escapeHtml(item.periodoDesde || "-")} a ${escapeHtml(item.periodoHasta || "-")}</strong>
       <span>Vencimiento cuota</span><strong>${escapeHtml(item.vencimiento || "-")}</strong>
       <span>Proximo vencimiento</span><strong>${escapeHtml(item.proximoVencimiento || "-")}</strong>
-      <span>Frecuencia</span><strong>${escapeHtml(item.frecuencia || "-")}${item.frecuenciaDivisor && item.frecuenciaDivisor > 1 ? ` (cuota = total anual / ${plainNumberValue(item.frecuenciaDivisor)})` : ""}</strong>
+      <span>Frecuencia</span><strong>${escapeHtml(item.frecuencia || "-")}${item.frecuenciaDivisor && item.frecuenciaDivisor > 1 ? ` (anual / ${plainNumberValue(item.frecuenciaDivisor)})` : ""}</strong>
       <span>Hectareas</span><strong>${plainNumberValue(item.hectareas)}</strong>
       <span>Producto / referencia</span><strong>${escapeHtml([item.cereal, item.mercado].filter(Boolean).join(" - ") || "-")}</strong>
       <span>Cotizacion por ${item.unidadCotizacion === "TN" ? "tonelada" : "kg"}</span><strong>${item.moneda === "USD" ? `USD ${plainNumberValue(item.cotizacion)} x TC ${moneyValue(item.tipoCambio)}` : moneyValue(item.cotizacion)}</strong>
-      <span>Total cuota</span><strong>${moneyValue(item.totalPesos)}</strong>
-      <span>Comision</span><strong>${item.comisionBase && item.comisionBase !== "NINGUNA" ? `${escapeHtml(item.comisionBase)} ${plainNumberValue(item.comisionPorcentaje)}% = ${moneyValue(item.comisionImporte)}` : "-"}</strong>
-      <span>Total con comision</span><strong>${moneyValue(item.totalConComision || item.totalPesos)}</strong>
+      <span>Criterio</span><strong>${escapeHtml(divisorText)}</strong>
+      <span>Promedio aplicado</span><strong>${moneyValue(item.cotizacionPesos || item.cotizacion)}</strong>
     </div>
+    <h2>Detalle de calculo de la cuota</h2>
+    <table><thead><tr><th>Bloque</th><th>Base</th><th>Has.</th><th>Kg/ha o importe</th><th>Kg anuales</th><th>Toneladas</th><th>Base anual</th><th>Importe cuota</th></tr></thead><tbody>
+      ${componentRow("Facturado / contrato", item.facturadoDetalle || {})}
+      ${cashTotal ? componentRow("Efectivo", item.efectivoDetalle || {}, "cash") : ""}
+      <tr class="total"><td colspan="7">Total cuota</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr>
+    </tbody></table>
+    ${commissionBlock}
     <h2>Cotizaciones utilizadas</h2>
     <table><thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th></tr></thead><tbody>${quoteRows}<tr class="total"><td colspan="3">Promedio / cotizacion aplicada</td><td class="amount">${moneyValue(item.cotizacionPesos || item.cotizacion)}</td></tr></tbody></table>
-    <h2>Detalle de calculo de la cuota</h2>
-    <table><thead><tr><th>Bloque</th><th>Base</th><th>Has.</th><th>Kg/ha o importe</th><th>Cantidad kg</th><th>Importe</th></tr></thead><tbody>
-      ${componentRow("Facturado / contrato", item.facturadoDetalle || {})}
-      ${item.efectivoTotal ? componentRow("Efectivo", item.efectivoDetalle || {}) : ""}
-      ${commissionRows}
-      <tr class="total"><td colspan="5">Total cuota</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr>
-      ${item.comisionImporte ? `<tr class="total"><td colspan="5">Total con comision</td><td class="amount">${moneyValue(item.totalConComision || item.totalPesos)}</td></tr>` : ""}
-    </tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
-    <button onclick="window.print()">Imprimir / guardar PDF</button>
+    <div class="print-actions"><button onclick="window.print()">Imprimir / guardar PDF</button></div>
   </body></html>`);
   popup.document.close();
 }
