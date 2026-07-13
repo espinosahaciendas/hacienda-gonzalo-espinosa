@@ -2325,6 +2325,13 @@ class BackupDataSource {
         producto: normalizeText(item.producto),
         cotizacion: parseMoney(item.cotizacion)
       })),
+      pagos: asArray(input.pagos).map((item, index) => ({
+        id: normalizeText(item.id) || `PAGO-CAMPO-${Date.now()}-${index}`,
+        fecha: item.fecha ? fieldDate(item.fecha) : "",
+        medio: normalizeText(item.medio || "Transferencia"),
+        referencia: normalizeText(item.referencia),
+        importe: Math.abs(parseMoney(item.importe))
+      })).filter((item) => item.importe > 0),
       facturadoDetalle: input.facturadoDetalle || {},
       efectivoDetalle: input.efectivoDetalle || {},
       facturadoAnualDetalle: input.facturadoAnualDetalle || {},

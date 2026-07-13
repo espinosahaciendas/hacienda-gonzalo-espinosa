@@ -504,8 +504,8 @@ async function handleApi(req, res) {
     }
     if (req.method === "POST") {
       const body = await readBody(req);
-      await dataSource.saveFieldLease(body);
-      sendJson(res, 200, { items: await dataSource.getFieldLeases() });
+      const item = await dataSource.saveFieldLease(body);
+      sendJson(res, 200, { item, items: await dataSource.getFieldLeases() });
       return;
     }
   }
