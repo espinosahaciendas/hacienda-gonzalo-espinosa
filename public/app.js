@@ -1203,7 +1203,7 @@ function findFieldContractByLeaseFields() {
 }
 
 function currentFieldContractForCalculation() {
-  const payload = fieldContractPayload();
+  const payload = fieldContractPayloadForCalculation();
   if (
     payload.nombre || payload.arrendador || payload.campo || payload.hectareas
     || payload.facturadoValor || payload.facturadoTasa || payload.efectivoValor || payload.efectivoTasa
@@ -1220,6 +1220,29 @@ function currentFieldContractForCalculation() {
   const leaseSaved = findFieldContractByLeaseFields();
   if (leaseSaved) return leaseSaved;
   return null;
+}
+
+function fieldContractPayloadForCalculation() {
+  const visible = fieldContractPayload();
+  const active = state.activeFieldContract || {};
+  const hasVisibleRule = Boolean(
+    visible.nombre || visible.arrendador || visible.campo || visible.hectareas
+    || visible.facturadoValor || visible.facturadoTasa || visible.efectivoValor || visible.efectivoTasa
+  );
+  if (!hasVisibleRule) return active;
+  return {
+    ...active,
+    ...visible,
+    hectareas: visible.hectareas || active.hectareas || 0,
+    facturadoValor: visible.facturadoValor || active.facturadoValor || 0,
+    facturadoTasa: visible.facturadoTasa || active.facturadoTasa || 0,
+    efectivoValor: visible.efectivoValor || active.efectivoValor || 0,
+    efectivoTasa: visible.efectivoTasa || active.efectivoTasa || 0,
+    facturadoBase: visible.facturadoBase || active.facturadoBase || "KG_SOJA",
+    efectivoBase: visible.efectivoBase || active.efectivoBase || "MISMA_FACTURADA",
+    facturadoModo: visible.facturadoModo || active.facturadoModo || "HECTAREAS",
+    efectivoModo: visible.efectivoModo || active.efectivoModo || "NINGUNO"
+  };
 }
 
 function syncFieldContractFormToActive() {
@@ -1296,9 +1319,9 @@ function useFieldContractInCalculation(item = currentFieldContractForCalculation
   const calc = fieldLeaseCurrentInput();
   const rule = fieldLeaseMissingRuleMessage(calc);
   if (rule) {
-    setFieldLeaseMessage(rule, "error");
+    setFieldLeaseMessage(`${rule} Datos tomados: ${plainNumberValue(calc.hectareas)} ha, valor facturado ${plainNumberValue(calc.facturadoDetalle?.hectareas || 0)} ha, ${plainNumberValue(calc.facturadoDetalle?.tasa || 0)} kg/ha, promedio ${moneyValue(calc.cotizacionPesos)}.`, "error");
   } else {
-    setFieldLeaseMessage(`Contrato listo para calcular: ${plainNumberValue(calc.hectareas)} ha. Facturado ${moneyValue(calc.facturadoTotal)} / efectivo ${moneyValue(calc.efectivoTotal)}.`, "ok");
+    setFieldLeaseMessage(`Contrato listo para calcular: ${plainNumberValue(calc.hectareas)} ha, ${plainNumberValue(calc.facturadoDetalle?.tasa || 0)} kg/ha. Facturado ${moneyValue(calc.facturadoTotal)} / efectivo ${moneyValue(calc.efectivoTotal)}.`, "ok");
   }
   setFieldContractMessage("Contrato cargado en el calculo.", "ok");
 }
@@ -1469,12 +1492,12 @@ function calculateFieldContractComponent(contract, type, priceInPesos, unit) {
   }
   if (base === "PESOS_HA" || base === "DOLARES_HA") {
     const total = hectares * rate * (base === "DOLARES_HA" ? parseMoneyInput($("#field-lease-exchange")?.value || 0) : 1);
-    return { tipo: type, modo: mode, hectareas, tasa: rate, base, cantidad: hectares, total };
+    return { tipo: type, modo: mode, hectareas: hectares, tasa: rate, base, cantidad: hectares, total };
   }
   const kg = hectares * rate;
   const tn = kg / 1000;
   const total = unit === "TN" ? tn * priceInPesos : kg * priceInPesos;
-  return { tipo: type, modo: mode, hectareas, tasa: rate, base, cantidad: kg, toneladas: tn, total };
+  return { tipo: type, modo: mode, hectareas: hectares, tasa: rate, base, cantidad: kg, toneladas: tn, total };
 }
 
 function fieldQuoteAverage() {
