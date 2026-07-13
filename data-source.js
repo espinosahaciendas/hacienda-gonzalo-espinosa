@@ -6,7 +6,7 @@ const DEFAULT_BACKUP_PATH = path.join(__dirname, "..", "database", "backup-gonza
 const DEFAULT_APP_DATA_PATH = path.join(__dirname, "data", "local-db.json");
 
 function readJson(filePath) {
-  const raw = fs.readFileSync(filePath, "utf8");
+  const raw = fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
   const parsed = JSON.parse(raw);
   return repairLegacyOperationAmounts(parsed.data || parsed);
 }
