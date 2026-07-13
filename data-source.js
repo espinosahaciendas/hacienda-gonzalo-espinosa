@@ -2270,9 +2270,22 @@ class BackupDataSource {
     const calculatedTotal = unidadCotizacion === "TN" ? totalTn * cotizacionPesos : totalKg * cotizacionPesos;
     const providedFacturado = parseMoney(input.facturadoTotal);
     const providedEfectivo = parseMoney(input.efectivoTotal);
+    const facturadoAnualTotal = parseMoney(input.facturadoAnualTotal);
+    const efectivoAnualTotal = parseMoney(input.efectivoAnualTotal);
+    const totalAnual = parseMoney(input.totalAnual) || facturadoAnualTotal + efectivoAnualTotal;
     const totalPesos = providedFacturado || providedEfectivo
       ? providedFacturado + providedEfectivo
       : parseMoney(input.totalPesos) || calculatedTotal;
+    const comisionBase = normalizeText(input.comisionBase || "NINGUNA").toUpperCase();
+    const comisionPorcentaje = parseMoney(input.comisionPorcentaje);
+    const comisionBaseImporte = parseMoney(input.comisionBaseImporte);
+    const comisionGeneralImporte = parseMoney(input.comisionGeneralImporte);
+    const comisionFacturadoPorcentaje = parseMoney(input.comisionFacturadoPorcentaje);
+    const comisionFacturadoImporte = parseMoney(input.comisionFacturadoImporte);
+    const comisionEfectivoPorcentaje = parseMoney(input.comisionEfectivoPorcentaje);
+    const comisionEfectivoImporte = parseMoney(input.comisionEfectivoImporte);
+    const comisionImporte = parseMoney(input.comisionImporte);
+    const totalConComision = parseMoney(input.totalConComision) || (totalPesos + comisionImporte);
     const importeCuota = cuotas ? totalPesos / cuotas : totalPesos;
     return {
       id: normalizeText(input.id) || `ARR-${Date.now()}`,
@@ -2306,8 +2319,24 @@ class BackupDataSource {
       })),
       facturadoDetalle: input.facturadoDetalle || {},
       efectivoDetalle: input.efectivoDetalle || {},
+      facturadoAnualDetalle: input.facturadoAnualDetalle || {},
+      efectivoAnualDetalle: input.efectivoAnualDetalle || {},
       facturadoTotal: parseMoney(input.facturadoTotal),
       efectivoTotal: parseMoney(input.efectivoTotal),
+      facturadoAnualTotal,
+      efectivoAnualTotal,
+      totalAnual,
+      frecuenciaDivisor: parseMoney(input.frecuenciaDivisor) || 1,
+      comisionBase,
+      comisionPorcentaje,
+      comisionBaseImporte,
+      comisionGeneralImporte,
+      comisionFacturadoPorcentaje,
+      comisionFacturadoImporte,
+      comisionEfectivoPorcentaje,
+      comisionEfectivoImporte,
+      comisionImporte,
+      totalConComision,
       totalKg,
       totalTn,
       cotizacionPesos,
