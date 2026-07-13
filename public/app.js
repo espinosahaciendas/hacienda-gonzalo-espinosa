@@ -1443,6 +1443,7 @@ function fieldLeaseCurrentInput() {
   return {
     contrato: $("#field-lease-contract")?.value || "",
     cliente: $("#field-lease-client")?.value || "",
+    arrendatario: contract.arrendatario || "",
     campo: $("#field-lease-farm")?.value || "",
     fecha: $("#field-lease-date")?.value || new Date().toISOString().slice(0, 10),
     periodoDesde: $("#field-lease-from")?.value || "",
@@ -1745,6 +1746,10 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
   const title = safePdfTitle("Calculo_arrendamiento", item.cliente || item.campo || "campos", item.fecha || "");
   const popup = window.open("", "_blank", "width=1000,height=800");
   if (!popup) return;
+  const fieldReportDate = (value) => {
+    const date = parseAnyLocalDate(value);
+    return date ? formatDisplayDate(date) : escapeHtml(value || "-");
+  };
   const cashTotal = Number(item.efectivoTotal || 0);
   const billedTotal = Number(item.facturadoTotal || 0);
   const commissionTotal = Number(item.comisionImporte || 0);
@@ -1753,7 +1758,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     ? `Importes de la cuota calculados sobre base anual / ${plainNumberValue(item.frecuenciaDivisor)}.`
     : "Importes calculados para el vencimiento informado.";
   const quoteRows = Array.isArray(item.cotizaciones) && item.cotizaciones.length
-    ? item.cotizaciones.map((row) => `<tr><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${moneyValue(row.cotizacion)}</td></tr>`).join("")
+    ? item.cotizaciones.map((row) => `<tr><td>${fieldReportDate(row.fecha)}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${moneyValue(row.cotizacion)}</td></tr>`).join("")
     : `<tr><td colspan="4">Sin detalle de cotizaciones. Se informa la cotizacion/promedio cargado manualmente.</td></tr>`;
   const componentRow = (label, detail, cssClass = "") => {
     const annualTotal = Number(detail?.totalAnual || 0);
@@ -1783,20 +1788,21 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     .total{background:#fff3e8;font-weight:700}.cash{background:#fff8ed}.note{border:1px solid #dbcbb8;padding:7px;margin-top:9px;font-size:9.5px;line-height:1.25}
     .print-actions{margin-top:14px}.print-actions button{padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}body{margin:0}.print-actions{display:none}h2{break-after:avoid}table{break-inside:auto}tr{break-inside:avoid}}
   </style></head><body>
-    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Calculo de arrendamiento</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.cliente || "-")} | ${escapeHtml(item.campo || "-")} | Fecha de calculo: ${escapeHtml(item.fecha || "-")}</p></div></header>
+    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Calculo de arrendamiento</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.cliente || "-")} / ${escapeHtml(item.arrendatario || "-")} | ${escapeHtml(item.campo || "-")} | Fecha de calculo: ${fieldReportDate(item.fecha)}</p></div></header>
     <section class="summary">
-      <div class="box"><span>Vencimiento</span><strong>${escapeHtml(item.vencimiento || "-")}</strong></div>
+      <div class="box"><span>Vencimiento</span><strong>${fieldReportDate(item.vencimiento)}</strong></div>
       <div class="box"><span>Facturado / contrato</span><strong>${moneyValue(billedTotal)}</strong></div>
       <div class="box"><span>Efectivo</span><strong>${moneyValue(cashTotal)}</strong></div>
       <div class="box main"><span>${commissionTotal ? "Total con comision" : "Total cuota"}</span><strong>${moneyValue(finalTotal)}</strong></div>
     </section>
     <div class="grid">
       <span>Contrato / referencia</span><strong>${escapeHtml(item.contrato || "-")}</strong>
-      <span>Cliente / arrendador</span><strong>${escapeHtml(item.cliente || "-")}</strong>
+      <span>Arrendador</span><strong>${escapeHtml(item.cliente || "-")}</strong>
+      <span>Arrendatario</span><strong>${escapeHtml(item.arrendatario || "-")}</strong>
       <span>Campo</span><strong>${escapeHtml(item.campo || "-")}</strong>
-      <span>Periodo</span><strong>${escapeHtml(item.periodoDesde || "-")} a ${escapeHtml(item.periodoHasta || "-")}</strong>
-      <span>Vencimiento cuota</span><strong>${escapeHtml(item.vencimiento || "-")}</strong>
-      <span>Proximo vencimiento</span><strong>${escapeHtml(item.proximoVencimiento || "-")}</strong>
+      <span>Periodo</span><strong>${fieldReportDate(item.periodoDesde)} a ${fieldReportDate(item.periodoHasta)}</strong>
+      <span>Vencimiento cuota</span><strong>${fieldReportDate(item.vencimiento)}</strong>
+      <span>Proximo vencimiento</span><strong>${fieldReportDate(item.proximoVencimiento)}</strong>
       <span>Frecuencia</span><strong>${escapeHtml(item.frecuencia || "-")}${item.frecuenciaDivisor && item.frecuenciaDivisor > 1 ? ` (anual / ${plainNumberValue(item.frecuenciaDivisor)})` : ""}</strong>
       <span>Hectareas</span><strong>${plainNumberValue(item.hectareas)}</strong>
       <span>Producto / referencia</span><strong>${escapeHtml([item.cereal, item.mercado].filter(Boolean).join(" - ") || "-")}</strong>
