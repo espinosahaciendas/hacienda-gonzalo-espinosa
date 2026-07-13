@@ -25,6 +25,7 @@
   externalDueRows: [],
   commissionistRows: [],
   fieldQuoteRows: [],
+  fieldDataLoaded: false,
   usuario: null,
   weightTickets: [],
   reportRefreshInFlight: false
@@ -146,6 +147,7 @@ function setView(view) {
     campos: "Campos"
   };
   $("#view-title").textContent = titles[view] || "Sistema";
+  if (view === "campos") loadFieldModuleData();
   if (!state.restoringHistory && previousView !== view) {
     window.history.pushState({ view }, "", `#${view}`);
   }
@@ -214,12 +216,10 @@ async function reloadAppData() {
     fetchJson("/api/categorias"),
     fetchJson("/api/tabs")
   ]);
-  const [caja, cajaConciliaciones, documentos, fieldContracts, fieldLeases] = await Promise.all([
+  const [caja, cajaConciliaciones, documentos] = await Promise.all([
     fetchJsonOptional("/api/caja-diaria", { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 }),
     fetchJsonOptional("/api/caja-conciliaciones", { items: [], totalRecibido: 0, totalAplicado: 0, saldo: 0, abiertas: 0 }),
-    fetchJsonOptional("/api/documentos", { items: [] }),
-    fetchJsonOptional("/api/campos/contratos", { items: [] }),
-    fetchJsonOptional("/api/campos/arrendamientos", { items: [] })
+    fetchJsonOptional("/api/documentos", { items: [] })
   ]);
 
   state.clientes = clientes.items || [];
@@ -230,15 +230,11 @@ async function reloadAppData() {
   state.caja = caja || { items: [], total: 0, totalHoy: 0, totalMes: 0, pendienteRecuperar: 0 };
   state.cajaConciliaciones = cajaConciliaciones || { items: [], totalRecibido: 0, totalAplicado: 0, saldo: 0, abiertas: 0 };
   state.documentos = documentos.items || [];
-  state.fieldContracts = fieldContracts.items || [];
-  state.fieldLeases = fieldLeases.items || [];
 
   renderMetrics();
   renderCajaDiaria();
   renderCashReconciliations();
   renderDocumentos();
-  renderFieldContracts();
-  renderFieldLeases();
   renderClientes();
   renderOperaciones();
   renderCategories();
@@ -248,6 +244,19 @@ async function reloadAppData() {
   populateCommissionistClients();
   renderMobileSummary();
   renderCommissionistRows();
+}
+
+async function loadFieldModuleData(force = false) {
+  if (state.fieldDataLoaded && !force) return;
+  const [fieldContracts, fieldLeases] = await Promise.all([
+    fetchJsonOptional("/api/campos/contratos", { items: [] }),
+    fetchJsonOptional("/api/campos/arrendamientos", { items: [] })
+  ]);
+  state.fieldContracts = fieldContracts.items || [];
+  state.fieldLeases = fieldLeases.items || [];
+  state.fieldDataLoaded = true;
+  renderFieldContracts();
+  renderFieldLeases();
 }
 
 function downloadBackup() {
