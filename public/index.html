@@ -434,6 +434,7 @@
                 <select id="field-contract-frequency">
                   <option value="MENSUAL">Mensual</option>
                   <option value="TRIMESTRAL">Trimestral</option>
+                  <option value="CUATRIMESTRAL">Cuatrimestral</option>
                   <option value="SEMESTRAL">Semestral</option>
                   <option value="ANUAL">Anual</option>
                   <option value="UNICO">Unico pago</option>
@@ -585,7 +586,7 @@
             <div class="advanced-subpanel">
               <h3>Comision</h3>
               <div class="form-grid">
-                <label>Aplicar comision sobre
+                <label>Comision general sobre
                   <select id="field-lease-commission-base">
                     <option value="NINGUNA">Sin comision</option>
                     <option value="TOTAL">Total cuota</option>
@@ -593,7 +594,9 @@
                     <option value="EFECTIVO">Efectivo</option>
                   </select>
                 </label>
-                <label>% comision<input id="field-lease-commission-rate" inputmode="decimal" placeholder="Ej.: 3"></label>
+                <label>% comision general<input id="field-lease-commission-rate" inputmode="decimal" placeholder="Opcional"></label>
+                <label>% comision sobre facturado<input id="field-lease-commission-billed-rate" inputmode="decimal" placeholder="Opcional"></label>
+                <label>% comision sobre efectivo<input id="field-lease-commission-cash-rate" inputmode="decimal" placeholder="Opcional"></label>
               </div>
             </div>
             <div class="advanced-subpanel">
@@ -2208,7 +2211,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260713-campos-calculo-directo-v6"></script>
+    <script src="/app.js?v=20260713-campos-cuota-periodo-v9"></script>
   </body>
 </html>
 

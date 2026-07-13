@@ -1313,7 +1313,7 @@ function useFieldContractInCalculation(item = currentFieldContractForCalculation
   $("#field-lease-next-due").value = formatDateForInput(item.proximoVencimiento);
   $("#field-lease-cereal").value = fieldContractProductLabel(item.facturadoBase) || "";
   $("#field-lease-market").value = item.criterioCotizacion || "";
-  $("#field-lease-unit").value = item.facturadoBase === "IMPORTE_FIJO" || item.facturadoBase === "PESOS_HA" || item.facturadoBase === "DOLARES_HA" ? "FIJO" : "KG";
+  $("#field-lease-unit").value = fieldContractDefaultQuoteUnit(item.facturadoBase);
   $("#field-lease-notes").value = item.condiciones || "";
   updateFieldLeasePreview();
   const calc = fieldLeaseCurrentInput();
@@ -1333,6 +1333,13 @@ function fieldContractProductLabel(base) {
   if (key.includes("DOLAR")) return "Dolar";
   if (key.includes("PESO")) return "Pesos";
   return "";
+}
+
+function fieldContractDefaultQuoteUnit(base) {
+  const key = String(base || "").toUpperCase();
+  if (key === "IMPORTE_FIJO" || key === "PESOS_HA" || key === "DOLARES_HA") return "FIJO";
+  if (key.includes("SOJA") || key.includes("CEREAL") || key.includes("MAIZ") || key.includes("TRIGO")) return "TN";
+  return "KG";
 }
 
 async function saveFieldContract(event) {
@@ -1425,8 +1432,12 @@ function fieldLeaseCurrentInput() {
   const unit = $("#field-lease-unit")?.value || "KG";
   const priceInPesos = currencyType === "USD" ? price * exchange : price;
   const contract = currentFieldContractForCalculation() || {};
-  const billed = calculateFieldContractComponent(contract, "FACTURADO", priceInPesos, unit);
-  const cash = calculateFieldContractComponent(contract, "EFECTIVO", priceInPesos, unit);
+  const frequency = contract.frecuencia || "MENSUAL";
+  const frequencyDivisor = fieldLeaseFrequencyDivisor(frequency);
+  const billedAnnual = calculateFieldContractComponent(contract, "FACTURADO", priceInPesos, unit);
+  const cashAnnual = calculateFieldContractComponent(contract, "EFECTIVO", priceInPesos, unit);
+  const billed = fieldLeaseComponentForInstallment(billedAnnual, frequencyDivisor);
+  const cash = fieldLeaseComponentForInstallment(cashAnnual, frequencyDivisor);
   const totalPesos = billed.total + cash.total;
   const commission = calculateFieldLeaseCommission(totalPesos, billed.total, cash.total);
   return {
@@ -1445,7 +1456,8 @@ function fieldLeaseCurrentInput() {
     moneda: currencyType,
     cotizacion: price,
     tipoCambio: exchange,
-    frecuencia: contract.frecuencia || "",
+    frecuencia: frequency,
+    frecuenciaDivisor: frequencyDivisor,
     vencimientoHabitual: contract.vencimientoHabitual || "",
     criterioCotizacion: contract.criterioCotizacion || "",
     observaciones: $("#field-lease-notes")?.value || "",
@@ -1453,10 +1465,21 @@ function fieldLeaseCurrentInput() {
     cotizacionPesos: priceInPesos,
     facturadoDetalle: billed,
     efectivoDetalle: cash,
+    facturadoAnualDetalle: billedAnnual,
+    efectivoAnualDetalle: cashAnnual,
     facturadoTotal: billed.total,
     efectivoTotal: cash.total,
+    facturadoAnualTotal: billedAnnual.total,
+    efectivoAnualTotal: cashAnnual.total,
+    totalAnual: billedAnnual.total + cashAnnual.total,
     comisionBase: commission.base,
     comisionPorcentaje: commission.rate,
+    comisionBaseImporte: commission.baseAmount,
+    comisionGeneralImporte: commission.generalTotal,
+    comisionFacturadoPorcentaje: commission.billedRate,
+    comisionFacturadoImporte: commission.billedTotal,
+    comisionEfectivoPorcentaje: commission.cashRate,
+    comisionEfectivoImporte: commission.cashTotal,
     comisionImporte: commission.total,
     totalPesos,
     totalConComision: totalPesos + commission.total,
@@ -1464,15 +1487,38 @@ function fieldLeaseCurrentInput() {
   };
 }
 
+function fieldLeaseFrequencyDivisor(frequency) {
+  const key = String(frequency || "").toUpperCase();
+  if (key === "MENSUAL") return 12;
+  if (key === "TRIMESTRAL") return 4;
+  if (key === "CUATRIMESTRAL") return 3;
+  if (key === "SEMESTRAL") return 2;
+  return 1;
+}
+
+function fieldLeaseComponentForInstallment(component, divisor) {
+  const safeDivisor = Math.max(Number(divisor || 1), 1);
+  return {
+    ...component,
+    totalAnual: Number(component?.total || 0),
+    total: Number(component?.total || 0) / safeDivisor
+  };
+}
+
 function calculateFieldLeaseCommission(total, billed, cash) {
   const base = $("#field-lease-commission-base")?.value || "NINGUNA";
   const rate = parseMoneyInput($("#field-lease-commission-rate")?.value || 0);
+  const billedRate = parseMoneyInput($("#field-lease-commission-billed-rate")?.value || 0);
+  const cashRate = parseMoneyInput($("#field-lease-commission-cash-rate")?.value || 0);
   let baseAmount = 0;
   if (base === "TOTAL") baseAmount = Number(total || 0);
   if (base === "FACTURADO") baseAmount = Number(billed || 0);
   if (base === "EFECTIVO") baseAmount = Number(cash || 0);
-  const commissionTotal = base === "NINGUNA" ? 0 : baseAmount * rate / 100;
-  return { base, rate, baseAmount, total: commissionTotal };
+  const generalTotal = base === "NINGUNA" ? 0 : baseAmount * rate / 100;
+  const billedTotal = Number(billed || 0) * billedRate / 100;
+  const cashTotal = Number(cash || 0) * cashRate / 100;
+  const commissionTotal = generalTotal + billedTotal + cashTotal;
+  return { base, rate, baseAmount, generalTotal, billedRate, billedTotal, cashRate, cashTotal, total: commissionTotal };
 }
 
 function calculateFieldContractComponent(contract, type, priceInPesos, unit) {
@@ -1496,8 +1542,10 @@ function calculateFieldContractComponent(contract, type, priceInPesos, unit) {
   }
   const kg = hectares * rate;
   const tn = kg / 1000;
-  const total = unit === "TN" ? tn * priceInPesos : kg * priceInPesos;
-  return { tipo: type, modo: mode, hectareas: hectares, tasa: rate, base, cantidad: kg, toneladas: tn, total };
+  const cerealBase = base.includes("SOJA") || base.includes("CEREAL") || base.includes("MAIZ") || base.includes("TRIGO");
+  const quotedByTon = unit === "TN" || cerealBase;
+  const total = quotedByTon ? tn * priceInPesos : kg * priceInPesos;
+  return { tipo: type, modo: mode, hectareas: hectares, tasa: rate, base, cantidad: kg, toneladas: tn, unidadCalculo: quotedByTon ? "TN" : "KG", total };
 }
 
 function fieldQuoteAverage() {
@@ -1554,6 +1602,7 @@ function addFieldQuoteRow() {
 function fieldLeaseFrequencyDays(frequency) {
   const key = String(frequency || "").toUpperCase();
   if (key === "TRIMESTRAL") return 90;
+  if (key === "CUATRIMESTRAL") return 120;
   if (key === "SEMESTRAL") return 180;
   if (key === "ANUAL") return 365;
   return 30;
@@ -1650,6 +1699,8 @@ function fillFieldLeaseForm(item) {
   setMoneyInput("#field-lease-exchange", item.tipoCambio || 0);
   if ($("#field-lease-commission-base")) $("#field-lease-commission-base").value = item.comisionBase || "NINGUNA";
   if ($("#field-lease-commission-rate")) $("#field-lease-commission-rate").value = item.comisionPorcentaje || "";
+  if ($("#field-lease-commission-billed-rate")) $("#field-lease-commission-billed-rate").value = item.comisionFacturadoPorcentaje || "";
+  if ($("#field-lease-commission-cash-rate")) $("#field-lease-commission-cash-rate").value = item.comisionEfectivoPorcentaje || "";
   $("#field-lease-notes").value = item.observaciones || "";
   state.fieldQuoteRows = Array.isArray(item.cotizaciones) ? item.cotizaciones : [];
   renderFieldQuoteRows();
@@ -1659,18 +1710,18 @@ function fillFieldLeaseForm(item) {
 
 async function saveFieldLease(event) {
   event.preventDefault();
-  updateFieldLeasePreview();
-  const payload = fieldLeaseCurrentInput();
-  if (!payload.cliente && !payload.contrato && !payload.campo) {
-    setFieldLeaseMessage("Cargue al menos contrato, cliente o campo.", "error");
-    return;
-  }
-  const missingRule = fieldLeaseMissingRuleMessage(payload);
-  if (missingRule) {
-    setFieldLeaseMessage(missingRule, "error");
-    return;
-  }
   try {
+    updateFieldLeasePreview();
+    const payload = fieldLeaseCurrentInput();
+    if (!payload.cliente && !payload.contrato && !payload.campo) {
+      setFieldLeaseMessage("Cargue al menos contrato, cliente o campo.", "error");
+      return;
+    }
+    const missingRule = fieldLeaseMissingRuleMessage(payload);
+    if (missingRule) {
+      setFieldLeaseMessage(missingRule, "error");
+      return;
+    }
     const saved = await fetchJson("/api/campos/arrendamientos", {
       method: "POST",
       body: JSON.stringify(payload)
@@ -1698,6 +1749,11 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     ? item.cotizaciones.map((row) => `<tr><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${moneyValue(row.cotizacion)}</td></tr>`).join("")
     : `<tr><td colspan="4">Sin detalle de cotizaciones. Se informa la cotizacion/promedio cargado manualmente.</td></tr>`;
   const componentRow = (label, detail) => `<tr><td>${label}</td><td>${escapeHtml(detail?.base || "-")}</td><td>${plainNumberValue(detail?.hectareas || 0)}</td><td>${plainNumberValue(detail?.tasa || 0)}</td><td>${plainNumberValue(detail?.cantidad || 0)}</td><td class="amount">${moneyValue(detail?.total || 0)}</td></tr>`;
+  const commissionRows = [
+    item.comisionGeneralImporte ? `<tr><td>Comision general</td><td>${escapeHtml(item.comisionBase || "-")}</td><td colspan="3">${plainNumberValue(item.comisionPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionGeneralImporte)}</td></tr>` : "",
+    item.comisionFacturadoImporte ? `<tr><td>Comision sobre facturado</td><td>Facturado / contrato</td><td colspan="3">${plainNumberValue(item.comisionFacturadoPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionFacturadoImporte)}</td></tr>` : "",
+    item.comisionEfectivoImporte ? `<tr><td>Comision sobre efectivo</td><td>Efectivo</td><td colspan="3">${plainNumberValue(item.comisionEfectivoPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionEfectivoImporte)}</td></tr>` : ""
+  ].join("");
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
     body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22}
     header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:12px}
@@ -1717,6 +1773,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
       <span>Periodo</span><strong>${escapeHtml(item.periodoDesde || "-")} a ${escapeHtml(item.periodoHasta || "-")}</strong>
       <span>Vencimiento cuota</span><strong>${escapeHtml(item.vencimiento || "-")}</strong>
       <span>Proximo vencimiento</span><strong>${escapeHtml(item.proximoVencimiento || "-")}</strong>
+      <span>Frecuencia</span><strong>${escapeHtml(item.frecuencia || "-")}${item.frecuenciaDivisor && item.frecuenciaDivisor > 1 ? ` (cuota = total anual / ${plainNumberValue(item.frecuenciaDivisor)})` : ""}</strong>
       <span>Hectareas</span><strong>${plainNumberValue(item.hectareas)}</strong>
       <span>Producto / referencia</span><strong>${escapeHtml([item.cereal, item.mercado].filter(Boolean).join(" - ") || "-")}</strong>
       <span>Cotizacion por ${item.unidadCotizacion === "TN" ? "tonelada" : "kg"}</span><strong>${item.moneda === "USD" ? `USD ${plainNumberValue(item.cotizacion)} x TC ${moneyValue(item.tipoCambio)}` : moneyValue(item.cotizacion)}</strong>
@@ -1730,7 +1787,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     <table><thead><tr><th>Bloque</th><th>Base</th><th>Has.</th><th>Kg/ha o importe</th><th>Cantidad kg</th><th>Importe</th></tr></thead><tbody>
       ${componentRow("Facturado / contrato", item.facturadoDetalle || {})}
       ${item.efectivoTotal ? componentRow("Efectivo", item.efectivoDetalle || {}) : ""}
-      ${item.comisionImporte ? `<tr><td>Comision</td><td>${escapeHtml(item.comisionBase || "-")}</td><td colspan="3">${plainNumberValue(item.comisionPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionImporte)}</td></tr>` : ""}
+      ${commissionRows}
       <tr class="total"><td colspan="5">Total cuota</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr>
       ${item.comisionImporte ? `<tr class="total"><td colspan="5">Total con comision</td><td class="amount">${moneyValue(item.totalConComision || item.totalPesos)}</td></tr>` : ""}
     </tbody></table>
@@ -1741,15 +1798,19 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
 }
 
 function printCurrentFieldLeaseReport() {
-  updateFieldLeasePreview();
-  const payload = fieldLeaseCurrentInput();
-  const missingRule = fieldLeaseMissingRuleMessage(payload);
-  if (missingRule) {
-    setFieldLeaseMessage(missingRule, "error");
-    return;
+  try {
+    updateFieldLeasePreview();
+    const payload = fieldLeaseCurrentInput();
+    const missingRule = fieldLeaseMissingRuleMessage(payload);
+    if (missingRule) {
+      setFieldLeaseMessage(missingRule, "error");
+      return;
+    }
+    setFieldLeaseMessage("");
+    printFieldLeaseReport(payload);
+  } catch (error) {
+    setFieldLeaseMessage(error.message || "No se pudo generar el reporte del calculo.", "error");
   }
-  setFieldLeaseMessage("");
-  printFieldLeaseReport(payload);
 }
 
 function renderMetrics() {
