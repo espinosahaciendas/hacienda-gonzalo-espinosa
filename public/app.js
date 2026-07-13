@@ -1237,7 +1237,9 @@ async function saveFieldContract(event) {
 }
 
 function fieldLeaseCurrentInput() {
-  const price = parseMoneyInput($("#field-lease-price")?.value || 0);
+  const quoteAverage = fieldQuoteAverage();
+  const manualPrice = parseMoneyInput($("#field-lease-price")?.value || 0);
+  const price = quoteAverage || manualPrice;
   const exchange = parseMoneyInput($("#field-lease-exchange")?.value || 0);
   const currencyType = $("#field-lease-currency")?.value || "ARS";
   const unit = $("#field-lease-unit")?.value || "KG";
@@ -1305,7 +1307,21 @@ function calculateFieldContractComponent(contract, type, priceInPesos, unit) {
 function fieldQuoteAverage() {
   const rows = state.fieldQuoteRows || [];
   if (!rows.length) return 0;
-  return rows.reduce((sum, item) => sum + Number(item.cotizacion || 0), 0) / rows.length;
+  const values = rows
+    .map((item) => parseMoneyInput(item.cotizacion || 0))
+    .filter((value) => value > 0);
+  if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function syncFieldQuoteAverageToPrice() {
+  const average = fieldQuoteAverage();
+  if (average) {
+    setMoneyInput("#field-lease-price", average);
+  } else if ($("#field-lease-price")) {
+    $("#field-lease-price").value = "";
+  }
+  return average;
 }
 
 function renderFieldQuoteRows() {
@@ -1335,8 +1351,7 @@ function addFieldQuoteRow() {
   });
   $("#field-quote-price").value = "";
   renderFieldQuoteRows();
-  const average = fieldQuoteAverage();
-  if (average) setMoneyInput("#field-lease-price", average);
+  syncFieldQuoteAverageToPrice();
   updateFieldLeasePreview();
 }
 
@@ -1414,11 +1429,12 @@ function fillFieldLeaseForm(item) {
   $("#field-lease-market").value = item.mercado || "";
   $("#field-lease-unit").value = item.unidadCotizacion || "KG";
   $("#field-lease-currency").value = item.moneda || "ARS";
-  setMoneyInput("#field-lease-price", item.cotizacion || 0);
+  setMoneyInput("#field-lease-price", item.cotizacion || item.cotizacionPesos || 0);
   setMoneyInput("#field-lease-exchange", item.tipoCambio || 0);
   $("#field-lease-notes").value = item.observaciones || "";
   state.fieldQuoteRows = Array.isArray(item.cotizaciones) ? item.cotizaciones : [];
   renderFieldQuoteRows();
+  if (state.fieldQuoteRows.length) syncFieldQuoteAverageToPrice();
   updateFieldLeasePreview();
 }
 
@@ -6845,8 +6861,7 @@ async function init() {
     if (!button) return;
     state.fieldQuoteRows = state.fieldQuoteRows.filter((item) => String(item.id) !== String(button.dataset.fieldQuoteRemove));
     renderFieldQuoteRows();
-    const average = fieldQuoteAverage();
-    if (average) setMoneyInput("#field-lease-price", average);
+    syncFieldQuoteAverageToPrice();
     updateFieldLeasePreview();
   });
   $all("#field-lease-form input, #field-lease-form select, #field-lease-form textarea").forEach((node) => {
