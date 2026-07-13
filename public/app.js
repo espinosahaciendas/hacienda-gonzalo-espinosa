@@ -1632,7 +1632,7 @@ function updateFieldLeasePreview() {
   setPreview("#field-lease-total", moneyValue(calc.totalPesos));
   setPreview("#field-lease-commission-total", moneyValue(calc.comisionImporte));
   setPreview("#field-lease-grand-total", moneyValue(calc.totalConComision));
-  setPreview("#field-lease-due-preview", calc.vencimiento ? formatDateForDisplay(calc.vencimiento) : "-");
+  setPreview("#field-lease-due-preview", calc.vencimiento ? formatDisplayDate(calc.vencimiento) : "-");
   const messageNode = $("#field-lease-message");
   if (messageNode && calc.totalPesos && /Falta|promedio esta cargado/i.test(messageNode.textContent || "")) {
     setFieldLeaseMessage("");
