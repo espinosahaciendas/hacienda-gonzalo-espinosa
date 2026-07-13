@@ -25,6 +25,7 @@
   externalDueRows: [],
   commissionistRows: [],
   fieldQuoteRows: [],
+  fieldLeasePaymentRows: [],
   activeFieldContract: null,
   fieldDataLoaded: false,
   usuario: null,
@@ -1424,6 +1425,8 @@ function openFieldContractPdf(contractId = $("#field-contract-id")?.value || "")
 }
 
 function fieldLeaseCurrentInput() {
+  const leaseId = $("#field-lease-id")?.value || "";
+  const savedLease = leaseId ? (state.fieldLeases || []).find((item) => String(item.id) === String(leaseId)) || {} : {};
   const quoteAverage = fieldQuoteAverage();
   const manualPrice = parseMoneyInput($("#field-lease-price")?.value || 0);
   const price = quoteAverage || manualPrice;
@@ -1441,9 +1444,10 @@ function fieldLeaseCurrentInput() {
   const totalPesos = billed.total + cash.total;
   const commission = calculateFieldLeaseCommission(totalPesos, billed.total, cash.total);
   return {
+    id: leaseId,
     contrato: $("#field-lease-contract")?.value || "",
     cliente: $("#field-lease-client")?.value || "",
-    arrendatario: contract.arrendatario || "",
+    arrendatario: contract.arrendatario || savedLease.arrendatario || "",
     campo: $("#field-lease-farm")?.value || "",
     fecha: $("#field-lease-date")?.value || new Date().toISOString().slice(0, 10),
     periodoDesde: $("#field-lease-from")?.value || "",
@@ -1463,6 +1467,7 @@ function fieldLeaseCurrentInput() {
     criterioCotizacion: contract.criterioCotizacion || "",
     observaciones: $("#field-lease-notes")?.value || "",
     cotizaciones: state.fieldQuoteRows || [],
+    pagos: state.fieldLeasePaymentRows || [],
     cotizacionPesos: priceInPesos,
     facturadoDetalle: billed,
     efectivoDetalle: cash,
@@ -1634,6 +1639,7 @@ function updateFieldLeasePreview() {
   setPreview("#field-lease-commission-total", moneyValue(calc.comisionImporte));
   setPreview("#field-lease-grand-total", moneyValue(calc.totalConComision));
   setPreview("#field-lease-due-preview", calc.vencimiento ? formatDisplayDate(calc.vencimiento) : "-");
+  renderFieldLeasePaymentRows(calc.totalConComision);
   const messageNode = $("#field-lease-message");
   if (messageNode && calc.totalPesos && /Falta|promedio esta cargado/i.test(messageNode.textContent || "")) {
     setFieldLeaseMessage("");
@@ -1652,14 +1658,60 @@ function fieldLeaseMissingRuleMessage(payload) {
 
 function resetFieldLeaseForm() {
   $("#field-lease-form")?.reset();
+  if ($("#field-lease-id")) $("#field-lease-id").value = "";
   const today = new Date().toISOString().slice(0, 10);
   $("#field-lease-date").value = today;
   $("#field-lease-due-date").value = today;
+  if ($("#field-payment-date")) $("#field-payment-date").value = today;
   $("#field-lease-currency").value = "ARS";
   $("#field-lease-unit").value = "KG";
   state.fieldQuoteRows = [];
+  state.fieldLeasePaymentRows = [];
   renderFieldQuoteRows();
+  renderFieldLeasePaymentRows(0);
   updateFieldLeasePreview();
+  setFieldLeaseMessage("");
+}
+
+function fieldLeasePaymentsTotal() {
+  return (state.fieldLeasePaymentRows || []).reduce((sum, item) => sum + parseMoneyInput(item.importe || 0), 0);
+}
+
+function renderFieldLeasePaymentRows(totalDue = fieldLeaseCurrentInput().totalConComision) {
+  const body = $("#field-payment-body");
+  if (!body) return;
+  const rows = state.fieldLeasePaymentRows || [];
+  body.innerHTML = rows.length
+    ? rows.map((item) => `<tr>
+        <td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(item.fecha)) || item.fecha || "-")}</td>
+        <td>${escapeHtml(item.medio || "-")}</td>
+        <td>${escapeHtml(item.referencia || "-")}</td>
+        <td class="amount">${moneyValue(item.importe || 0)}</td>
+        <td><button type="button" class="small-button danger-button" data-field-payment-remove="${escapeHtml(item.id)}">Quitar</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="5">Sin pagos registrados para esta cuota.</td></tr>`;
+  const paid = fieldLeasePaymentsTotal();
+  const balance = Number(totalDue || 0) - paid;
+  if ($("#field-payment-paid")) $("#field-payment-paid").textContent = moneyValue(paid);
+  if ($("#field-payment-balance")) $("#field-payment-balance").textContent = moneyValue(balance);
+}
+
+function addFieldLeasePaymentRow() {
+  const amount = parseMoneyInput($("#field-payment-amount")?.value || 0);
+  if (!amount) {
+    setFieldLeaseMessage("Cargue un importe para registrar el pago de la cuota.", "error");
+    return;
+  }
+  state.fieldLeasePaymentRows.push({
+    id: `PAGO-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    fecha: $("#field-payment-date")?.value || new Date().toISOString().slice(0, 10),
+    medio: $("#field-payment-method")?.value || "Transferencia",
+    referencia: $("#field-payment-reference")?.value || "",
+    importe: amount
+  });
+  $("#field-payment-reference").value = "";
+  $("#field-payment-amount").value = "";
+  renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
   setFieldLeaseMessage("");
 }
 
@@ -1674,8 +1726,8 @@ function renderFieldLeases() {
         <td>${escapeHtml(item.campo || "-")}</td>
         <td>${escapeHtml(item.cereal || "-")}</td>
         <td>${plainNumberValue(item.hectareas)}</td>
-        <td>${moneyValue(item.totalPesos)}</td>
-        <td>${escapeHtml(item.vencimiento || item.fecha || "-")}</td>
+        <td>${moneyValue(item.totalConComision || item.totalPesos)}</td>
+        <td>${moneyValue((item.pagos || []).reduce((sum, payment) => sum + parseMoneyInput(payment.importe || 0), 0))}</td>
         <td><button type="button" class="small-button" data-field-lease-open="${escapeHtml(item.id)}">Abrir</button> <button type="button" class="small-button" data-field-lease-print="${escapeHtml(item.id)}">Imprimir</button> <button type="button" class="small-button danger-button" data-field-lease-delete="${escapeHtml(item.id)}">Eliminar</button></td>
       </tr>`).join("")
     : `<tr><td colspan="8">Sin calculos de arrendamiento cargados.</td></tr>`;
@@ -1684,6 +1736,7 @@ function renderFieldLeases() {
 
 function fillFieldLeaseForm(item) {
   if (!item) return;
+  if ($("#field-lease-id")) $("#field-lease-id").value = item.id || "";
   $("#field-lease-contract").value = item.contrato || "";
   $("#field-lease-client").value = item.cliente || "";
   $("#field-lease-farm").value = item.campo || "";
@@ -1704,7 +1757,9 @@ function fillFieldLeaseForm(item) {
   if ($("#field-lease-commission-cash-rate")) $("#field-lease-commission-cash-rate").value = item.comisionEfectivoPorcentaje || "";
   $("#field-lease-notes").value = item.observaciones || "";
   state.fieldQuoteRows = Array.isArray(item.cotizaciones) ? item.cotizaciones : [];
+  state.fieldLeasePaymentRows = Array.isArray(item.pagos) ? item.pagos : [];
   renderFieldQuoteRows();
+  renderFieldLeasePaymentRows(item.totalConComision || item.totalPesos || 0);
   if (state.fieldQuoteRows.length) syncFieldQuoteAverageToPrice();
   updateFieldLeasePreview();
 }
@@ -1727,6 +1782,7 @@ async function saveFieldLease(event) {
       method: "POST",
       body: JSON.stringify(payload)
     });
+    if (saved.item?.id && $("#field-lease-id")) $("#field-lease-id").value = saved.item.id;
     state.fieldLeases = saved.items || [];
     renderFieldLeases();
     setFieldLeaseMessage("Calculo guardado correctamente.", "ok");
@@ -1754,6 +1810,9 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
   const billedTotal = Number(item.facturadoTotal || 0);
   const commissionTotal = Number(item.comisionImporte || 0);
   const finalTotal = Number(item.totalConComision || item.totalPesos || 0);
+  const paymentRowsData = Array.isArray(item.pagos) ? item.pagos : [];
+  const paymentsTotal = paymentRowsData.reduce((sum, payment) => sum + parseMoneyInput(payment.importe || 0), 0);
+  const paymentBalance = finalTotal - paymentsTotal;
   const divisorText = item.frecuenciaDivisor && item.frecuenciaDivisor > 1
     ? `Importes de la cuota calculados sobre base anual / ${plainNumberValue(item.frecuenciaDivisor)}.`
     : "Importes calculados para el vencimiento informado.";
@@ -1774,6 +1833,9 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
   const commissionBlock = commissionRows
     ? `<h2>Comision</h2><table><thead><tr><th>Concepto</th><th>Aplica sobre</th><th>%</th><th>Base</th><th>Importe</th></tr></thead><tbody>${commissionRows}<tr class="total"><td colspan="4">Total comision</td><td class="amount">${moneyValue(commissionTotal)}</td></tr></tbody></table>`
     : "";
+  const paymentRows = paymentRowsData.length
+    ? paymentRowsData.map((payment) => `<tr><td>${fieldReportDate(payment.fecha)}</td><td>${escapeHtml(payment.medio || "-")}</td><td>${escapeHtml(payment.referencia || "-")}</td><td class="amount">${moneyValue(payment.importe || 0)}</td></tr>`).join("")
+    : `<tr><td colspan="4">Sin pagos registrados para esta cuota.</td></tr>`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
     body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22;font-size:10.5px}
     header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:10px}
@@ -1794,6 +1856,8 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
       <div class="box"><span>Facturado / contrato</span><strong>${moneyValue(billedTotal)}</strong></div>
       <div class="box"><span>Efectivo</span><strong>${moneyValue(cashTotal)}</strong></div>
       <div class="box main"><span>${commissionTotal ? "Total con comision" : "Total cuota"}</span><strong>${moneyValue(finalTotal)}</strong></div>
+      <div class="box"><span>Pagado</span><strong>${moneyValue(paymentsTotal)}</strong></div>
+      <div class="box main"><span>Saldo</span><strong>${moneyValue(paymentBalance)}</strong></div>
     </section>
     <div class="grid">
       <span>Contrato / referencia</span><strong>${escapeHtml(item.contrato || "-")}</strong>
@@ -1817,6 +1881,8 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
       <tr class="total"><td colspan="7">Total cuota</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr>
     </tbody></table>
     ${commissionBlock}
+    <h2>Pagos registrados de la cuota</h2>
+    <table><thead><tr><th>Fecha</th><th>Medio</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="3">Total pagado</td><td class="amount">${moneyValue(paymentsTotal)}</td></tr><tr class="total"><td colspan="3">Saldo pendiente</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>
     <h2>Cotizaciones utilizadas</h2>
     <table><thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th></tr></thead><tbody>${quoteRows}<tr class="total"><td colspan="3">Promedio / cotizacion aplicada</td><td class="amount">${moneyValue(item.cotizacionPesos || item.cotizacion)}</td></tr></tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
@@ -7207,6 +7273,7 @@ async function init() {
   $("#field-lease-clear").addEventListener("click", resetFieldLeaseForm);
   $("#field-lease-print").addEventListener("click", printCurrentFieldLeaseReport);
   $("#field-quote-add").addEventListener("click", addFieldQuoteRow);
+  $("#field-payment-add").addEventListener("click", addFieldLeasePaymentRow);
   $("#field-quote-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-field-quote-remove]");
     if (!button) return;
@@ -7214,6 +7281,12 @@ async function init() {
     renderFieldQuoteRows();
     syncFieldQuoteAverageToPrice();
     updateFieldLeasePreview();
+  });
+  $("#field-payment-body").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-payment-remove]");
+    if (!button) return;
+    state.fieldLeasePaymentRows = state.fieldLeasePaymentRows.filter((item) => String(item.id) !== String(button.dataset.fieldPaymentRemove));
+    renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
   });
   $all("#field-lease-form input, #field-lease-form select, #field-lease-form textarea").forEach((node) => {
     node.addEventListener("input", updateFieldLeasePreview);

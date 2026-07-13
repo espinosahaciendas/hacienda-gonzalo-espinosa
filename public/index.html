@@ -554,6 +554,7 @@
             <button type="button" class="ghost-button" id="field-lease-clear">Nuevo calculo</button>
           </div>
           <form id="field-lease-form">
+            <input type="hidden" id="field-lease-id">
             <div class="form-grid">
               <label>Contrato / referencia<input id="field-lease-contract" placeholder="Ej.: Arrendamiento campo La Esperanza"></label>
               <label>Cliente / arrendador<input id="field-lease-client" autocomplete="off"></label>
@@ -630,6 +631,41 @@
               <div><span>Total con comision</span><strong id="field-lease-grand-total">$ 0,00</strong></div>
               <div><span>Vencimiento</span><strong id="field-lease-due-preview">-</strong></div>
             </div>
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Pagos de esta cuota</h3>
+                  <p class="subtle">Registro interno de como se abono esta cuota. No impacta cuenta corriente de Hacienda.</p>
+                </div>
+                <div class="mini-summary">
+                  <span>Pagado: <strong id="field-payment-paid">$ 0,00</strong></span>
+                  <span>Saldo: <strong id="field-payment-balance">$ 0,00</strong></span>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>Fecha de pago<input id="field-payment-date" type="date"></label>
+                <label>Medio
+                  <select id="field-payment-method">
+                    <option value="Transferencia">Transferencia</option>
+                    <option value="E-cheq">E-cheq</option>
+                    <option value="Efectivo">Efectivo</option>
+                    <option value="Cheque">Cheque</option>
+                    <option value="Otro">Otro</option>
+                  </select>
+                </label>
+                <label>Referencia / detalle<input id="field-payment-reference" placeholder="Banco, numero de echeq, comprobante, observacion"></label>
+                <label>Importe<input id="field-payment-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-payment-add">Agregar pago</button>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Fecha</th><th>Medio</th><th>Referencia</th><th>Importe</th><th>Accion</th></tr></thead>
+                  <tbody id="field-payment-body"></tbody>
+                </table>
+              </div>
+            </div>
             <div class="form-actions">
               <button type="button" class="ghost-button" id="field-lease-print">Ver / imprimir calculo</button>
               <button type="submit" class="primary-button">Guardar calculo</button>
@@ -656,7 +692,7 @@
                   <th>Cereal</th>
                   <th>Has.</th>
                   <th>Total</th>
-                  <th>Cuotas</th>
+                  <th>Pagado</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -2211,7 +2247,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260713-campos-reporte-partes-v12"></script>
+    <script src="/app.js?v=20260713-campos-pagos-cuota-v14"></script>
   </body>
 </html>
 
