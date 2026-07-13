@@ -495,12 +495,54 @@
               </div>
             </div>
             <label>Condiciones base<textarea id="field-contract-notes" rows="3" placeholder="Ej.: 60 has a 600 kg soja/ha. Pago mensual vto. 05-10 de cada mes."></textarea></label>
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>PDF del contrato</h3>
+                  <p class="subtle">Opcional. Queda asociado solo a este contrato de Campos para control interno.</p>
+                </div>
+                <span class="subtle" id="field-contract-pdf-summary">Sin PDF asociado.</span>
+              </div>
+              <div class="form-grid">
+                <label class="span-2">Adjuntar contrato en PDF<input id="field-contract-pdf" type="file" accept="application/pdf,.pdf"></label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-contract-pdf-upload">Adjuntar PDF al contrato</button>
+                <button type="button" class="ghost-button" id="field-contract-pdf-open">Ver PDF asociado</button>
+              </div>
+            </div>
             <div class="form-actions">
               <button type="button" class="ghost-button" id="field-contract-use">Usar en calculo</button>
               <button type="submit" class="primary-button">Guardar contrato</button>
             </div>
             <p class="form-message" id="field-contract-message"></p>
           </form>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Contratos guardados</h2>
+              <p class="subtle">Desde aca podes editar, usar en calculo, ver PDF o borrar contratos repetidos.</p>
+            </div>
+            <span class="subtle" id="field-contract-summary">Sin contratos guardados.</span>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Contrato</th>
+                  <th>Arrendador</th>
+                  <th>Arrendatario</th>
+                  <th>Campo</th>
+                  <th>Has.</th>
+                  <th>PDF</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="field-contract-body"></tbody>
+            </table>
+          </div>
         </div>
 
         <div class="panel">
@@ -2151,6 +2193,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260713-campos-calculo-contrato-v2"></script>
+    <script src="/app.js?v=20260713-campos-contratos-pdf-admin"></script>
   </body>
 </html>

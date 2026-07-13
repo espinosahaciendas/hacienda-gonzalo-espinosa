@@ -1062,6 +1062,20 @@ function setFieldContractMessage(message, type = "") {
   node.className = `form-message ${type}`.trim();
 }
 
+function fieldContractDocuments(contractId) {
+  if (!contractId) return [];
+  return (state.documentos || []).filter((documento) =>
+    documento.entidadTipo === "CAMPO_CONTRATO" && String(documento.entidadId || "") === String(contractId)
+  );
+}
+
+function updateFieldContractPdfSummary(contractId = $("#field-contract-id")?.value || "") {
+  const summary = $("#field-contract-pdf-summary");
+  if (!summary) return;
+  const docs = fieldContractDocuments(contractId);
+  summary.textContent = docs.length ? `${docs.length} PDF asociado/s.` : "Sin PDF asociado.";
+}
+
 function fieldContractPayload() {
   return {
     id: $("#field-contract-id")?.value || "",
@@ -1090,6 +1104,34 @@ function fieldContractPayload() {
 
 function renderFieldContracts() {
   renderFieldContractSuggestions();
+  renderFieldContractTable();
+}
+
+function renderFieldContractTable() {
+  const body = $("#field-contract-body");
+  if (!body) return;
+  const rows = state.fieldContracts || [];
+  $("#field-contract-summary").textContent = rows.length ? `${rows.length} contrato/s guardado/s.` : "Sin contratos guardados.";
+  body.innerHTML = rows.length
+    ? rows.map((item) => {
+        const docs = fieldContractDocuments(item.id);
+        return `<tr>
+          <td><strong>${escapeHtml(item.nombre || "-")}</strong></td>
+          <td>${escapeHtml(item.arrendador || "-")}</td>
+          <td>${escapeHtml(item.arrendatario || "-")}</td>
+          <td>${escapeHtml(item.campo || "-")}</td>
+          <td>${plainNumberValue(item.hectareas || 0)}</td>
+          <td>${docs.length ? `${docs.length} PDF` : "-"}</td>
+          <td>
+            <button type="button" class="small-button" data-field-contract-edit="${escapeHtml(item.id)}">Editar</button>
+            <button type="button" class="small-button" data-field-contract-use-row="${escapeHtml(item.id)}">Usar</button>
+            ${docs.length ? `<button type="button" class="small-button" data-field-contract-doc="${escapeHtml(item.id)}">Ver PDF</button>` : ""}
+            <button type="button" class="small-button danger-button" data-field-contract-delete="${escapeHtml(item.id)}">Eliminar</button>
+          </td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="7">Sin contratos guardados.</td></tr>`;
+  updateFieldContractPdfSummary();
 }
 
 function fieldContractSearchLabel(item) {
@@ -1149,9 +1191,12 @@ function findFieldContractByLeaseFields() {
     const owner = normalizeSearch(item.arrendador || "");
     const tenant = normalizeSearch(item.arrendatario || "");
     const farm = normalizeSearch(item.campo || "");
-    const matchesContract = contractName && (name === contractName || name.includes(contractName) || contractName.includes(name));
-    const matchesClient = clientName && (owner === clientName || tenant === clientName || owner.includes(clientName) || tenant.includes(clientName));
-    const matchesFarm = farmName && (farm === farmName || farm.includes(farmName) || farmName.includes(farm));
+    const matchesContract = contractName && name && (name === contractName || name.includes(contractName) || contractName.includes(name));
+    const matchesClient = clientName && (
+      (owner && (owner === clientName || owner.includes(clientName) || clientName.includes(owner)))
+      || (tenant && (tenant === clientName || tenant.includes(clientName) || clientName.includes(tenant)))
+    );
+    const matchesFarm = farmName && farm && (farm === farmName || farm.includes(farmName) || farmName.includes(farm));
     return matchesContract || (matchesClient && matchesFarm);
   }) || null;
 }
@@ -1193,13 +1238,16 @@ function fillFieldContractForm(item) {
   $("#field-contract-cash-base").value = item.efectivoBase || "MISMA_FACTURADA";
   $("#field-contract-cash-rate").value = item.efectivoTasa || "";
   $("#field-contract-notes").value = item.condiciones || "";
+  updateFieldContractPdfSummary(item.id || "");
 }
 
 function resetFieldContractForm() {
   $("#field-contract-form")?.reset();
   $("#field-contract-id").value = "";
+  $("#field-contract-pdf").value = "";
   $("#field-contract-suggestions").hidden = true;
   $("#field-contract-suggestions").innerHTML = "";
+  updateFieldContractPdfSummary("");
   setFieldContractMessage("");
 }
 
@@ -1256,6 +1304,62 @@ async function saveFieldContract(event) {
   } catch (error) {
     setFieldContractMessage(error.message, "error");
   }
+}
+
+async function deleteFieldContract(id) {
+  const item = (state.fieldContracts || []).find((row) => String(row.id) === String(id));
+  if (!item) return;
+  const label = item.nombre || item.campo || "este contrato";
+  if (!window.confirm(`Se eliminara ${label}. Los PDF asociados quedaran en Archivo documental. ¿Continuar?`)) return;
+  const saved = await fetchJson(`/api/campos/contratos/${encodeURIComponent(id)}`, { method: "DELETE" });
+  state.fieldContracts = saved.items || [];
+  if (String($("#field-contract-id")?.value || "") === String(id)) resetFieldContractForm();
+  renderFieldContracts();
+  setFieldContractMessage("Contrato eliminado.", "ok");
+}
+
+async function uploadFieldContractPdf() {
+  const contractId = $("#field-contract-id")?.value || "";
+  if (!contractId) {
+    setFieldContractMessage("Primero guarda o selecciona el contrato para adjuntar el PDF.", "error");
+    return;
+  }
+  const file = $("#field-contract-pdf")?.files?.[0];
+  if (!file) {
+    setFieldContractMessage("Falta seleccionar el PDF del contrato.", "error");
+    return;
+  }
+  const contract = (state.fieldContracts || []).find((item) => String(item.id) === String(contractId)) || fieldContractPayload();
+  const form = new FormData();
+  form.append("archivo", file);
+  form.append("entidadTipo", "CAMPO_CONTRATO");
+  form.append("entidadId", contractId);
+  form.append("cliente", contract.arrendador || "");
+  form.append("tipo", "Contrato de campo");
+  form.append("parte", "INTERNO");
+  form.append("titulo", contract.nombre ? `Contrato ${contract.nombre}` : file.name);
+  form.append("observacion", [contract.campo, contract.arrendatario].filter(Boolean).join(" / "));
+  setFieldContractMessage("Subiendo PDF del contrato...");
+  const response = await fetch("/api/documentos", { method: "POST", body: form });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    setFieldContractMessage(payload.error || "No se pudo subir el PDF.", "error");
+    return;
+  }
+  const documentos = await fetchJsonOptional("/api/documentos", { items: [] });
+  state.documentos = documentos.items || [];
+  $("#field-contract-pdf").value = "";
+  renderFieldContracts();
+  setFieldContractMessage("PDF asociado al contrato.", "ok");
+}
+
+function openFieldContractPdf(contractId = $("#field-contract-id")?.value || "") {
+  const docs = fieldContractDocuments(contractId);
+  if (!docs.length) {
+    setFieldContractMessage("Este contrato no tiene PDF asociado.", "error");
+    return;
+  }
+  window.open(documentDownloadUrl(docs[0].id), "_blank", "noopener");
 }
 
 function fieldLeaseCurrentInput() {
@@ -1406,6 +1510,16 @@ function updateFieldLeasePreview() {
   $("#field-lease-due-preview").textContent = calc.vencimiento ? formatDateForDisplay(calc.vencimiento) : "-";
 }
 
+function fieldLeaseMissingRuleMessage(payload) {
+  if (!payload.cotizacionPesos && !payload.totalPesos) {
+    return "Falta cargar cotizacion/promedio o una regla fija del contrato.";
+  }
+  if (!payload.totalPesos) {
+    return "El promedio esta cargado, pero falta una regla de calculo del contrato: hectareas y kg/ha, importe fijo o porcentaje. Selecciona/guarda el contrato y verifica la parte facturada o efectivo.";
+  }
+  return "";
+}
+
 function resetFieldLeaseForm() {
   $("#field-lease-form")?.reset();
   const today = new Date().toISOString().slice(0, 10);
@@ -1462,13 +1576,15 @@ function fillFieldLeaseForm(item) {
 
 async function saveFieldLease(event) {
   event.preventDefault();
+  updateFieldLeasePreview();
   const payload = fieldLeaseCurrentInput();
   if (!payload.cliente && !payload.contrato && !payload.campo) {
     setFieldLeaseMessage("Cargue al menos contrato, cliente o campo.", "error");
     return;
   }
-  if (!payload.cotizacion && !payload.totalPesos) {
-    setFieldLeaseMessage("Falta cargar cotizacion/promedio o una regla fija del contrato.", "error");
+  const missingRule = fieldLeaseMissingRuleMessage(payload);
+  if (missingRule) {
+    setFieldLeaseMessage(missingRule, "error");
     return;
   }
   try {
@@ -1535,6 +1651,18 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     <button onclick="window.print()">Imprimir / guardar PDF</button>
   </body></html>`);
   popup.document.close();
+}
+
+function printCurrentFieldLeaseReport() {
+  updateFieldLeasePreview();
+  const payload = fieldLeaseCurrentInput();
+  const missingRule = fieldLeaseMissingRuleMessage(payload);
+  if (missingRule) {
+    setFieldLeaseMessage(missingRule, "error");
+    return;
+  }
+  setFieldLeaseMessage("");
+  printFieldLeaseReport(payload);
 }
 
 function renderMetrics() {
@@ -6856,6 +6984,8 @@ async function init() {
   $("#field-contract-form").addEventListener("submit", saveFieldContract);
   $("#field-contract-clear").addEventListener("click", resetFieldContractForm);
   $("#field-contract-use").addEventListener("click", () => useFieldContractInCalculation());
+  $("#field-contract-pdf-upload").addEventListener("click", uploadFieldContractPdf);
+  $("#field-contract-pdf-open").addEventListener("click", () => openFieldContractPdf());
   $("#field-contract-search").addEventListener("input", renderFieldContractSuggestions);
   $("#field-contract-search").addEventListener("change", () => {
     const item = findFieldContractBySearch();
@@ -6874,9 +7004,28 @@ async function init() {
     $("#field-contract-suggestions").innerHTML = "";
     useFieldContractInCalculation(item);
   });
+  $("#field-contract-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-field-contract-edit]");
+    const useButton = event.target.closest("[data-field-contract-use-row]");
+    const docButton = event.target.closest("[data-field-contract-doc]");
+    const deleteButton = event.target.closest("[data-field-contract-delete]");
+    const id = editButton?.dataset.fieldContractEdit
+      || useButton?.dataset.fieldContractUseRow
+      || docButton?.dataset.fieldContractDoc
+      || deleteButton?.dataset.fieldContractDelete;
+    if (!id) return;
+    const item = (state.fieldContracts || []).find((row) => String(row.id) === String(id));
+    if (editButton && item) {
+      fillFieldContractForm(item);
+      setFieldContractMessage("Contrato cargado para editar.", "ok");
+    }
+    if (useButton && item) useFieldContractInCalculation(item);
+    if (docButton) openFieldContractPdf(id);
+    if (deleteButton) deleteFieldContract(id);
+  });
   $("#field-lease-form").addEventListener("submit", saveFieldLease);
   $("#field-lease-clear").addEventListener("click", resetFieldLeaseForm);
-  $("#field-lease-print").addEventListener("click", () => printFieldLeaseReport(fieldLeaseCurrentInput()));
+  $("#field-lease-print").addEventListener("click", printCurrentFieldLeaseReport);
   $("#field-quote-add").addEventListener("click", addFieldQuoteRow);
   $("#field-quote-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-field-quote-remove]");
