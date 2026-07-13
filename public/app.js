@@ -1139,12 +1139,31 @@ function findFieldContractBySearch() {
   }) || null;
 }
 
+function findFieldContractByLeaseFields() {
+  const contractName = normalizeSearch($("#field-lease-contract")?.value || "");
+  const clientName = normalizeSearch($("#field-lease-client")?.value || "");
+  const farmName = normalizeSearch($("#field-lease-farm")?.value || "");
+  if (!contractName && !clientName && !farmName) return null;
+  return (state.fieldContracts || []).find((item) => {
+    const name = normalizeSearch(item.nombre || "");
+    const owner = normalizeSearch(item.arrendador || "");
+    const tenant = normalizeSearch(item.arrendatario || "");
+    const farm = normalizeSearch(item.campo || "");
+    const matchesContract = contractName && (name === contractName || name.includes(contractName) || contractName.includes(name));
+    const matchesClient = clientName && (owner === clientName || tenant === clientName || owner.includes(clientName) || tenant.includes(clientName));
+    const matchesFarm = farmName && (farm === farmName || farm.includes(farmName) || farmName.includes(farm));
+    return matchesContract || (matchesClient && matchesFarm);
+  }) || null;
+}
+
 function currentFieldContractForCalculation() {
   const formId = $("#field-contract-id")?.value || "";
   const saved = formId
     ? (state.fieldContracts || []).find((item) => String(item.id) === String(formId))
     : findFieldContractBySearch();
   if (saved) return saved;
+  const leaseSaved = findFieldContractByLeaseFields();
+  if (leaseSaved) return leaseSaved;
   const payload = fieldContractPayload();
   if (payload.nombre || payload.arrendador || payload.campo || payload.hectareas || payload.condiciones) return payload;
   return null;
@@ -1229,8 +1248,11 @@ async function saveFieldContract(event) {
     state.fieldContracts = saved.items || [];
     renderFieldContracts();
     const current = state.fieldContracts.find((item) => item.id === (saved.item && saved.item.id));
-    if (current) fillFieldContractForm(current);
-    setFieldContractMessage("Contrato guardado correctamente.", "ok");
+    if (current) {
+      fillFieldContractForm(current);
+      useFieldContractInCalculation(current);
+    }
+    setFieldContractMessage("Contrato guardado correctamente y cargado en el calculo.", "ok");
   } catch (error) {
     setFieldContractMessage(error.message, "error");
   }
@@ -1257,7 +1279,7 @@ function fieldLeaseCurrentInput() {
     periodoHasta: $("#field-lease-to")?.value || "",
     vencimiento: $("#field-lease-due-date")?.value || "",
     proximoVencimiento: $("#field-lease-next-due")?.value || "",
-    hectareas: Number(contract.hectareas || 0),
+    hectareas: parseMoneyInput(contract.hectareas || 0),
     cereal: $("#field-lease-cereal")?.value || "",
     mercado: $("#field-lease-market")?.value || "",
     unidadCotizacion: unit,
@@ -1280,14 +1302,14 @@ function fieldLeaseCurrentInput() {
 }
 
 function calculateFieldContractComponent(contract, type, priceInPesos, unit) {
-  const totalHectares = Number(contract.hectareas || 0);
+  const totalHectares = parseMoneyInput(contract.hectareas || 0);
   const prefix = type === "EFECTIVO" ? "efectivo" : "facturado";
   const mode = String(contract[`${prefix}Modo`] || (type === "EFECTIVO" ? "NINGUNO" : "HECTAREAS")).toUpperCase();
   if (mode === "NINGUNO") return { tipo: type, modo: mode, hectareas: 0, tasa: 0, base: "", cantidad: 0, total: 0 };
-  const value = Number(contract[`${prefix}Valor`] || 0);
+  const value = parseMoneyInput(contract[`${prefix}Valor`] || 0);
   let base = String(contract[`${prefix}Base`] || "KG_SOJA").toUpperCase();
   if (type === "EFECTIVO" && base === "MISMA_FACTURADA") base = String(contract.facturadoBase || "KG_SOJA").toUpperCase();
-  const rate = Number(contract[`${prefix}Tasa`] || 0) || (type === "EFECTIVO" ? Number(contract.facturadoTasa || 0) : 0);
+  const rate = parseMoneyInput(contract[`${prefix}Tasa`] || 0) || (type === "EFECTIVO" ? parseMoneyInput(contract.facturadoTasa || 0) : 0);
   let hectares = totalHectares;
   if (mode === "HECTAREAS") hectares = value || totalHectares;
   if (mode === "PORCENTAJE") hectares = totalHectares * value / 100;
@@ -1295,7 +1317,7 @@ function calculateFieldContractComponent(contract, type, priceInPesos, unit) {
     return { tipo: type, modo: mode, hectareas: 0, tasa: value || rate, base, cantidad: 1, total: value || rate };
   }
   if (base === "PESOS_HA" || base === "DOLARES_HA") {
-    const total = hectares * rate * (base === "DOLARES_HA" ? Number($("#field-lease-exchange")?.value ? parseMoneyInput($("#field-lease-exchange").value) : 0) : 1);
+    const total = hectares * rate * (base === "DOLARES_HA" ? parseMoneyInput($("#field-lease-exchange")?.value || 0) : 1);
     return { tipo: type, modo: mode, hectareas, tasa: rate, base, cantidad: hectares, total };
   }
   const kg = hectares * rate;
