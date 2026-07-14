@@ -1284,7 +1284,7 @@ function addFieldContractLineRow() {
   state.fieldContractLineRows.push(normalizeFieldContractLine({
     aplicaA: $("#field-contract-line-applies")?.value || "FACTURADO",
     detalle: detail || fieldContractBaseLabel(base),
-    hectareas,
+    hectareas: hectares,
     base,
     tasa: rate,
     cotizacion: parseFieldDecimalInput($("#field-contract-line-price")?.value || 0),
@@ -8299,21 +8299,6 @@ async function init() {
     formatMoneyInput(event.target);
     renderLiquidationTotals();
     renderReport();
-  });
-  document.addEventListener("click", (event) => {
-    const lineButton = event.target.closest("#field-contract-line-add");
-    if (lineButton) {
-      event.preventDefault();
-      event.stopPropagation();
-      addFieldContractLineRow();
-      return;
-    }
-    const installmentButton = event.target.closest("#field-contract-installment-add");
-    if (installmentButton) {
-      event.preventDefault();
-      event.stopPropagation();
-      addFieldContractInstallmentRow();
-    }
   });
   $("#client-form").addEventListener("submit", saveClient);
   $("#client-cancel").addEventListener("click", resetClientForm);
