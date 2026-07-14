@@ -2232,6 +2232,29 @@ class BackupDataSource {
         porcentaje: parseMoney(item.porcentaje),
         observaciones: normalizeText(item.observaciones)
       })).filter((item) => item.nombre || item.porcentaje),
+      lineas: asArray(input.lineas).map((item, index) => ({
+        id: normalizeText(item.id) || `LINEA-CAMPO-${Date.now()}-${index}`,
+        aplicaA: ["EFECTIVO", "AMBAS"].includes(normalizeText(item.aplicaA || item.aplica).toUpperCase())
+          ? normalizeText(item.aplicaA || item.aplica).toUpperCase()
+          : "FACTURADO",
+        detalle: normalizeText(item.detalle),
+        hectareas: parseMoney(item.hectareas),
+        base: normalizeText(item.base || "KG_CARNE").toUpperCase(),
+        tasa: parseMoney(item.tasa),
+        cotizacion: parseMoney(item.cotizacion),
+        observaciones: normalizeText(item.observaciones)
+      })).filter((item) => item.detalle || item.hectareas || item.tasa),
+      cuotas: asArray(input.cuotas).map((item, index) => ({
+        id: normalizeText(item.id) || `CUOTA-CAMPO-${Date.now()}-${index}`,
+        numero: parseMoney(item.numero),
+        vencimiento: item.vencimiento ? formatDateForDisplay(item.vencimiento) : "",
+        tipo: ["EFECTIVO", "MIXTA", "INFORMATIVA"].includes(normalizeText(item.tipo).toUpperCase())
+          ? normalizeText(item.tipo).toUpperCase()
+          : "FACTURADO",
+        porcentaje: parseMoney(item.porcentaje),
+        importeFijo: parseMoney(item.importeFijo),
+        detalle: normalizeText(item.detalle)
+      })).filter((item) => item.numero || item.vencimiento || item.porcentaje || item.importeFijo),
       creadoEn: input.creadoEn || new Date().toISOString(),
       actualizadoEn: new Date().toISOString()
     };
@@ -2313,6 +2336,18 @@ class BackupDataSource {
       periodoHasta: input.periodoHasta ? fieldDate(input.periodoHasta) : "",
       vencimiento: input.vencimiento ? fieldDate(input.vencimiento) : "",
       proximoVencimiento: input.proximoVencimiento ? fieldDate(input.proximoVencimiento) : "",
+      cuotaManualId: normalizeText(input.cuotaManualId),
+      cuotaManual: input.cuotaManual ? {
+        id: normalizeText(input.cuotaManual.id),
+        numero: parseMoney(input.cuotaManual.numero),
+        vencimiento: input.cuotaManual.vencimiento ? fieldDate(input.cuotaManual.vencimiento) : "",
+        tipo: ["EFECTIVO", "MIXTA", "INFORMATIVA"].includes(normalizeText(input.cuotaManual.tipo).toUpperCase())
+          ? normalizeText(input.cuotaManual.tipo).toUpperCase()
+          : "FACTURADO",
+        porcentaje: parseMoney(input.cuotaManual.porcentaje),
+        importeFijo: parseMoney(input.cuotaManual.importeFijo),
+        detalle: normalizeText(input.cuotaManual.detalle)
+      } : null,
       hectareas,
       cereal: normalizeText(input.cereal || "SOJA").toUpperCase(),
       mercado: normalizeText(input.mercado),
