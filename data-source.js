@@ -2252,9 +2252,11 @@ class BackupDataSource {
           ? normalizeText(item.tipo).toUpperCase()
           : "FACTURADO",
         porcentaje: parseMoney(item.porcentaje),
+        cantidadFija: parseMoney(item.cantidadFija || item.cantidad),
+        unidadCantidad: ["TN"].includes(normalizeText(item.unidadCantidad).toUpperCase()) ? "TN" : "KG",
         importeFijo: parseMoney(item.importeFijo),
         detalle: normalizeText(item.detalle)
-      })).filter((item) => item.numero || item.vencimiento || item.porcentaje || item.importeFijo),
+      })).filter((item) => item.numero || item.vencimiento || item.porcentaje || item.cantidadFija || item.importeFijo),
       creadoEn: input.creadoEn || new Date().toISOString(),
       actualizadoEn: new Date().toISOString()
     };
@@ -2345,6 +2347,8 @@ class BackupDataSource {
           ? normalizeText(input.cuotaManual.tipo).toUpperCase()
           : "FACTURADO",
         porcentaje: parseMoney(input.cuotaManual.porcentaje),
+        cantidadFija: parseMoney(input.cuotaManual.cantidadFija || input.cuotaManual.cantidad),
+        unidadCantidad: ["TN"].includes(normalizeText(input.cuotaManual.unidadCantidad).toUpperCase()) ? "TN" : "KG",
         importeFijo: parseMoney(input.cuotaManual.importeFijo),
         detalle: normalizeText(input.cuotaManual.detalle)
       } : null,
