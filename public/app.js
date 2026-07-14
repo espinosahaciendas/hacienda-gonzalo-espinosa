@@ -1274,11 +1274,11 @@ function addFieldContractLineRow() {
     cotizacion: parseMoneyInput($("#field-contract-line-price")?.value || 0),
     observaciones: $("#field-contract-line-notes")?.value || ""
   }));
-  $("#field-contract-line-label").value = "";
-  $("#field-contract-line-hectares").value = "";
-  $("#field-contract-line-rate").value = "";
-  $("#field-contract-line-price").value = "";
-  $("#field-contract-line-notes").value = "";
+  if ($("#field-contract-line-label")) $("#field-contract-line-label").value = "";
+  if ($("#field-contract-line-hectares")) $("#field-contract-line-hectares").value = "";
+  if ($("#field-contract-line-rate")) $("#field-contract-line-rate").value = "";
+  if ($("#field-contract-line-price")) $("#field-contract-line-price").value = "";
+  if ($("#field-contract-line-notes")) $("#field-contract-line-notes").value = "";
   renderFieldContractLineRows();
   syncFieldContractFormToActive();
   updateFieldLeasePreview();
@@ -1309,12 +1309,12 @@ function addFieldContractInstallmentRow() {
     importeFijo: amount,
     detalle: $("#field-contract-installment-notes")?.value || ""
   }));
-  $("#field-contract-installment-number").value = "";
-  $("#field-contract-installment-percent").value = "";
-  $("#field-contract-installment-quantity").value = "";
-  $("#field-contract-installment-quantity-unit").value = "KG";
-  $("#field-contract-installment-amount").value = "";
-  $("#field-contract-installment-notes").value = "";
+  if ($("#field-contract-installment-number")) $("#field-contract-installment-number").value = "";
+  if ($("#field-contract-installment-percent")) $("#field-contract-installment-percent").value = "";
+  if ($("#field-contract-installment-quantity")) $("#field-contract-installment-quantity").value = "";
+  if ($("#field-contract-installment-quantity-unit")) $("#field-contract-installment-quantity-unit").value = "KG";
+  if ($("#field-contract-installment-amount")) $("#field-contract-installment-amount").value = "";
+  if ($("#field-contract-installment-notes")) $("#field-contract-installment-notes").value = "";
   renderFieldContractInstallmentRows();
   syncFieldContractFormToActive();
   setFieldContractMessage("");
@@ -7927,11 +7927,6 @@ async function init() {
   $("#field-contract-pdf-upload").addEventListener("click", uploadFieldContractPdf);
   $("#field-contract-pdf-open").addEventListener("click", () => openFieldContractPdf());
   $("#field-contract-party-add").addEventListener("click", addFieldContractPartyRow);
-  $("#field-contract-line-add").addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    addFieldContractLineRow();
-  });
   $all("#field-contract-form input, #field-contract-form select, #field-contract-form textarea").forEach((node) => {
     node.addEventListener("input", syncFieldContractFormToActive);
     node.addEventListener("change", syncFieldContractFormToActive);
@@ -7999,7 +7994,6 @@ async function init() {
   $("#field-lease-print").addEventListener("click", printCurrentFieldLeaseReport);
   $("#field-quote-add").addEventListener("click", addFieldQuoteRow);
   $("#field-payment-add").addEventListener("click", addFieldLeasePaymentRow);
-  $("#field-contract-installment-add").addEventListener("click", addFieldContractInstallmentRow);
   $("#field-quote-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-field-quote-remove]");
     if (!button) return;
@@ -8286,6 +8280,21 @@ async function init() {
     formatMoneyInput(event.target);
     renderLiquidationTotals();
     renderReport();
+  });
+  document.addEventListener("click", (event) => {
+    const lineButton = event.target.closest("#field-contract-line-add");
+    if (lineButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      addFieldContractLineRow();
+      return;
+    }
+    const installmentButton = event.target.closest("#field-contract-installment-add");
+    if (installmentButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      addFieldContractInstallmentRow();
+    }
   });
   $("#client-form").addEventListener("submit", saveClient);
   $("#client-cancel").addEventListener("click", resetClientForm);
