@@ -1166,7 +1166,7 @@ function normalizeFieldContractInstallment(row = {}) {
       ? String(row.tipo || "").toUpperCase()
       : "FACTURADO",
     porcentaje: parseMoneyInput(row.porcentaje || 0),
-    cantidadFija: parseMoneyInput(row.cantidadFija || row.cantidad || 0),
+    cantidadFija: parseFieldDecimalInput(row.cantidadFija || row.cantidad || 0),
     unidadCantidad: ["TN"].includes(String(row.unidadCantidad || "").toUpperCase()) ? "TN" : "KG",
     importeFijo: parseMoneyInput(row.importeFijo || 0),
     detalle: String(row.detalle || "").trim()
@@ -1216,6 +1216,22 @@ function fieldContractBaseLabel(value) {
   return key || "-";
 }
 
+function parseFieldDecimalInput(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+  const normalized = raw.toLowerCase().replace(/×/g, "x");
+  if (/[x*]/.test(normalized)) {
+    const factors = normalized
+      .split(/[x*]/)
+      .map((part) => parseFieldDecimalInput(part))
+      .filter((number) => Number.isFinite(number));
+    return factors.length ? factors.reduce((total, number) => total * number, 1) : 0;
+  }
+  const cleaned = normalized.replace(/[^0-9,.\-]/g, "");
+  return parseMoneyInput(cleaned || normalized);
+}
+
 function normalizeFieldContractLine(row = {}) {
   const applies = String(row.aplicaA || row.aplica || "FACTURADO").toUpperCase();
   const base = String(row.base || "KG_CARNE").toUpperCase();
@@ -1223,10 +1239,10 @@ function normalizeFieldContractLine(row = {}) {
     id: row.id || `LINEA-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     aplicaA: ["EFECTIVO", "AMBAS"].includes(applies) ? applies : "FACTURADO",
     detalle: String(row.detalle || "").trim(),
-    hectareas: parseMoneyInput(row.hectareas || 0),
+    hectareas: parseFieldDecimalInput(row.hectareas || 0),
     base: ["KG_CARNE", "KG_SOJA", "KG_TRIGO", "KG_CEREAL", "PESOS_HA", "DOLARES_HA", "IMPORTE_FIJO"].includes(base) ? base : "KG_CARNE",
-    tasa: parseMoneyInput(row.tasa || 0),
-    cotizacion: parseMoneyInput(row.cotizacion || 0),
+    tasa: parseFieldDecimalInput(row.tasa || 0),
+    cotizacion: parseFieldDecimalInput(row.cotizacion || 0),
     observaciones: String(row.observaciones || "").trim()
   };
 }
@@ -1253,8 +1269,8 @@ function renderFieldContractLineRows() {
 }
 
 function addFieldContractLineRow() {
-  const hectares = parseMoneyInput($("#field-contract-line-hectares")?.value || 0);
-  const rate = parseMoneyInput($("#field-contract-line-rate")?.value || 0);
+  const hectares = parseFieldDecimalInput($("#field-contract-line-hectares")?.value || 0);
+  const rate = parseFieldDecimalInput($("#field-contract-line-rate")?.value || 0);
   const base = $("#field-contract-line-base")?.value || "KG_CARNE";
   const detail = String($("#field-contract-line-label")?.value || "").trim();
   if (!hectares && base !== "IMPORTE_FIJO") {
@@ -1271,7 +1287,7 @@ function addFieldContractLineRow() {
     hectareas,
     base,
     tasa: rate,
-    cotizacion: parseMoneyInput($("#field-contract-line-price")?.value || 0),
+    cotizacion: parseFieldDecimalInput($("#field-contract-line-price")?.value || 0),
     observaciones: $("#field-contract-line-notes")?.value || ""
   }));
   if ($("#field-contract-line-label")) $("#field-contract-line-label").value = "";
@@ -1289,7 +1305,7 @@ function addFieldContractInstallmentRow() {
   const number = parseMoneyInput($("#field-contract-installment-number")?.value || 0);
   const due = $("#field-contract-installment-due")?.value || "";
   const percent = parseMoneyInput($("#field-contract-installment-percent")?.value || 0);
-  const quantity = parseMoneyInput($("#field-contract-installment-quantity")?.value || 0);
+  const quantity = parseFieldDecimalInput($("#field-contract-installment-quantity")?.value || 0);
   const amount = parseMoneyInput($("#field-contract-installment-amount")?.value || 0);
   if (!number || !due) {
     setFieldContractMessage("Cargue numero y vencimiento para agregar una cuota manual.", "error");
