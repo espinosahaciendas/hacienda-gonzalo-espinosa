@@ -477,6 +477,49 @@
                 </table>
               </div>
             </div>
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Lineas mixtas de calculo</h3>
+                  <p class="subtle">Opcional. Use esto cuando el contrato tenga varios bloques: carne, soja, trigo, hectareas distintas o bases diferentes.</p>
+                </div>
+                <span class="subtle" id="field-contract-line-summary">Sin lineas mixtas.</span>
+              </div>
+              <div class="form-grid">
+                <label>Aplica a
+                  <select id="field-contract-line-applies">
+                    <option value="FACTURADO">Facturado / contrato</option>
+                    <option value="EFECTIVO">Efectivo</option>
+                    <option value="AMBAS">Ambas partes</option>
+                  </select>
+                </label>
+                <label>Detalle / producto<input id="field-contract-line-label" placeholder="Ej.: 30 has carne / Trigo / Soja"></label>
+                <label>Hectareas<input id="field-contract-line-hectares" inputmode="decimal"></label>
+                <label>Base
+                  <select id="field-contract-line-base">
+                    <option value="KG_CARNE">Kg carne/ha</option>
+                    <option value="KG_SOJA">Kg soja/ha</option>
+                    <option value="KG_TRIGO">Kg trigo/ha</option>
+                    <option value="KG_CEREAL">Kg cereal/ha</option>
+                    <option value="PESOS_HA">Pesos por ha</option>
+                    <option value="DOLARES_HA">Dolares por ha</option>
+                    <option value="IMPORTE_FIJO">Importe fijo</option>
+                  </select>
+                </label>
+                <label>Kg/ha o importe base<input id="field-contract-line-rate" inputmode="decimal"></label>
+                <label>Cotizacion propia opcional<input id="field-contract-line-price" class="money-input" inputmode="decimal" placeholder="Si queda vacio usa el promedio de la cuota"></label>
+                <label class="span-2">Observaciones<input id="field-contract-line-notes" placeholder="Opcional"></label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-contract-line-add">Agregar linea</button>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Aplica</th><th>Detalle</th><th>Has.</th><th>Base</th><th>Kg/ha o importe</th><th>Cotizacion propia</th><th>Observaciones</th><th>Accion</th></tr></thead>
+                  <tbody id="field-contract-line-body"></tbody>
+                </table>
+              </div>
+            </div>
             <div class="field-contract-rules">
               <div class="advanced-subpanel">
                 <h3>Parte facturada / contrato</h3>
@@ -525,6 +568,39 @@
                   </label>
                   <label>Kg/ha o importe base<input id="field-contract-cash-rate" inputmode="decimal"></label>
                 </div>
+              </div>
+            </div>
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Plan manual de cuotas</h3>
+                  <p class="subtle">Opcional para contratos con vencimientos fijos. Permite definir si cada cuota va por efectivo, por contrato/factura o mixta.</p>
+                </div>
+                <span class="subtle" id="field-contract-installment-summary">Sin cuotas manuales.</span>
+              </div>
+              <div class="form-grid">
+                <label>Nro. cuota<input id="field-contract-installment-number" inputmode="numeric" placeholder="Ej.: 1"></label>
+                <label>Vencimiento<input id="field-contract-installment-due" type="date"></label>
+                <label>Tipo de cuota
+                  <select id="field-contract-installment-type">
+                    <option value="FACTURADO">Facturada / contrato</option>
+                    <option value="EFECTIVO">Efectivo</option>
+                    <option value="MIXTA">Mixta</option>
+                    <option value="INFORMATIVA">Informativa / no calcula</option>
+                  </select>
+                </label>
+                <label>Porcentaje del bloque<input id="field-contract-installment-percent" inputmode="decimal" placeholder="Ej.: 25"></label>
+                <label>Importe fijo opcional<input id="field-contract-installment-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Detalle<input id="field-contract-installment-notes" placeholder="Ej.: primera cuota efectivo"></label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-contract-installment-add">Agregar cuota</button>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Cuota</th><th>Vencimiento</th><th>Tipo</th><th>%</th><th>Importe fijo</th><th>Detalle</th><th>Accion</th></tr></thead>
+                  <tbody id="field-contract-installment-body"></tbody>
+                </table>
               </div>
             </div>
             <label>Condiciones base<textarea id="field-contract-notes" rows="3" placeholder="Ej.: 60 has a 600 kg soja/ha. Pago mensual vto. 05-10 de cada mes."></textarea></label>
@@ -597,6 +673,11 @@
               <label>Periodo hasta<input id="field-lease-to" type="date"></label>
               <label>Vencimiento cuota<input id="field-lease-due-date" type="date"></label>
               <label>Proximo vencimiento informativo de la cuota<input id="field-lease-next-due" type="date"></label>
+              <label>Cuota manual a calcular
+                <select id="field-lease-installment">
+                  <option value="">Sin cuota manual / calculo normal</option>
+                </select>
+              </label>
               <label>Producto / indice
                 <input id="field-lease-cereal" placeholder="Ej.: Soja Quequen, Carne, Dolar">
               </label>
@@ -2326,7 +2407,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260713-campos-varias-partes-v17"></script>
+    <script src="/app.js?v=20260714-campos-lineas-mixtas-v19"></script>
   </body>
 </html>
 
