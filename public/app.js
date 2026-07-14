@@ -1166,6 +1166,8 @@ function normalizeFieldContractInstallment(row = {}) {
       ? String(row.tipo || "").toUpperCase()
       : "FACTURADO",
     porcentaje: parseMoneyInput(row.porcentaje || 0),
+    cantidadFija: parseMoneyInput(row.cantidadFija || row.cantidad || 0),
+    unidadCantidad: ["TN"].includes(String(row.unidadCantidad || "").toUpperCase()) ? "TN" : "KG",
     importeFijo: parseMoneyInput(row.importeFijo || 0),
     detalle: String(row.detalle || "").trim()
   };
@@ -1183,11 +1185,12 @@ function renderFieldContractInstallmentRows() {
         <td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(row.vencimiento)) || row.vencimiento || "-")}</td>
         <td>${escapeHtml(fieldContractInstallmentTypeLabel(row.tipo))}</td>
         <td>${row.porcentaje ? `${plainNumberValue(row.porcentaje)}%` : "-"}</td>
+        <td>${row.cantidadFija ? `${plainNumberValue(row.cantidadFija)} ${escapeHtml(row.unidadCantidad || "KG")}` : "-"}</td>
         <td class="amount">${row.importeFijo ? moneyValue(row.importeFijo) : "-"}</td>
         <td>${escapeHtml(row.detalle || "-")}</td>
         <td><button type="button" class="small-button danger-button" data-field-contract-installment-remove="${escapeHtml(row.id)}">Quitar</button></td>
       </tr>`).join("")
-    : `<tr><td colspan="7">Sin cuotas manuales. El calculo usara la frecuencia base del contrato.</td></tr>`;
+    : `<tr><td colspan="8">Sin cuotas manuales. El calculo usara la frecuencia base del contrato.</td></tr>`;
   if ($("#field-contract-installment-summary")) {
     $("#field-contract-installment-summary").textContent = rows.length ? `${rows.length} cuota/s manual/es.` : "Sin cuotas manuales.";
   }
@@ -1253,6 +1256,7 @@ function addFieldContractLineRow() {
   const hectares = parseMoneyInput($("#field-contract-line-hectares")?.value || 0);
   const rate = parseMoneyInput($("#field-contract-line-rate")?.value || 0);
   const base = $("#field-contract-line-base")?.value || "KG_CARNE";
+  const detail = String($("#field-contract-line-label")?.value || "").trim();
   if (!hectares && base !== "IMPORTE_FIJO") {
     setFieldContractMessage("Cargue hectareas para agregar la linea mixta.", "error");
     return;
@@ -1263,7 +1267,7 @@ function addFieldContractLineRow() {
   }
   state.fieldContractLineRows.push(normalizeFieldContractLine({
     aplicaA: $("#field-contract-line-applies")?.value || "FACTURADO",
-    detalle: $("#field-contract-line-label")?.value || "",
+    detalle: detail || fieldContractBaseLabel(base),
     hectareas,
     base,
     tasa: rate,
@@ -1277,20 +1281,22 @@ function addFieldContractLineRow() {
   $("#field-contract-line-notes").value = "";
   renderFieldContractLineRows();
   syncFieldContractFormToActive();
-  setFieldContractMessage("");
+  updateFieldLeasePreview();
+  setFieldContractMessage("Linea mixta agregada al contrato. Para conservarla, guarde el contrato.", "ok");
 }
 
 function addFieldContractInstallmentRow() {
   const number = parseMoneyInput($("#field-contract-installment-number")?.value || 0);
   const due = $("#field-contract-installment-due")?.value || "";
   const percent = parseMoneyInput($("#field-contract-installment-percent")?.value || 0);
+  const quantity = parseMoneyInput($("#field-contract-installment-quantity")?.value || 0);
   const amount = parseMoneyInput($("#field-contract-installment-amount")?.value || 0);
   if (!number || !due) {
     setFieldContractMessage("Cargue numero y vencimiento para agregar una cuota manual.", "error");
     return;
   }
-  if (!percent && !amount && ($("#field-contract-installment-type")?.value || "") !== "INFORMATIVA") {
-    setFieldContractMessage("Cargue porcentaje o importe fijo para la cuota manual.", "error");
+  if (!percent && !quantity && !amount && ($("#field-contract-installment-type")?.value || "") !== "INFORMATIVA") {
+    setFieldContractMessage("Cargue porcentaje, cantidad fija kg/tn o importe fijo para la cuota manual.", "error");
     return;
   }
   state.fieldContractInstallmentRows.push(normalizeFieldContractInstallment({
@@ -1298,11 +1304,15 @@ function addFieldContractInstallmentRow() {
     vencimiento: due,
     tipo: $("#field-contract-installment-type")?.value || "FACTURADO",
     porcentaje: percent,
+    cantidadFija: quantity,
+    unidadCantidad: $("#field-contract-installment-quantity-unit")?.value || "KG",
     importeFijo: amount,
     detalle: $("#field-contract-installment-notes")?.value || ""
   }));
   $("#field-contract-installment-number").value = "";
   $("#field-contract-installment-percent").value = "";
+  $("#field-contract-installment-quantity").value = "";
+  $("#field-contract-installment-quantity-unit").value = "KG";
   $("#field-contract-installment-amount").value = "";
   $("#field-contract-installment-notes").value = "";
   renderFieldContractInstallmentRows();
@@ -1318,7 +1328,10 @@ function renderFieldLeaseInstallmentOptions(selectedId = $("#field-lease-install
     .map(normalizeFieldContractInstallment)
     .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
   select.innerHTML = `<option value="">Sin cuota manual / calculo normal</option>` + rows.map((row) => {
-    const label = `Cuota ${plainNumberValue(row.numero || 0)} - ${formatDisplayDate(parseAnyLocalDate(row.vencimiento)) || row.vencimiento || "-"} - ${fieldContractInstallmentTypeLabel(row.tipo)}`;
+    const quantityText = row.cantidadFija ? ` - ${plainNumberValue(row.cantidadFija)} ${row.unidadCantidad || "KG"}` : "";
+    const percentText = row.porcentaje ? ` - ${plainNumberValue(row.porcentaje)}%` : "";
+    const amountText = row.importeFijo ? ` - ${moneyValue(row.importeFijo)}` : "";
+    const label = `Cuota ${plainNumberValue(row.numero || 0)} - ${formatDisplayDate(parseAnyLocalDate(row.vencimiento)) || row.vencimiento || "-"} - ${fieldContractInstallmentTypeLabel(row.tipo)}${quantityText || percentText || amountText}`;
     return `<option value="${escapeHtml(row.id)}">${escapeHtml(label)}</option>`;
   }).join("");
   if (selectedId && rows.some((row) => String(row.id) === String(selectedId))) select.value = selectedId;
@@ -1820,24 +1833,49 @@ function scaleFieldLeaseComponent(component = {}, factor = 0, totalOverride = nu
   const baseTotal = Number(component.total || 0);
   const total = totalOverride !== null ? Number(totalOverride || 0) : baseTotal * factor;
   const lineScale = totalOverride !== null && baseTotal ? total / baseTotal : factor;
+  const quantityScale = totalOverride !== null && baseTotal ? lineScale : factor;
   return {
     ...component,
     totalAnual: baseTotal,
     total,
-    cantidad: Number(component.cantidad || 0) * factor,
-    toneladas: Number(component.toneladas || 0) * factor,
-    hectareas: Number(component.hectareas || 0) * factor,
+    cantidad: Number(component.cantidad || 0) * quantityScale,
+    toneladas: Number(component.toneladas || 0) * quantityScale,
+    hectareas: Number(component.hectareas || 0) * quantityScale,
     lineas: Array.isArray(component.lineas)
       ? component.lineas.map((line) => ({
           ...line,
           totalAnual: Number(line.total || 0),
           total: Number(line.total || 0) * lineScale,
-          cantidad: Number(line.cantidad || 0) * factor,
-          toneladas: Number(line.toneladas || 0) * factor,
-          hectareas: Number(line.hectareas || 0) * factor
+          cantidad: Number(line.cantidad || 0) * quantityScale,
+          toneladas: Number(line.toneladas || 0) * quantityScale,
+          hectareas: Number(line.hectareas || 0) * quantityScale
         }))
       : []
   };
+}
+
+function fieldLeaseInstallmentQuantityAmount(installment = {}, component = {}) {
+  const quantity = parseMoneyInput(installment.cantidadFija || 0);
+  if (!quantity) return null;
+  const unit = String(installment.unidadCantidad || "KG").toUpperCase();
+  const total = Number(component.total || 0);
+  const kilograms = Number(component.cantidad || 0);
+  const tons = Number(component.toneladas || 0) || kilograms / 1000;
+  if (unit === "TN") {
+    const pricePerTon = tons ? total / tons : 0;
+    return pricePerTon ? quantity * pricePerTon : 0;
+  }
+  const pricePerKg = kilograms ? total / kilograms : (tons ? total / (tons * 1000) : 0);
+  return pricePerKg ? quantity * pricePerKg : 0;
+}
+
+function fieldLeaseInstallmentQuantityAmountForMixed(installment = {}, billedAnnual = {}, cashAnnual = {}) {
+  const quantity = parseMoneyInput(installment.cantidadFija || 0);
+  if (!quantity) return null;
+  const billedAmount = fieldLeaseInstallmentQuantityAmount(installment, billedAnnual);
+  if (billedAmount) return billedAmount;
+  const cashAmount = fieldLeaseInstallmentQuantityAmount(installment, cashAnnual);
+  return cashAmount || 0;
 }
 
 function applyFieldLeaseManualInstallment(installment, billedAnnual, cashAnnual) {
@@ -1849,20 +1887,23 @@ function applyFieldLeaseManualInstallment(installment, billedAnnual, cashAnnual)
   const emptyCash = scaleFieldLeaseComponent(cashAnnual, 0, 0);
   if (type === "INFORMATIVA") return { facturado: emptyBilled, efectivo: emptyCash };
   if (type === "EFECTIVO") {
+    const quantityAmount = fieldLeaseInstallmentQuantityAmount(installment, cashAnnual);
     return {
       facturado: emptyBilled,
-      efectivo: scaleFieldLeaseComponent(cashAnnual, factor, fixedAmount || null)
+      efectivo: scaleFieldLeaseComponent(cashAnnual, factor, fixedAmount || quantityAmount || null)
     };
   }
   if (type === "MIXTA") {
-    if (fixedAmount) {
+    const quantityAmount = fieldLeaseInstallmentQuantityAmountForMixed(installment, billedAnnual, cashAnnual);
+    const manualAmount = fixedAmount || quantityAmount || 0;
+    if (manualAmount) {
       const billedBase = Number(billedAnnual.total || 0);
       const cashBase = Number(cashAnnual.total || 0);
       const totalBase = billedBase + cashBase;
       const billedShare = totalBase ? billedBase / totalBase : 0.5;
       return {
-        facturado: scaleFieldLeaseComponent(billedAnnual, factor, fixedAmount * billedShare),
-        efectivo: scaleFieldLeaseComponent(cashAnnual, factor, fixedAmount * (1 - billedShare))
+        facturado: scaleFieldLeaseComponent(billedAnnual, factor, manualAmount * billedShare),
+        efectivo: scaleFieldLeaseComponent(cashAnnual, factor, manualAmount * (1 - billedShare))
       };
     }
     return {
@@ -1870,8 +1911,9 @@ function applyFieldLeaseManualInstallment(installment, billedAnnual, cashAnnual)
       efectivo: scaleFieldLeaseComponent(cashAnnual, factor)
     };
   }
+  const quantityAmount = fieldLeaseInstallmentQuantityAmount(installment, billedAnnual);
   return {
-    facturado: scaleFieldLeaseComponent(billedAnnual, factor, fixedAmount || null),
+    facturado: scaleFieldLeaseComponent(billedAnnual, factor, fixedAmount || quantityAmount || null),
     efectivo: emptyCash
   };
 }
@@ -2417,7 +2459,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     : "Importes calculados para el vencimiento informado.";
   const manualInstallment = item.cuotaManual || null;
   const manualInstallmentNote = manualInstallment
-    ? `Cuota ${plainNumberValue(manualInstallment.numero || 0)} - ${fieldContractInstallmentTypeLabel(manualInstallment.tipo)}${manualInstallment.porcentaje ? ` - ${plainNumberValue(manualInstallment.porcentaje)}%` : ""}${manualInstallment.importeFijo ? ` - ${moneyValue(manualInstallment.importeFijo)}` : ""}`
+    ? `Cuota ${plainNumberValue(manualInstallment.numero || 0)} - ${fieldContractInstallmentTypeLabel(manualInstallment.tipo)}${manualInstallment.porcentaje ? ` - ${plainNumberValue(manualInstallment.porcentaje)}%` : ""}${manualInstallment.cantidadFija ? ` - ${plainNumberValue(manualInstallment.cantidadFija)} ${manualInstallment.unidadCantidad || "KG"}` : ""}${manualInstallment.importeFijo ? ` - ${moneyValue(manualInstallment.importeFijo)}` : ""}`
     : "";
   const quoteRows = Array.isArray(item.cotizaciones) && item.cotizaciones.length
     ? item.cotizaciones.map((row) => `<tr><td>${fieldReportDate(row.fecha)}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${moneyValue(row.cotizacion)}</td></tr>`).join("")
@@ -7885,7 +7927,11 @@ async function init() {
   $("#field-contract-pdf-upload").addEventListener("click", uploadFieldContractPdf);
   $("#field-contract-pdf-open").addEventListener("click", () => openFieldContractPdf());
   $("#field-contract-party-add").addEventListener("click", addFieldContractPartyRow);
-  $("#field-contract-line-add").addEventListener("click", addFieldContractLineRow);
+  $("#field-contract-line-add").addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    addFieldContractLineRow();
+  });
   $all("#field-contract-form input, #field-contract-form select, #field-contract-form textarea").forEach((node) => {
     node.addEventListener("input", syncFieldContractFormToActive);
     node.addEventListener("change", syncFieldContractFormToActive);

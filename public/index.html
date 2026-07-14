@@ -589,7 +589,14 @@
                     <option value="INFORMATIVA">Informativa / no calcula</option>
                   </select>
                 </label>
-                <label>Porcentaje del bloque<input id="field-contract-installment-percent" inputmode="decimal" placeholder="Ej.: 25"></label>
+                <label>Porcentaje del bloque opcional<input id="field-contract-installment-percent" inputmode="decimal" placeholder="Ej.: 25"></label>
+                <label>Cantidad fija kg/tn opcional<input id="field-contract-installment-quantity" inputmode="decimal" placeholder="Ej.: 4213,44"></label>
+                <label>Unidad cantidad
+                  <select id="field-contract-installment-quantity-unit">
+                    <option value="KG">Kg</option>
+                    <option value="TN">Tn</option>
+                  </select>
+                </label>
                 <label>Importe fijo opcional<input id="field-contract-installment-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
                 <label>Detalle<input id="field-contract-installment-notes" placeholder="Ej.: primera cuota efectivo"></label>
               </div>
@@ -598,7 +605,7 @@
               </div>
               <div class="table-wrap compact-table">
                 <table>
-                  <thead><tr><th>Cuota</th><th>Vencimiento</th><th>Tipo</th><th>%</th><th>Importe fijo</th><th>Detalle</th><th>Accion</th></tr></thead>
+                  <thead><tr><th>Cuota</th><th>Vencimiento</th><th>Tipo</th><th>%</th><th>Cantidad</th><th>Importe fijo</th><th>Detalle</th><th>Accion</th></tr></thead>
                   <tbody id="field-contract-installment-body"></tbody>
                 </table>
               </div>
@@ -2407,7 +2414,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260714-campos-lineas-mixtas-v19"></script>
+    <script src="/app.js?v=20260714-campos-cuotas-cantidad-v21"></script>
   </body>
 </html>
 
