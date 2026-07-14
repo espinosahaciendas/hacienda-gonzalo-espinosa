@@ -511,7 +511,7 @@
                 <label class="span-2">Observaciones<input id="field-contract-line-notes" placeholder="Opcional"></label>
               </div>
               <div class="form-actions">
-                <button type="button" class="ghost-button" id="field-contract-line-add">Agregar linea</button>
+                <button type="button" class="ghost-button" id="field-contract-line-add" onclick="event.preventDefault(); window.addFieldContractLineRow && window.addFieldContractLineRow();">Agregar linea</button>
               </div>
               <div class="table-wrap compact-table">
                 <table>
@@ -601,7 +601,7 @@
                 <label>Detalle<input id="field-contract-installment-notes" placeholder="Ej.: primera cuota efectivo"></label>
               </div>
               <div class="form-actions">
-                <button type="button" class="ghost-button" id="field-contract-installment-add">Agregar cuota</button>
+                <button type="button" class="ghost-button" id="field-contract-installment-add" onclick="event.preventDefault(); window.addFieldContractInstallmentRow && window.addFieldContractInstallmentRow();">Agregar cuota</button>
               </div>
               <div class="table-wrap compact-table">
                 <table>
@@ -2414,7 +2414,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260714-campos-lineas-tolerantes-v23"></script>
+    <script src="/app.js?v=20260714-campos-boton-directo-v24"></script>
   </body>
 </html>
 

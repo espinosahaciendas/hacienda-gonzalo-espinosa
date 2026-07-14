@@ -1336,6 +1336,9 @@ function addFieldContractInstallmentRow() {
   setFieldContractMessage("");
 }
 
+window.addFieldContractLineRow = addFieldContractLineRow;
+window.addFieldContractInstallmentRow = addFieldContractInstallmentRow;
+
 function renderFieldLeaseInstallmentOptions(selectedId = $("#field-lease-installment")?.value || "") {
   const select = $("#field-lease-installment");
   if (!select) return;
