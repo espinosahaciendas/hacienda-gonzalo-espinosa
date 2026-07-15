@@ -42,7 +42,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260715-campos-cotizacion-producto-v36";
+const APP_BUILD = "20260715-campos-partes-reporte-v38";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2115,10 +2115,11 @@ function fieldLeaseProductQuoteOverridesFromInputs(contract = {}) {
   return fieldLeaseProductQuoteRowsFromContract(contract).map((row) => {
     const input = $all("[data-field-product-quote]").find((node) => String(node.dataset.fieldProductQuote) === String(row.producto));
     const unitInput = $all("[data-field-product-quote-unit]").find((node) => String(node.dataset.fieldProductQuoteUnit) === String(row.producto));
+    const inputQuote = input ? parseMoneyInput(input.value || 0) : 0;
     return {
       ...row,
       unidad: unitInput ? unitInput.value : (row.unidad || fieldLeaseDefaultQuoteUnitForProduct(row.producto)),
-      cotizacion: input ? parseMoneyInput(input.value || 0) : parseMoneyInput(row.cotizacion || 0)
+      cotizacion: inputQuote || parseMoneyInput(row.cotizacion || 0)
     };
   });
 }
@@ -2168,8 +2169,9 @@ function renderFieldLeaseLineQuoteRows(contract = currentFieldContractForCalcula
   const body = $("#field-line-quote-body");
   const productBody = $("#field-product-quote-body");
   if (!panel || !body || !productBody) return;
+  const productRows = fieldLeaseProductQuoteOverridesFromInputs(contract);
+  state.fieldLeaseProductQuoteRows = productRows;
   const rows = fieldLeaseLineQuoteRowsFromContract(contract);
-  const productRows = fieldLeaseProductQuoteRowsFromContract(contract);
   const signature = `${fieldLeaseLineQuoteSignature(contract)}||${productRows.map((row) => `${row.producto}:${row.cotizacion}:${row.unidad}`).join("|")}`;
   panel.hidden = !rows.length;
   if (!rows.length) {
@@ -2958,10 +2960,10 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
     <h2>Cotizaciones utilizadas</h2>
     ${quoteGroupsBlock}
     ${commissionBlock}
-    ${isGeneralReport ? "" : `<h2>${isInternalReport ? "Resumen de cobro / pago por parte" : `Resumen correspondiente a ${escapeHtml(audienceLabel.toLowerCase())}`}</h2>
+    <h2>${isInternalReport || isGeneralReport ? "Distribucion por partes de la cuota" : `Resumen correspondiente a ${escapeHtml(audienceLabel.toLowerCase())}`}</h2>
     <table><thead><tr><th>Parte</th><th>Rol</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision</th><th>Criterio</th><th>Neto informado</th></tr></thead><tbody>
       ${partyNetRows}
-    </tbody></table>`}
+    </tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
     ${isGeneralReport ? "" : `<h2>Pagos imputados a esta cuota</h2>
     <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Aplicacion</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="7">Total pagado</td><td class="amount">${moneyValue(paymentsTotals.pagado)}</td></tr><tr class="total"><td colspan="7">Comision/descuento aplicado</td><td class="amount">${moneyValue(paymentsTotals.comision)}</td></tr><tr class="total"><td colspan="7">Saldo pendiente general</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>`}
