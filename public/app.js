@@ -40,7 +40,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260707-campos-arrendamientos-base";
+const APP_BUILD = "20260715-campos-reporte-pagos-v28";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1307,19 +1307,17 @@ function addFieldContractInstallmentRow() {
   const percent = parseMoneyInput($("#field-contract-installment-percent")?.value || 0);
   const quantity = parseFieldDecimalInput($("#field-contract-installment-quantity")?.value || 0);
   const amount = parseMoneyInput($("#field-contract-installment-amount")?.value || 0);
+  const type = $("#field-contract-installment-type")?.value || "FACTURADO";
   if (!number || !due) {
     setFieldContractMessage("Cargue numero y vencimiento para agregar una cuota manual.", "error");
     return;
   }
-  if (!percent && !quantity && !amount && ($("#field-contract-installment-type")?.value || "") !== "INFORMATIVA") {
-    setFieldContractMessage("Cargue porcentaje, cantidad fija kg/tn o importe fijo para la cuota manual.", "error");
-    return;
-  }
+  const fullBlockPercent = !percent && !quantity && !amount && type !== "INFORMATIVA" ? 100 : percent;
   state.fieldContractInstallmentRows.push(normalizeFieldContractInstallment({
     numero: number,
     vencimiento: due,
-    tipo: $("#field-contract-installment-type")?.value || "FACTURADO",
-    porcentaje: percent,
+    tipo: type,
+    porcentaje: fullBlockPercent,
     cantidadFija: quantity,
     unidadCantidad: $("#field-contract-installment-quantity-unit")?.value || "KG",
     importeFijo: amount,
@@ -1333,7 +1331,7 @@ function addFieldContractInstallmentRow() {
   if ($("#field-contract-installment-notes")) $("#field-contract-installment-notes").value = "";
   renderFieldContractInstallmentRows();
   syncFieldContractFormToActive();
-  setFieldContractMessage("");
+  setFieldContractMessage("Cuota manual agregada. Si no cargaste porcentaje/cantidad/importe, se tomo el 100% del bloque elegido.", "ok");
 }
 
 window.addFieldContractLineRow = addFieldContractLineRow;
@@ -1900,8 +1898,9 @@ function fieldLeaseInstallmentQuantityAmountForMixed(installment = {}, billedAnn
 function applyFieldLeaseManualInstallment(installment, billedAnnual, cashAnnual) {
   const type = String(installment?.tipo || "FACTURADO").toUpperCase();
   const percent = parseMoneyInput(installment?.porcentaje || 0);
-  const factor = percent ? percent / 100 : 0;
   const fixedAmount = parseMoneyInput(installment?.importeFijo || 0);
+  const hasQuantity = !!parseMoneyInput(installment?.cantidadFija || 0);
+  const factor = percent ? percent / 100 : (!fixedAmount && !hasQuantity ? 1 : 0);
   const emptyBilled = scaleFieldLeaseComponent(billedAnnual, 0, 0);
   const emptyCash = scaleFieldLeaseComponent(cashAnnual, 0, 0);
   if (type === "INFORMATIVA") return { facturado: emptyBilled, efectivo: emptyCash };
@@ -2174,6 +2173,7 @@ function updateFieldLeasePreview() {
   setPreview("#field-lease-grand-total", moneyValue(calc.totalConComision));
   setPreview("#field-lease-due-preview", calc.vencimiento ? formatDisplayDate(calc.vencimiento) : "-");
   renderFieldLeasePartyDistributionRows(calc.distribucionPartes || []);
+  renderFieldLeaseMiniLedgerRows(calc.distribucionPartes || []);
   renderFieldLeasePaymentRows(calc.totalConComision);
   const messageNode = $("#field-lease-message");
   if (messageNode && calc.totalPesos && /Falta|promedio esta cargado/i.test(messageNode.textContent || "")) {
@@ -2196,6 +2196,40 @@ function renderFieldLeasePartyDistributionRows(rows = []) {
         <td class="amount">${moneyValue(row.totalConComision || row.totalCuota || 0)}</td>
       </tr>`).join("")
     : `<tr><td colspan="8">Sin distribucion especial. Se usaran las partes principales del contrato.</td></tr>`;
+}
+
+function fieldLeaseMiniLedgerNet(row = {}) {
+  const role = String(row.tipo || "").toUpperCase();
+  const base = Number(row.totalCuota || 0);
+  const commission = Number(row.comision || 0);
+  if (role === "ARRENDATARIO") {
+    return {
+      criterio: commission ? "Comision sumada al pagador" : "Sin comision",
+      neto: base + commission
+    };
+  }
+  return {
+    criterio: commission ? "Comision descontada al cobrador" : "Sin comision",
+    neto: base - commission
+  };
+}
+
+function renderFieldLeaseMiniLedgerRows(rows = []) {
+  const body = $("#field-lease-mini-ledger-body");
+  if (!body) return;
+  body.innerHTML = rows.length
+    ? rows.map((row) => {
+        const result = fieldLeaseMiniLedgerNet(row);
+        return `<tr${String(row.tipo || "").toUpperCase() === "ARRENDADOR" ? ' class="cash-row-soft"' : ""}>
+          <td>${escapeHtml(row.nombre || "-")}</td>
+          <td>${escapeHtml(fieldContractPartyTypeLabel(row.tipo))}</td>
+          <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
+          <td class="amount">${moneyValue(row.comision || 0)}</td>
+          <td>${escapeHtml(result.criterio)}</td>
+          <td class="amount">${moneyValue(result.neto)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="6">Sin cuenta minima calculada. Cargue/seleccione un contrato.</td></tr>`;
 }
 
 function fieldLeaseMissingRuleMessage(payload) {
@@ -2496,7 +2530,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
   const mixedLinesBlock = mixedLineRows.length
     ? `<h2>Detalle de lineas mixtas</h2>
       <table><thead><tr><th>Bloque</th><th>Detalle</th><th>Has.</th><th>Base</th><th>Kg/ha o importe</th><th>Kg cuota</th><th>Toneladas cuota</th><th>Cotizacion usada</th><th>Importe cuota</th></tr></thead><tbody>
-        ${mixedLineRows.map((line) => `<tr>
+        ${mixedLineRows.map((line) => `<tr${String(line.bloque || "").toUpperCase().includes("EFECTIVO") ? ' class="cash"' : ""}>
           <td>${escapeHtml(line.bloque || "-")}</td>
           <td>${escapeHtml(line.detalle || "-")}</td>
           <td>${plainNumberValue(line.hectareas || 0)}</td>
@@ -2518,28 +2552,28 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     ? `<h2>Comision</h2><table><thead><tr><th>Concepto</th><th>Aplica sobre</th><th>%</th><th>Base</th><th>Importe</th></tr></thead><tbody>${commissionRows}<tr class="total"><td colspan="4">Total comision</td><td class="amount">${moneyValue(commissionTotal)}</td></tr></tbody></table>`
     : "";
   const paymentRows = paymentRowsData.length
-    ? paymentRowsData.map((payment) => `<tr><td>${fieldReportDate(payment.fecha)}</td><td>${escapeHtml(fieldLeasePaymentConceptLabel(payment.concepto))}</td><td>${escapeHtml(fieldLeasePaymentPartyLabel(payment.parte))}</td><td>${escapeHtml(fieldLeaseCommissionApplicationLabel(payment.aplicacionComision))}</td><td>${escapeHtml(fieldLeasePaymentStatusLabel(payment.estado))}</td><td>${escapeHtml(payment.medio || "-")}</td><td>${escapeHtml(payment.referencia || "-")}</td><td class="amount">${moneyValue(payment.importe || 0)}</td></tr>`).join("")
+    ? paymentRowsData.map((payment) => {
+        const cashPayment = /EFECTIVO/i.test([payment.concepto, payment.medio, payment.referencia].filter(Boolean).join(" "));
+        return `<tr${cashPayment ? ' class="cash"' : ""}><td>${fieldReportDate(payment.fecha)}</td><td>${escapeHtml(fieldLeasePaymentConceptLabel(payment.concepto))}</td><td>${escapeHtml(fieldLeasePaymentPartyLabel(payment.parte))}</td><td>${escapeHtml(fieldLeaseCommissionApplicationLabel(payment.aplicacionComision))}</td><td>${escapeHtml(fieldLeasePaymentStatusLabel(payment.estado))}</td><td>${escapeHtml(payment.medio || "-")}</td><td>${escapeHtml(payment.referencia || "-")}</td><td class="amount">${moneyValue(payment.importe || 0)}</td></tr>`;
+      }).join("")
     : `<tr><td colspan="8">Sin pagos registrados para esta cuota.</td></tr>`;
-  const distributionRows = distributionRowsData.length
-    ? distributionRowsData.map((row) => `<tr>
-        <td>${escapeHtml(fieldContractPartyTypeLabel(row.tipo))}</td>
-        <td>${escapeHtml(row.nombre || "-")}</td>
-        <td>${escapeHtml(row.cuit || "-")}</td>
-        <td class="amount">${plainNumberValue(row.porcentaje || 0)}%</td>
-        <td class="amount">${moneyValue(row.facturado || 0)}</td>
-        <td class="amount">${moneyValue(row.efectivo || 0)}</td>
-        <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
-        <td class="amount">${moneyValue(row.comision || 0)}</td>
-        <td class="amount">${moneyValue(row.totalConComision || row.totalCuota || 0)}</td>
-      </tr>`).join("")
-    : `<tr><td colspan="9">Sin distribucion por partes cargada.</td></tr>`;
-  const partySummaryRow = (label, summary, role) => {
-    const partyTotal = role === "PAGADOR"
-      ? summary.base + summary.comisionSumada
-      : summary.base - summary.comisionDescontada;
-    const balance = partyTotal - summary.pagos;
-    return `<tr><td>${label}</td><td class="amount">${moneyValue(summary.base)}</td><td class="amount">${moneyValue(summary.comisionSumada)}</td><td class="amount">${moneyValue(summary.comisionDescontada)}</td><td class="amount">${moneyValue(summary.comisionFacturaAparte)}</td><td class="amount">${moneyValue(summary.pagos)}</td><td class="amount">${moneyValue(balance)}</td></tr>`;
-  };
+  const partyNetRows = distributionRowsData.length
+    ? distributionRowsData.map((row) => {
+        const result = fieldLeaseMiniLedgerNet(row);
+        return `<tr${String(row.tipo || "").toUpperCase() === "ARRENDADOR" ? ' class="cash-row-soft"' : ""}>
+          <td>${escapeHtml(row.nombre || "-")}</td>
+          <td>${escapeHtml(fieldContractPartyTypeLabel(row.tipo))}</td>
+          <td>${escapeHtml(row.cuit || "-")}</td>
+          <td class="amount">${plainNumberValue(row.porcentaje || 0)}%</td>
+          <td class="amount">${moneyValue(row.facturado || 0)}</td>
+          <td class="amount">${moneyValue(row.efectivo || 0)}</td>
+          <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
+          <td class="amount">${moneyValue(row.comision || 0)}</td>
+          <td>${escapeHtml(result.criterio)}</td>
+          <td class="amount">${moneyValue(result.neto)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="10">Sin partes cargadas.</td></tr>`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
     body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22;font-size:10.5px}
     header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:10px}
@@ -2551,7 +2585,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     .grid{display:grid;grid-template-columns:155px 1fr 155px 1fr;border:1px solid #dbcbb8;margin-bottom:8px}
     .grid span,.grid strong{border-bottom:1px solid #dbcbb8;padding:4px;font-size:9.5px}.grid span{background:#f8f2ea;color:#7b5a32}.grid strong{font-size:10px}
     table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:5px}th,td{border:1px solid #dbcbb8;padding:4px;text-align:left;vertical-align:top}th{background:#f8f2ea}.amount{text-align:right;font-weight:700;white-space:nowrap}
-    .total{background:#fff3e8;font-weight:700}.cash{background:#fff8ed}.note{border:1px solid #dbcbb8;padding:7px;margin-top:9px;font-size:9.5px;line-height:1.25}
+    .total{background:#fff3e8;font-weight:700}.cash,.cash-row-soft{background:#fff8ed}.cash td,.cash-row-soft td{font-style:italic;font-weight:700}.note{border:1px solid #dbcbb8;padding:7px;margin-top:9px;font-size:9.5px;line-height:1.25}
     .print-actions{margin-top:14px}.print-actions button{padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}body{margin:0}.print-actions{display:none}h2{break-after:avoid}table{break-inside:auto}tr{break-inside:avoid}}
   </style></head><body>
     <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Calculo de arrendamiento</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.cliente || "-")} / ${escapeHtml(item.arrendatario || "-")} | ${escapeHtml(item.campo || "-")} | Fecha de calculo: ${fieldReportDate(item.fecha)}</p></div></header>
@@ -2588,21 +2622,16 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
       <tr class="total"><td colspan="7">Total cuota</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr>
     </tbody></table>
     ${mixedLinesBlock}
-    ${commissionBlock}
-    <h2>Distribucion por partes del contrato</h2>
-    <table><thead><tr><th>Tipo</th><th>Parte</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision proporcional</th><th>Total con comision</th></tr></thead><tbody>
-      ${distributionRows}
-    </tbody></table>
-    <h2>Aplicacion general de pagos/comisiones</h2>
-    <table><thead><tr><th>Parte</th><th>Base cuota</th><th>Comision sumada</th><th>Comision descontada</th><th>Factura aparte</th><th>Pagos registrados</th><th>Saldo informado</th></tr></thead><tbody>
-      ${partySummaryRow(`Arrendador - ${escapeHtml(item.cliente || "-")}`, landlordSummary, "COBRADOR")}
-      ${partySummaryRow(`Arrendatario - ${escapeHtml(item.arrendatario || "-")}`, tenantSummary, "PAGADOR")}
-    </tbody></table>
-    <h2>Pagos registrados de la cuota</h2>
-    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Aplicacion</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="7">Total pagado</td><td class="amount">${moneyValue(paymentsTotals.pagado)}</td></tr><tr class="total"><td colspan="7">Comision/descuento aplicado</td><td class="amount">${moneyValue(paymentsTotals.comision)}</td></tr><tr class="total"><td colspan="7">Saldo pendiente general</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>
     <h2>Cotizaciones utilizadas</h2>
     <table><thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th></tr></thead><tbody>${quoteRows}<tr class="total"><td colspan="3">Promedio / cotizacion aplicada</td><td class="amount">${moneyValue(item.cotizacionPesos || item.cotizacion)}</td></tr></tbody></table>
+    ${commissionBlock}
+    <h2>Resumen de cobro / pago por parte</h2>
+    <table><thead><tr><th>Parte</th><th>Rol</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision</th><th>Criterio</th><th>Neto informado</th></tr></thead><tbody>
+      ${partyNetRows}
+    </tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
+    <h2>Pagos imputados a esta cuota</h2>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Aplicacion</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="7">Total pagado</td><td class="amount">${moneyValue(paymentsTotals.pagado)}</td></tr><tr class="total"><td colspan="7">Comision/descuento aplicado</td><td class="amount">${moneyValue(paymentsTotals.comision)}</td></tr><tr class="total"><td colspan="7">Saldo pendiente general</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>
     <div class="print-actions"><button onclick="window.print()">Imprimir / guardar PDF</button></div>
   </body></html>`);
   popup.document.close();

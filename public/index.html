@@ -574,7 +574,7 @@
               <div class="panel-head">
                 <div>
                   <h3>Plan manual de cuotas</h3>
-                  <p class="subtle">Opcional para contratos con vencimientos fijos. Permite definir si cada cuota va por efectivo, por contrato/factura o mixta.</p>
+                  <p class="subtle">Opcional para contratos con vencimientos fijos. Si dejas porcentaje, cantidad e importe en blanco, toma el 100% del bloque elegido.</p>
                 </div>
                 <span class="subtle" id="field-contract-installment-summary">Sin cuotas manuales.</span>
               </div>
@@ -754,7 +754,7 @@
             </div>
             <div class="advanced-subpanel">
               <h3>Distribucion de esta cuota por partes</h3>
-              <p class="subtle">Se calcula segun los porcentajes cargados en el contrato. Sirve para contratos con varios arrendadores o varios arrendatarios.</p>
+              <p class="subtle">Control interno propio de Campos. Se calcula segun los porcentajes cargados en el contrato.</p>
               <div class="table-wrap compact-table">
                 <table>
                   <thead><tr><th>Tipo</th><th>Parte</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision</th><th>Total con comision</th></tr></thead>
@@ -763,10 +763,20 @@
               </div>
             </div>
             <div class="advanced-subpanel">
+              <h3>Cuenta minima de la cuota</h3>
+              <p class="subtle">Control interno de Campos: al arrendador se le descuenta la comision; al arrendatario se le suma cuando corresponda.</p>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Parte</th><th>Rol</th><th>Base cuota</th><th>Comision</th><th>Criterio</th><th>Neto informado</th></tr></thead>
+                  <tbody id="field-lease-mini-ledger-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="advanced-subpanel">
               <div class="panel-head">
                 <div>
                   <h3>Pagos de esta cuota</h3>
-                  <p class="subtle">Registro interno de como se abono esta cuota. No impacta cuenta corriente de Hacienda.</p>
+                  <p class="subtle">Registro interno de Campos de como se abono esta cuota. No impacta cuenta corriente de Hacienda.</p>
                 </div>
                 <div class="mini-summary">
                   <span>Pagado: <strong id="field-payment-paid">$ 0,00</strong></span>
@@ -776,17 +786,17 @@
               </div>
               <div class="form-grid">
                 <label>Fecha de pago<input id="field-payment-date" type="date"></label>
-                <label>Concepto
+                <label>Concepto del registro
                   <select id="field-payment-concept">
-                    <option value="PAGO_CUOTA">Pago de cuota</option>
-                    <option value="PAGO_FACTURADO">Pago facturado / contrato</option>
-                    <option value="PAGO_EFECTIVO">Pago efectivo</option>
-                    <option value="COMISION_COBRADA">Comision cobrada</option>
+                    <option value="PAGO_CUOTA">Pago aplicado a la cuota</option>
+                    <option value="PAGO_FACTURADO">Pago parte facturada / contrato</option>
+                    <option value="PAGO_EFECTIVO">Pago parte efectivo</option>
+                    <option value="COMISION_COBRADA">Comision cobrada / facturada</option>
                     <option value="COMISION_DESCONTADA">Comision descontada</option>
                     <option value="OTRO">Otro ajuste</option>
                   </select>
                 </label>
-                <label>Parte
+                <label>Parte a la que aplica
                   <select id="field-payment-party">
                     <option value="GENERAL">General</option>
                     <option value="ARRENDADOR">Arrendador</option>
@@ -794,7 +804,7 @@
                     <option value="AMBAS">Ambas partes</option>
                   </select>
                 </label>
-                <label>Aplicacion comision
+                <label>Como impacta la comision
                   <select id="field-payment-commission-application">
                     <option value="NO_APLICA">No aplica</option>
                     <option value="SUMA_PAGADOR">Se suma al que paga</option>
@@ -2414,7 +2424,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260714-campos-lineas-ok-v26"></script>
+    <script src="/app.js?v=20260715-campos-reporte-pagos-v28"></script>
   </body>
 </html>
 
