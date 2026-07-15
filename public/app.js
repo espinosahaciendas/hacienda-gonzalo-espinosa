@@ -42,7 +42,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260715-campos-cotizacion-producto-v35";
+const APP_BUILD = "20260715-campos-cotizacion-producto-v36";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1957,10 +1957,23 @@ function fieldLeaseFrequencyDivisor(frequency) {
 
 function fieldLeaseComponentForInstallment(component, divisor) {
   const safeDivisor = Math.max(Number(divisor || 1), 1);
+  const factor = 1 / safeDivisor;
   return {
     ...component,
     totalAnual: Number(component?.total || 0),
-    total: Number(component?.total || 0) / safeDivisor
+    total: Number(component?.total || 0) * factor,
+    cantidad: Number(component?.cantidad || 0) * factor,
+    toneladas: Number(component?.toneladas || 0) * factor,
+    hectareas: Number(component?.hectareas || 0),
+    lineas: Array.isArray(component?.lineas)
+      ? component.lineas.map((line) => ({
+          ...line,
+          totalAnual: Number(line.total || 0),
+          total: Number(line.total || 0) * factor,
+          cantidad: Number(line.cantidad || 0) * factor,
+          toneladas: Number(line.toneladas || 0) * factor
+        }))
+      : []
   };
 }
 
@@ -2070,6 +2083,12 @@ function fieldContractLineProductLabel(value = "") {
   return key;
 }
 
+function fieldLeaseDefaultQuoteUnitForProduct(product = "") {
+  const key = fieldContractLineProductKey(product);
+  if (key === "SOJA" || key === "TRIGO" || key === "MAIZ" || key === "CEREAL") return "TN";
+  return "KG";
+}
+
 function fieldLeaseProductQuoteRowsFromContract(contract = {}) {
   const saved = new Map((state.fieldLeaseProductQuoteRows || []).map((row) => [String(row.producto), row]));
   const quoteAverages = fieldQuoteAverageByProduct();
@@ -2083,6 +2102,7 @@ function fieldLeaseProductQuoteRowsFromContract(contract = {}) {
       producto: product,
       etiqueta: fieldContractLineProductLabel(product),
       lineas: 0,
+      unidad: saved.get(product)?.unidad || fieldLeaseDefaultQuoteUnitForProduct(product),
       cotizacion: savedQuote || quoteAverages.get(product) || 0
     };
     existing.lineas += 1;
@@ -2094,8 +2114,10 @@ function fieldLeaseProductQuoteRowsFromContract(contract = {}) {
 function fieldLeaseProductQuoteOverridesFromInputs(contract = {}) {
   return fieldLeaseProductQuoteRowsFromContract(contract).map((row) => {
     const input = $all("[data-field-product-quote]").find((node) => String(node.dataset.fieldProductQuote) === String(row.producto));
+    const unitInput = $all("[data-field-product-quote-unit]").find((node) => String(node.dataset.fieldProductQuoteUnit) === String(row.producto));
     return {
       ...row,
+      unidad: unitInput ? unitInput.value : (row.unidad || fieldLeaseDefaultQuoteUnitForProduct(row.producto)),
       cotizacion: input ? parseMoneyInput(input.value || 0) : parseMoneyInput(row.cotizacion || 0)
     };
   });
@@ -2105,9 +2127,15 @@ function fieldLeaseProductQuoteByKey(rows = []) {
   return new Map((rows || []).map((row) => [String(row.producto), parseMoneyInput(row.cotizacion || 0)]));
 }
 
+function fieldLeaseProductQuoteUnitByKey(rows = []) {
+  return new Map((rows || []).map((row) => [String(row.producto), row.unidad || fieldLeaseDefaultQuoteUnitForProduct(row.producto)]));
+}
+
 function fieldLeaseLineQuoteRowsFromContract(contract = {}) {
   const saved = new Map((state.fieldLeaseLineQuoteRows || []).map((row) => [String(row.id), row]));
-  const productQuotes = fieldLeaseProductQuoteByKey(fieldLeaseProductQuoteOverridesFromInputs(contract));
+  const productRows = fieldLeaseProductQuoteOverridesFromInputs(contract);
+  const productQuotes = fieldLeaseProductQuoteByKey(productRows);
+  const productUnits = fieldLeaseProductQuoteUnitByKey(productRows);
   return (Array.isArray(contract.lineas) ? contract.lineas.map(normalizeFieldContractLine) : []).map((line) => {
     const existing = saved.get(String(line.id)) || {};
     const product = fieldContractLineProductKey(line.base);
@@ -2118,6 +2146,7 @@ function fieldLeaseLineQuoteRowsFromContract(contract = {}) {
       base: line.base,
       tasa: line.tasa,
       producto: product,
+      unidad: existing.unidad || productUnits.get(product) || fieldLeaseDefaultQuoteUnitForProduct(product),
       cotizacion: parseMoneyInput(productQuotes.get(product) || existing.cotizacion || line.cotizacion || 0)
     };
   });
@@ -2141,7 +2170,7 @@ function renderFieldLeaseLineQuoteRows(contract = currentFieldContractForCalcula
   if (!panel || !body || !productBody) return;
   const rows = fieldLeaseLineQuoteRowsFromContract(contract);
   const productRows = fieldLeaseProductQuoteRowsFromContract(contract);
-  const signature = `${fieldLeaseLineQuoteSignature(contract)}||${productRows.map((row) => `${row.producto}:${row.cotizacion}`).join("|")}`;
+  const signature = `${fieldLeaseLineQuoteSignature(contract)}||${productRows.map((row) => `${row.producto}:${row.cotizacion}:${row.unidad}`).join("|")}`;
   panel.hidden = !rows.length;
   if (!rows.length) {
     body.innerHTML = "";
@@ -2156,8 +2185,9 @@ function renderFieldLeaseLineQuoteRows(contract = currentFieldContractForCalcula
       <td>${escapeHtml(row.etiqueta || row.producto)}</td>
       <td>${plainNumberValue(row.lineas || 0)}</td>
       <td><input class="money-input field-product-quote-input" data-field-product-quote="${escapeHtml(row.producto)}" inputmode="decimal" value="${row.cotizacion ? moneyValue(row.cotizacion) : ""}" placeholder="Usa promedio general"></td>
+      <td><select data-field-product-quote-unit="${escapeHtml(row.producto)}"><option value="KG"${row.unidad === "KG" ? " selected" : ""}>Por kg</option><option value="TN"${row.unidad === "TN" ? " selected" : ""}>Por tonelada</option></select></td>
     </tr>`).join("")
-    : `<tr><td colspan="3">Sin productos que requieran cotizacion diferenciada.</td></tr>`;
+    : `<tr><td colspan="4">Sin productos que requieran cotizacion diferenciada.</td></tr>`;
   body.innerHTML = rows.map((row) => `<tr>
     <td>${escapeHtml(fieldContractLineAppliesLabel(row.aplicaA))}</td>
     <td>${escapeHtml(row.detalle || "-")}</td>
@@ -2171,6 +2201,7 @@ function applyFieldLeaseLineQuoteOverrides(contract = {}, quoteRows = []) {
   if (!contract || !Array.isArray(contract.lineas) || !contract.lineas.length) return contract || {};
   const quoteById = new Map((quoteRows || []).map((row) => [String(row.id), parseMoneyInput(row.cotizacion || 0)]));
   const productQuotes = fieldLeaseProductQuoteByKey(state.fieldLeaseProductQuoteRows || []);
+  const productUnits = fieldLeaseProductQuoteUnitByKey(state.fieldLeaseProductQuoteRows || []);
   return {
     ...contract,
     lineas: contract.lineas.map((line) => {
@@ -2179,6 +2210,7 @@ function applyFieldLeaseLineQuoteOverrides(contract = {}, quoteRows = []) {
       const quote = quoteById.get(String(normalized.id)) || productQuotes.get(product);
       return {
         ...normalized,
+        cotizacionUnidad: productUnits.get(product) || fieldLeaseDefaultQuoteUnitForProduct(product),
         cotizacion: quote || normalized.cotizacion || 0
       };
     })
@@ -2214,13 +2246,15 @@ function calculateFieldContractLine(line, priceInPesos) {
   const kg = hectares * rate;
   const toneladas = kg / 1000;
   const cerealBase = base.includes("SOJA") || base.includes("TRIGO") || base.includes("CEREAL") || base.includes("MAIZ");
-  const total = cerealBase ? toneladas * price : kg * price;
+  const quoteUnit = String(line.cotizacionUnidad || (cerealBase ? "TN" : "KG")).toUpperCase();
+  const quotedByTon = quoteUnit === "TN";
+  const total = quotedByTon ? toneladas * price : kg * price;
   return {
     ...line,
     cantidad: kg,
     toneladas,
     cotizacionAplicada: price,
-    unidadCalculo: cerealBase ? "TN" : "KG",
+    unidadCalculo: quotedByTon ? "TN" : "KG",
     total
   };
 }
@@ -2791,6 +2825,22 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
   const quoteRows = Array.isArray(item.cotizaciones) && item.cotizaciones.length
     ? item.cotizaciones.map((row) => `<tr><td>${fieldReportDate(row.fecha)}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${moneyValue(row.cotizacion)}</td></tr>`).join("")
     : `<tr><td colspan="4">Sin detalle de cotizaciones. Se informa la cotizacion/promedio cargado manualmente.</td></tr>`;
+  const quoteGroups = new Map();
+  (Array.isArray(item.cotizaciones) ? item.cotizaciones : []).forEach((row) => {
+    const product = fieldContractLineProductKey(row.producto || "");
+    if (!quoteGroups.has(product)) quoteGroups.set(product, []);
+    quoteGroups.get(product).push(row);
+  });
+  const quoteGroupsBlock = quoteGroups.size
+    ? Array.from(quoteGroups.entries()).map(([product, rows]) => {
+        const average = rows.reduce((sum, row) => sum + parseMoneyInput(row.cotizacion || 0), 0) / Math.max(rows.length, 1);
+        return `<h3>${escapeHtml(fieldContractLineProductLabel(product))}</h3>
+          <table><thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th></tr></thead><tbody>
+            ${rows.map((row) => `<tr><td>${fieldReportDate(row.fecha)}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${moneyValue(row.cotizacion)}</td></tr>`).join("")}
+            <tr class="total"><td colspan="3">Promedio ${escapeHtml(fieldContractLineProductLabel(product))}</td><td class="amount">${moneyValue(average)}</td></tr>
+          </tbody></table>`;
+      }).join("")
+    : `<table><tbody>${quoteRows}<tr class="total"><td colspan="3">Promedio / cotizacion aplicada</td><td class="amount">${moneyValue(item.cotizacionPesos || item.cotizacion)}</td></tr></tbody></table>`;
   const componentRow = (label, detail, cssClass = "") => {
     const annualTotal = Number(detail?.totalAnual || 0);
     const cuotaTotal = Number(detail?.total || 0);
@@ -2801,18 +2851,23 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
     ...(Array.isArray(item.facturadoDetalle?.lineas) ? item.facturadoDetalle.lineas.map((line) => ({ ...line, bloque: "Facturado / contrato" })) : []),
     ...(Array.isArray(item.efectivoDetalle?.lineas) ? item.efectivoDetalle.lineas.map((line) => ({ ...line, bloque: "Efectivo" })) : [])
   ];
+  const lineQuantityText = (line) => String(line.unidadCalculo || "").toUpperCase() === "TN"
+    ? `${plainNumberValue(line.toneladas || 0)} tn`
+    : `${plainNumberValue(line.cantidad || 0)} kg`;
+  const lineQuoteText = (line) => line.cotizacionAplicada
+    ? `${moneyValue(line.cotizacionAplicada)} / ${String(line.unidadCalculo || "").toUpperCase() === "TN" ? "tn" : "kg"}`
+    : "-";
   const mixedLinesBlock = mixedLineRows.length
     ? `<h2>Detalle de lineas mixtas</h2>
-      <table><thead><tr><th>Bloque</th><th>Detalle</th><th>Has.</th><th>Base</th><th>Kg/ha o importe</th><th>Kg cuota</th><th>Toneladas cuota</th><th>Cotizacion usada</th><th>Importe cuota</th></tr></thead><tbody>
+      <table><thead><tr><th>Bloque</th><th>Detalle</th><th>Has.</th><th>Base</th><th>Kg/ha o importe</th><th>Cantidad cuota</th><th>Cotizacion usada</th><th>Importe cuota</th></tr></thead><tbody>
         ${mixedLineRows.map((line) => `<tr${String(line.bloque || "").toUpperCase().includes("EFECTIVO") ? ' class="cash"' : ""}>
           <td>${escapeHtml(line.bloque || "-")}</td>
           <td>${escapeHtml(line.detalle || "-")}</td>
           <td>${plainNumberValue(line.hectareas || 0)}</td>
           <td>${escapeHtml(fieldContractBaseLabel(line.base))}</td>
           <td>${plainNumberValue(line.tasa || 0)}</td>
-          <td>${plainNumberValue(line.cantidad || 0)} kg</td>
-          <td>${line.toneladas ? `${plainNumberValue(line.toneladas)} tn` : "-"}</td>
-          <td class="amount">${line.cotizacionAplicada ? moneyValue(line.cotizacionAplicada) : "-"}</td>
+          <td>${lineQuantityText(line)}</td>
+          <td class="amount">${lineQuoteText(line)}</td>
           <td class="amount">${moneyValue(line.total || 0)}</td>
         </tr>`).join("")}
       </tbody></table>`
@@ -2901,7 +2956,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
     </tbody></table>
     ${mixedLinesBlock}
     <h2>Cotizaciones utilizadas</h2>
-    <table><thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th></tr></thead><tbody>${quoteRows}<tr class="total"><td colspan="3">Promedio / cotizacion aplicada</td><td class="amount">${moneyValue(item.cotizacionPesos || item.cotizacion)}</td></tr></tbody></table>
+    ${quoteGroupsBlock}
     ${commissionBlock}
     ${isGeneralReport ? "" : `<h2>${isInternalReport ? "Resumen de cobro / pago por parte" : `Resumen correspondiente a ${escapeHtml(audienceLabel.toLowerCase())}`}</h2>
     <table><thead><tr><th>Parte</th><th>Rol</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision</th><th>Criterio</th><th>Neto informado</th></tr></thead><tbody>
@@ -8481,6 +8536,12 @@ async function init() {
   });
   $("#field-product-quote-body")?.addEventListener("input", (event) => {
     if (!event.target.closest("[data-field-product-quote]")) return;
+    const body = $("#field-line-quote-body");
+    if (body) body.dataset.signature = "";
+    updateFieldLeasePreview();
+  });
+  $("#field-product-quote-body")?.addEventListener("change", (event) => {
+    if (!event.target.closest("[data-field-product-quote-unit]")) return;
     const body = $("#field-line-quote-body");
     if (body) body.dataset.signature = "";
     updateFieldLeasePreview();
