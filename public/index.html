@@ -742,6 +742,22 @@
                 </table>
               </div>
             </div>
+            <div class="advanced-subpanel" id="field-line-quotes-panel" hidden>
+              <h3>Cotizacion por producto de lineas mixtas</h3>
+              <p class="subtle">Cargue una sola cotizacion por producto. El sistema la aplica a todas las lineas carne, soja, trigo, etc. Si deja un producto vacio, toma el promedio general cargado arriba.</p>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Producto / indice</th><th>Lineas que aplica</th><th>Cotizacion para esta cuota</th></tr></thead>
+                  <tbody id="field-product-quote-body"></tbody>
+                </table>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Bloque</th><th>Detalle</th><th>Base</th><th>Kg/ha o importe</th><th>Cotizacion aplicada</th></tr></thead>
+                  <tbody id="field-line-quote-body"></tbody>
+                </table>
+              </div>
+            </div>
             <label>Observaciones<textarea id="field-lease-notes" rows="3" placeholder="Condiciones, ajustes, cotizacion usada, observaciones del contrato."></textarea></label>
             <div class="cc-grid">
               <div><span>Promedio aplicado</span><strong id="field-lease-average">$ 0,00</strong></div>
@@ -784,59 +800,69 @@
                   <span>Saldo: <strong id="field-payment-balance">$ 0,00</strong></span>
                 </div>
               </div>
-              <div class="form-grid">
-                <label>Fecha de pago<input id="field-payment-date" type="date"></label>
-                <label>Concepto del registro
-                  <select id="field-payment-concept">
-                    <option value="PAGO_CUOTA">Pago aplicado a la cuota</option>
-                    <option value="PAGO_FACTURADO">Pago parte facturada / contrato</option>
-                    <option value="PAGO_EFECTIVO">Pago parte efectivo</option>
-                    <option value="COMISION_COBRADA">Comision cobrada / facturada</option>
-                    <option value="COMISION_DESCONTADA">Comision descontada</option>
-                    <option value="OTRO">Otro ajuste</option>
-                  </select>
-                </label>
-                <label>Parte a la que aplica
-                  <select id="field-payment-party">
-                    <option value="GENERAL">General</option>
-                    <option value="ARRENDADOR">Arrendador</option>
-                    <option value="ARRENDATARIO">Arrendatario</option>
-                    <option value="AMBAS">Ambas partes</option>
-                  </select>
-                </label>
-                <label>Como impacta la comision
-                  <select id="field-payment-commission-application">
-                    <option value="NO_APLICA">No aplica</option>
-                    <option value="SUMA_PAGADOR">Se suma al que paga</option>
-                    <option value="DESCUENTA_COBRADOR">Se descuenta al que cobra</option>
-                    <option value="FACTURA_APARTE">Factura aparte</option>
-                  </select>
-                </label>
-                <label class="inline-check"><input id="field-payment-commission-add" type="checkbox"> El arrendatario paga/suma la comision</label>
-                <label class="inline-check"><input id="field-payment-commission-deduct" type="checkbox"> Descontar comision al arrendador</label>
-                <label>Estado comision / registro
-                  <select id="field-payment-status">
-                    <option value="PENDIENTE">Pendiente</option>
-                    <option value="FACTURADA">Facturada</option>
-                    <option value="PAGADA">Pagada</option>
-                    <option value="DESCONTADA">Descontada</option>
-                    <option value="INFORMADA">Informada</option>
-                  </select>
-                </label>
-                <label>Medio
-                  <select id="field-payment-method">
-                    <option value="Transferencia">Transferencia</option>
-                    <option value="E-cheq">E-cheq</option>
-                    <option value="Efectivo">Efectivo</option>
-                    <option value="Cheque">Cheque</option>
-                    <option value="Otro">Otro</option>
-                  </select>
-                </label>
-                <label>Referencia / detalle<input id="field-payment-reference" placeholder="Banco, numero de echeq, comprobante, observacion"></label>
-                <label>Importe<input id="field-payment-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+              <div class="advanced-subpanel soft-panel">
+                <h4>1. Comision de esta cuota</h4>
+                <p class="subtle">Use este bloque solo si en esta cuota corresponde cobrar, descontar o dejar facturada una comision.</p>
+                <div class="form-grid">
+                  <label>Que pasa con la comision
+                    <select id="field-payment-commission-mode">
+                      <option value="NO_APLICA">No registrar comision ahora</option>
+                      <option value="ARRENDATARIO_PAGA">La paga / se suma al arrendatario</option>
+                      <option value="ARRENDADOR_DESCUENTA">Se descuenta al arrendador</option>
+                      <option value="FACTURA_APARTE">Queda facturada aparte</option>
+                    </select>
+                  </label>
+                  <label>Importe de comision<input id="field-payment-commission-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                  <label>Estado de la comision
+                    <select id="field-payment-commission-status">
+                      <option value="PENDIENTE">Pendiente</option>
+                      <option value="FACTURADA">Facturada</option>
+                      <option value="PAGADA">Pagada</option>
+                      <option value="DESCONTADA">Descontada</option>
+                      <option value="INFORMADA">Informada</option>
+                    </select>
+                  </label>
+                  <label>Detalle / factura / observacion<input id="field-payment-commission-reference" placeholder="Ej.: factura de comision, descuento aplicado, observacion"></label>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" id="field-payment-commission-register">Registrar comision</button>
+                </div>
               </div>
-              <div class="form-actions">
-                <button type="button" class="ghost-button" id="field-payment-add">Agregar pago</button>
+              <div class="advanced-subpanel soft-panel">
+                <h4>2. Pago real de esta cuota</h4>
+                <p class="subtle">Registre aca como se pago o cobro la cuota: transferencia, efectivo, echeq u otro medio.</p>
+                <div class="form-grid">
+                  <label>Fecha de pago<input id="field-payment-date" type="date"></label>
+                  <label>Quien recibe / paga
+                    <select id="field-payment-party-simple">
+                      <option value="ARRENDADOR">Pago al arrendador</option>
+                      <option value="ARRENDATARIO">Pago del arrendatario</option>
+                      <option value="AMBAS">Ambas partes / registro general</option>
+                    </select>
+                  </label>
+                  <label>Que se esta pagando
+                    <select id="field-payment-concept-simple">
+                      <option value="PAGO_CUOTA">Pago aplicado a la cuota</option>
+                      <option value="PAGO_FACTURADO">Parte facturada / contrato</option>
+                      <option value="PAGO_EFECTIVO">Parte efectivo</option>
+                      <option value="OTRO">Otro ajuste</option>
+                    </select>
+                  </label>
+                  <label>Medio
+                    <select id="field-payment-method">
+                      <option value="Transferencia">Transferencia</option>
+                      <option value="E-cheq">E-cheq</option>
+                      <option value="Efectivo">Efectivo</option>
+                      <option value="Cheque">Cheque</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                  </label>
+                  <label>Referencia / detalle<input id="field-payment-reference" placeholder="Banco, numero de echeq, comprobante, observacion"></label>
+                  <label>Importe pagado<input id="field-payment-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" id="field-payment-add">Registrar pago</button>
+                </div>
               </div>
               <div class="table-wrap compact-table">
                 <table>
@@ -2428,7 +2454,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260715-campos-recibos-partes-v31"></script>
+    <script src="/app.js?v=20260715-campos-cotizacion-producto-v34"></script>
   </body>
 </html>
 

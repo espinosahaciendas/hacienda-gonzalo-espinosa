@@ -26,6 +26,8 @@
   commissionistRows: [],
   fieldQuoteRows: [],
   fieldLeasePaymentRows: [],
+  fieldLeaseProductQuoteRows: [],
+  fieldLeaseLineQuoteRows: [],
   fieldContractPartyRows: [],
   fieldContractInstallmentRows: [],
   fieldContractLineRows: [],
@@ -40,7 +42,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260715-campos-recibos-partes-v31";
+const APP_BUILD = "20260715-campos-cotizacion-producto-v34";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1340,7 +1342,9 @@ window.addFieldContractInstallmentRow = addFieldContractInstallmentRow;
 function renderFieldLeaseInstallmentOptions(selectedId = $("#field-lease-installment")?.value || "") {
   const select = $("#field-lease-installment");
   if (!select) return;
-  const contract = currentFieldContractForCalculation() || {};
+  const rawContract = currentFieldContractForCalculation() || {};
+  const lineQuotes = fieldLeaseLineQuoteOverridesFromInputs(rawContract);
+  const contract = applyFieldLeaseLineQuoteOverrides(rawContract, lineQuotes);
   const rows = (Array.isArray(contract.cuotas) && contract.cuotas.length ? contract.cuotas : state.fieldContractInstallmentRows || [])
     .map(normalizeFieldContractInstallment)
     .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
@@ -1769,7 +1773,11 @@ function fieldLeaseCurrentInput() {
   const currencyType = $("#field-lease-currency")?.value || "ARS";
   const unit = $("#field-lease-unit")?.value || "KG";
   const priceInPesos = currencyType === "USD" ? price * exchange : price;
-  const contract = currentFieldContractForCalculation() || {};
+  const rawContract = currentFieldContractForCalculation() || {};
+  const productQuotes = fieldLeaseProductQuoteOverridesFromInputs(rawContract);
+  state.fieldLeaseProductQuoteRows = productQuotes;
+  const lineQuotes = fieldLeaseLineQuoteOverridesFromInputs(rawContract);
+  const contract = applyFieldLeaseLineQuoteOverrides(rawContract, lineQuotes);
   const frequency = contract.frecuencia || "MENSUAL";
   const selectedInstallment = selectedFieldLeaseInstallment(contract);
   const frequencyDivisor = selectedInstallment ? 1 : fieldLeaseFrequencyDivisor(frequency);
@@ -1810,6 +1818,8 @@ function fieldLeaseCurrentInput() {
     criterioCotizacion: contract.criterioCotizacion || "",
     observaciones: $("#field-lease-notes")?.value || "",
     cotizaciones: state.fieldQuoteRows || [],
+    productQuotes,
+    lineQuotes,
     pagos: state.fieldLeasePaymentRows || [],
     partes,
     distribucionPartes,
@@ -2029,6 +2039,150 @@ function fieldContractLineAppliesToType(line, type) {
   return applies === "AMBAS" || applies === type;
 }
 
+function fieldLeaseLineQuoteSignature(contract = {}) {
+  const rows = Array.isArray(contract.lineas) ? contract.lineas.map(normalizeFieldContractLine) : [];
+  return rows.map((row) => `${row.id}:${row.aplicaA}:${row.detalle}:${row.base}:${row.hectareas}:${row.tasa}`).join("|");
+}
+
+function fieldContractLineProductKey(base = "") {
+  const key = String(base || "").toUpperCase();
+  if (key.includes("CARNE")) return "CARNE";
+  if (key.includes("SOJA")) return "SOJA";
+  if (key.includes("TRIGO")) return "TRIGO";
+  if (key.includes("MAIZ")) return "MAIZ";
+  if (key.includes("CEREAL")) return "CEREAL";
+  if (key.includes("DOLAR")) return "DOLAR";
+  if (key.includes("PESO")) return "PESOS";
+  if (key.includes("FIJO")) return "FIJO";
+  return key || "GENERAL";
+}
+
+function fieldContractLineProductLabel(value = "") {
+  const key = fieldContractLineProductKey(value);
+  if (key === "CARNE") return "Carne";
+  if (key === "SOJA") return "Soja";
+  if (key === "TRIGO") return "Trigo";
+  if (key === "MAIZ") return "Maiz";
+  if (key === "CEREAL") return "Cereal";
+  if (key === "DOLAR") return "Dolar";
+  if (key === "PESOS") return "Pesos";
+  if (key === "FIJO") return "Importe fijo";
+  return key;
+}
+
+function fieldLeaseProductQuoteRowsFromContract(contract = {}) {
+  const saved = new Map((state.fieldLeaseProductQuoteRows || []).map((row) => [String(row.producto), row]));
+  const lines = Array.isArray(contract.lineas) ? contract.lineas.map(normalizeFieldContractLine) : [];
+  const groups = new Map();
+  lines.forEach((line) => {
+    const product = fieldContractLineProductKey(line.base);
+    if (product === "FIJO" || product === "PESOS") return;
+    const existing = groups.get(product) || {
+      producto: product,
+      etiqueta: fieldContractLineProductLabel(product),
+      lineas: 0,
+      cotizacion: parseMoneyInput(saved.get(product)?.cotizacion || 0)
+    };
+    existing.lineas += 1;
+    groups.set(product, existing);
+  });
+  return Array.from(groups.values());
+}
+
+function fieldLeaseProductQuoteOverridesFromInputs(contract = {}) {
+  return fieldLeaseProductQuoteRowsFromContract(contract).map((row) => {
+    const input = $all("[data-field-product-quote]").find((node) => String(node.dataset.fieldProductQuote) === String(row.producto));
+    return {
+      ...row,
+      cotizacion: input ? parseMoneyInput(input.value || 0) : parseMoneyInput(row.cotizacion || 0)
+    };
+  });
+}
+
+function fieldLeaseProductQuoteByKey(rows = []) {
+  return new Map((rows || []).map((row) => [String(row.producto), parseMoneyInput(row.cotizacion || 0)]));
+}
+
+function fieldLeaseLineQuoteRowsFromContract(contract = {}) {
+  const saved = new Map((state.fieldLeaseLineQuoteRows || []).map((row) => [String(row.id), row]));
+  const productQuotes = fieldLeaseProductQuoteByKey(fieldLeaseProductQuoteOverridesFromInputs(contract));
+  return (Array.isArray(contract.lineas) ? contract.lineas.map(normalizeFieldContractLine) : []).map((line) => {
+    const existing = saved.get(String(line.id)) || {};
+    const product = fieldContractLineProductKey(line.base);
+    return {
+      id: line.id,
+      aplicaA: line.aplicaA,
+      detalle: line.detalle,
+      base: line.base,
+      tasa: line.tasa,
+      producto: product,
+      cotizacion: parseMoneyInput(productQuotes.get(product) || existing.cotizacion || line.cotizacion || 0)
+    };
+  });
+}
+
+function fieldLeaseLineQuoteOverridesFromInputs(contract = {}) {
+  const rows = fieldLeaseLineQuoteRowsFromContract(contract);
+  return rows.map((row) => {
+    const input = $all("[data-field-line-quote]").find((node) => String(node.dataset.fieldLineQuote) === String(row.id));
+    return {
+      ...row,
+      cotizacion: input ? parseMoneyInput(input.value || 0) : parseMoneyInput(row.cotizacion || 0)
+    };
+  });
+}
+
+function renderFieldLeaseLineQuoteRows(contract = currentFieldContractForCalculation() || {}, force = false) {
+  const panel = $("#field-line-quotes-panel");
+  const body = $("#field-line-quote-body");
+  const productBody = $("#field-product-quote-body");
+  if (!panel || !body || !productBody) return;
+  const rows = fieldLeaseLineQuoteRowsFromContract(contract);
+  const productRows = fieldLeaseProductQuoteRowsFromContract(contract);
+  const signature = fieldLeaseLineQuoteSignature(contract);
+  panel.hidden = !rows.length;
+  if (!rows.length) {
+    body.innerHTML = "";
+    productBody.innerHTML = "";
+    body.dataset.signature = "";
+    return;
+  }
+  if (!force && body.dataset.signature === signature) return;
+  body.dataset.signature = signature;
+  productBody.innerHTML = productRows.length
+    ? productRows.map((row) => `<tr>
+      <td>${escapeHtml(row.etiqueta || row.producto)}</td>
+      <td>${plainNumberValue(row.lineas || 0)}</td>
+      <td><input class="money-input field-product-quote-input" data-field-product-quote="${escapeHtml(row.producto)}" inputmode="decimal" value="${row.cotizacion ? moneyValue(row.cotizacion) : ""}" placeholder="Usa promedio general"></td>
+    </tr>`).join("")
+    : `<tr><td colspan="3">Sin productos que requieran cotizacion diferenciada.</td></tr>`;
+  body.innerHTML = rows.map((row) => `<tr>
+    <td>${escapeHtml(fieldContractLineAppliesLabel(row.aplicaA))}</td>
+    <td>${escapeHtml(row.detalle || "-")}</td>
+    <td>${escapeHtml(fieldContractBaseLabel(row.base))}</td>
+    <td>${plainNumberValue(row.tasa || 0)}</td>
+    <td class="amount">${row.cotizacion ? moneyValue(row.cotizacion) : "Promedio general"}</td>
+  </tr>`).join("");
+}
+
+function applyFieldLeaseLineQuoteOverrides(contract = {}, quoteRows = []) {
+  if (!contract || !Array.isArray(contract.lineas) || !contract.lineas.length) return contract || {};
+  const quoteById = new Map((quoteRows || []).map((row) => [String(row.id), parseMoneyInput(row.cotizacion || 0)]));
+  const productQuotes = fieldLeaseProductQuoteByKey(state.fieldLeaseProductQuoteRows || []);
+  return {
+    ...contract,
+    lineas: contract.lineas.map((line) => {
+      const normalized = normalizeFieldContractLine(line);
+      const product = fieldContractLineProductKey(normalized.base);
+      const quote = quoteById.get(String(normalized.id)) || productQuotes.get(product);
+      return {
+        ...normalized,
+        cotizacion: quote || normalized.cotizacion || 0
+      };
+    })
+  };
+}
+
 function calculateFieldContractLine(line, priceInPesos) {
   const base = String(line.base || "KG_CARNE").toUpperCase();
   const hectares = parseMoneyInput(line.hectareas || 0);
@@ -2160,6 +2314,7 @@ function buildFieldLeaseInstallments({ fecha, cuotas, frecuencia, importeCuota }
 
 function updateFieldLeasePreview() {
   if (!$("#field-lease-total")) return;
+  renderFieldLeaseLineQuoteRows(currentFieldContractForCalculation() || {});
   const calc = fieldLeaseCurrentInput();
   const setPreview = (selector, value) => {
     const node = $(selector);
@@ -2251,9 +2406,16 @@ function resetFieldLeaseForm() {
   if ($("#field-payment-date")) $("#field-payment-date").value = today;
   $("#field-lease-currency").value = "ARS";
   $("#field-lease-unit").value = "KG";
+  if ($("#field-payment-commission-mode")) $("#field-payment-commission-mode").value = "NO_APLICA";
+  if ($("#field-payment-commission-status")) $("#field-payment-commission-status").value = "PENDIENTE";
+  if ($("#field-payment-party-simple")) $("#field-payment-party-simple").value = "ARRENDADOR";
+  if ($("#field-payment-concept-simple")) $("#field-payment-concept-simple").value = "PAGO_CUOTA";
   state.fieldQuoteRows = [];
   state.fieldLeasePaymentRows = [];
+  state.fieldLeaseProductQuoteRows = [];
+  state.fieldLeaseLineQuoteRows = [];
   renderFieldQuoteRows();
+  renderFieldLeaseLineQuoteRows({}, true);
   renderFieldLeasePaymentRows(0);
   updateFieldLeasePreview();
   setFieldLeaseMessage("");
@@ -2303,6 +2465,19 @@ function syncFieldPaymentCommissionShortcut(source = "") {
   if (!add.checked && !deduct.checked && application && application.value !== "FACTURA_APARTE") {
     application.value = "NO_APLICA";
   }
+}
+
+function syncFieldPaymentCommissionMode() {
+  const mode = $("#field-payment-commission-mode")?.value || "NO_APLICA";
+  const status = $("#field-payment-commission-status");
+  if (!status) return;
+  if (mode === "ARRENDADOR_DESCUENTA") status.value = "DESCONTADA";
+  else if (mode === "FACTURA_APARTE") status.value = "FACTURADA";
+  else if (mode === "ARRENDATARIO_PAGA") status.value = "PENDIENTE";
+}
+
+function fieldLeasePaymentBalanceBase(totalDue = fieldLeaseCurrentInput().totalConComision) {
+  return Number(totalDue || 0);
 }
 
 function fieldLeasePaymentConceptLabel(value) {
@@ -2387,7 +2562,7 @@ function renderFieldLeasePaymentRows(totalDue = fieldLeaseCurrentInput().totalCo
       </tr>`).join("")
     : `<tr><td colspan="9">Sin pagos registrados para esta cuota.</td></tr>`;
   const totals = fieldLeasePaymentTotals();
-  const balance = Number(totalDue || 0) - totals.aplicado;
+  const balance = fieldLeasePaymentBalanceBase(totalDue) - totals.aplicado;
   if ($("#field-payment-paid")) $("#field-payment-paid").textContent = moneyValue(totals.pagado);
   if ($("#field-payment-commission")) $("#field-payment-commission").textContent = moneyValue(totals.comision);
   if ($("#field-payment-balance")) $("#field-payment-balance").textContent = moneyValue(balance);
@@ -2402,18 +2577,51 @@ function addFieldLeasePaymentRow() {
   state.fieldLeasePaymentRows.push({
     id: `PAGO-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     fecha: $("#field-payment-date")?.value || new Date().toISOString().slice(0, 10),
-    concepto: $("#field-payment-concept")?.value || "PAGO_CUOTA",
-    parte: $("#field-payment-party")?.value || "GENERAL",
-    aplicacionComision: $("#field-payment-commission-application")?.value || "NO_APLICA",
-    estado: $("#field-payment-status")?.value || "PENDIENTE",
+    concepto: $("#field-payment-concept-simple")?.value || $("#field-payment-concept")?.value || "PAGO_CUOTA",
+    parte: $("#field-payment-party-simple")?.value || $("#field-payment-party")?.value || "GENERAL",
+    aplicacionComision: "NO_APLICA",
+    estado: "PAGADA",
     medio: $("#field-payment-method")?.value || "Transferencia",
     referencia: $("#field-payment-reference")?.value || "",
     importe: amount
   });
   $("#field-payment-reference").value = "";
   $("#field-payment-amount").value = "";
-  if ($("#field-payment-commission-add")) $("#field-payment-commission-add").checked = false;
-  if ($("#field-payment-commission-deduct")) $("#field-payment-commission-deduct").checked = false;
+  renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
+  setFieldLeaseMessage("");
+}
+
+function addFieldLeaseCommissionRow() {
+  const mode = $("#field-payment-commission-mode")?.value || "NO_APLICA";
+  const amount = parseMoneyInput($("#field-payment-commission-amount")?.value || 0);
+  if (mode === "NO_APLICA") {
+    setFieldLeaseMessage("Seleccione como corresponde registrar la comision.", "error");
+    return;
+  }
+  if (!amount) {
+    setFieldLeaseMessage("Cargue el importe de la comision.", "error");
+    return;
+  }
+  const isTenantPays = mode === "ARRENDATARIO_PAGA";
+  const isLandlordDeduct = mode === "ARRENDADOR_DESCUENTA";
+  const isInvoiceApart = mode === "FACTURA_APARTE";
+  const statusField = $("#field-payment-commission-status");
+  const status = statusField?.value || (isLandlordDeduct ? "DESCONTADA" : "PENDIENTE");
+  state.fieldLeasePaymentRows.push({
+    id: `COMISION-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    fecha: $("#field-payment-date")?.value || new Date().toISOString().slice(0, 10),
+    concepto: isLandlordDeduct ? "COMISION_DESCONTADA" : "COMISION_COBRADA",
+    parte: isLandlordDeduct ? "ARRENDADOR" : isTenantPays ? "ARRENDATARIO" : "AMBAS",
+    aplicacionComision: isLandlordDeduct ? "DESCUENTA_COBRADOR" : isInvoiceApart ? "FACTURA_APARTE" : "SUMA_PAGADOR",
+    estado: status,
+    medio: isLandlordDeduct ? "Descuento" : "Comision",
+    referencia: $("#field-payment-commission-reference")?.value || "",
+    importe: amount
+  });
+  if ($("#field-payment-commission-reference")) $("#field-payment-commission-reference").value = "";
+  if ($("#field-payment-commission-amount")) $("#field-payment-commission-amount").value = "";
+  if ($("#field-payment-commission-mode")) $("#field-payment-commission-mode").value = "NO_APLICA";
+  if ($("#field-payment-commission-status")) $("#field-payment-commission-status").value = "PENDIENTE";
   renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
   setFieldLeaseMessage("");
 }
@@ -2460,9 +2668,12 @@ function fillFieldLeaseForm(item) {
   if ($("#field-lease-commission-cash-rate")) $("#field-lease-commission-cash-rate").value = item.comisionEfectivoPorcentaje || "";
   $("#field-lease-notes").value = item.observaciones || "";
   state.fieldQuoteRows = Array.isArray(item.cotizaciones) ? item.cotizaciones : [];
+  state.fieldLeaseProductQuoteRows = Array.isArray(item.productQuotes) ? item.productQuotes : [];
+  state.fieldLeaseLineQuoteRows = Array.isArray(item.lineQuotes) ? item.lineQuotes : [];
   state.fieldLeasePaymentRows = Array.isArray(item.pagos) ? item.pagos : [];
   renderFieldLeaseInstallmentOptions(item.cuotaManualId || "");
   renderFieldQuoteRows();
+  renderFieldLeaseLineQuoteRows(currentFieldContractForCalculation() || {}, true);
   renderFieldLeasePaymentRows(item.totalConComision || item.totalPesos || 0);
   if (state.fieldQuoteRows.length) syncFieldQuoteAverageToPrice();
   updateFieldLeasePreview();
@@ -8228,6 +8439,8 @@ async function init() {
   $("#field-lease-receipt-tenant")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDATARIO"));
   $("#field-quote-add").addEventListener("click", addFieldQuoteRow);
   $("#field-payment-add").addEventListener("click", addFieldLeasePaymentRow);
+  $("#field-payment-commission-register")?.addEventListener("click", addFieldLeaseCommissionRow);
+  $("#field-payment-commission-mode")?.addEventListener("change", syncFieldPaymentCommissionMode);
   $("#field-payment-commission-add")?.addEventListener("change", () => syncFieldPaymentCommissionShortcut("ADD"));
   $("#field-payment-commission-deduct")?.addEventListener("change", () => syncFieldPaymentCommissionShortcut("DEDUCT"));
   $("#field-quote-body").addEventListener("click", (event) => {
@@ -8243,6 +8456,16 @@ async function init() {
     if (!button) return;
     state.fieldLeasePaymentRows = state.fieldLeasePaymentRows.filter((item) => String(item.id) !== String(button.dataset.fieldPaymentRemove));
     renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
+  });
+  $("#field-line-quote-body")?.addEventListener("input", (event) => {
+    if (!event.target.closest("[data-field-line-quote]")) return;
+    updateFieldLeasePreview();
+  });
+  $("#field-product-quote-body")?.addEventListener("input", (event) => {
+    if (!event.target.closest("[data-field-product-quote]")) return;
+    const body = $("#field-line-quote-body");
+    if (body) body.dataset.signature = "";
+    updateFieldLeasePreview();
   });
   $("#field-lease-installment").addEventListener("change", () => {
     const selected = selectedFieldLeaseInstallment();
