@@ -42,7 +42,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260715-campos-cotizacion-producto-v34";
+const APP_BUILD = "20260715-campos-cotizacion-producto-v35";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2072,16 +2072,18 @@ function fieldContractLineProductLabel(value = "") {
 
 function fieldLeaseProductQuoteRowsFromContract(contract = {}) {
   const saved = new Map((state.fieldLeaseProductQuoteRows || []).map((row) => [String(row.producto), row]));
+  const quoteAverages = fieldQuoteAverageByProduct();
   const lines = Array.isArray(contract.lineas) ? contract.lineas.map(normalizeFieldContractLine) : [];
   const groups = new Map();
   lines.forEach((line) => {
     const product = fieldContractLineProductKey(line.base);
+    const savedQuote = parseMoneyInput(saved.get(product)?.cotizacion || 0);
     if (product === "FIJO" || product === "PESOS") return;
     const existing = groups.get(product) || {
       producto: product,
       etiqueta: fieldContractLineProductLabel(product),
       lineas: 0,
-      cotizacion: parseMoneyInput(saved.get(product)?.cotizacion || 0)
+      cotizacion: savedQuote || quoteAverages.get(product) || 0
     };
     existing.lineas += 1;
     groups.set(product, existing);
@@ -2139,7 +2141,7 @@ function renderFieldLeaseLineQuoteRows(contract = currentFieldContractForCalcula
   if (!panel || !body || !productBody) return;
   const rows = fieldLeaseLineQuoteRowsFromContract(contract);
   const productRows = fieldLeaseProductQuoteRowsFromContract(contract);
-  const signature = fieldLeaseLineQuoteSignature(contract);
+  const signature = `${fieldLeaseLineQuoteSignature(contract)}||${productRows.map((row) => `${row.producto}:${row.cotizacion}`).join("|")}`;
   panel.hidden = !rows.length;
   if (!rows.length) {
     body.innerHTML = "";
@@ -2249,6 +2251,22 @@ function fieldQuoteAverage() {
     .filter((value) => value > 0);
   if (!values.length) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function fieldQuoteAverageByProduct() {
+  const grouped = new Map();
+  (state.fieldQuoteRows || []).forEach((item) => {
+    const value = parseMoneyInput(item.cotizacion || 0);
+    if (!value) return;
+    const product = fieldContractLineProductKey(item.producto || "");
+    if (!grouped.has(product)) grouped.set(product, []);
+    grouped.get(product).push(value);
+  });
+  const averages = new Map();
+  grouped.forEach((values, product) => {
+    averages.set(product, values.reduce((sum, value) => sum + value, 0) / values.length);
+  });
+  return averages;
 }
 
 function syncFieldQuoteAverageToPrice() {
