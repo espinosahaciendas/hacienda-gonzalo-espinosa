@@ -40,7 +40,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260715-recibo-importe-original-v29";
+const APP_BUILD = "20260715-campos-recibos-partes-v31";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2278,6 +2278,33 @@ function fieldLeasePaymentTotals() {
   }, { pagado: 0, comision: 0, aplicado: 0 });
 }
 
+function syncFieldPaymentCommissionShortcut(source = "") {
+  const add = $("#field-payment-commission-add");
+  const deduct = $("#field-payment-commission-deduct");
+  const concept = $("#field-payment-concept");
+  const party = $("#field-payment-party");
+  const application = $("#field-payment-commission-application");
+  const status = $("#field-payment-status");
+  if (!add || !deduct) return;
+  if (source === "ADD" && add.checked) {
+    deduct.checked = false;
+    if (concept) concept.value = "COMISION_COBRADA";
+    if (party) party.value = "ARRENDATARIO";
+    if (application) application.value = "SUMA_PAGADOR";
+    if (status) status.value = "PENDIENTE";
+  }
+  if (source === "DEDUCT" && deduct.checked) {
+    add.checked = false;
+    if (concept) concept.value = "COMISION_DESCONTADA";
+    if (party) party.value = "ARRENDADOR";
+    if (application) application.value = "DESCUENTA_COBRADOR";
+    if (status) status.value = "DESCONTADA";
+  }
+  if (!add.checked && !deduct.checked && application && application.value !== "FACTURA_APARTE") {
+    application.value = "NO_APLICA";
+  }
+}
+
 function fieldLeasePaymentConceptLabel(value) {
   const key = String(value || "").toUpperCase();
   if (key === "PAGO_FACTURADO") return "Pago facturado / contrato";
@@ -2385,6 +2412,8 @@ function addFieldLeasePaymentRow() {
   });
   $("#field-payment-reference").value = "";
   $("#field-payment-amount").value = "";
+  if ($("#field-payment-commission-add")) $("#field-payment-commission-add").checked = false;
+  if ($("#field-payment-commission-deduct")) $("#field-payment-commission-deduct").checked = false;
   renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
   setFieldLeaseMessage("");
 }
@@ -2402,7 +2431,7 @@ function renderFieldLeases() {
         <td>${plainNumberValue(item.hectareas)}</td>
         <td>${moneyValue(item.totalConComision || item.totalPesos)}</td>
         <td>${moneyValue((item.pagos || []).reduce((sum, payment) => sum + parseMoneyInput(payment.importe || 0), 0))}</td>
-        <td><button type="button" class="small-button" data-field-lease-open="${escapeHtml(item.id)}">Abrir</button> <button type="button" class="small-button" data-field-lease-print="${escapeHtml(item.id)}">Imprimir</button> <button type="button" class="small-button danger-button" data-field-lease-delete="${escapeHtml(item.id)}">Eliminar</button></td>
+        <td><button type="button" class="small-button" data-field-lease-open="${escapeHtml(item.id)}">Abrir</button> <button type="button" class="small-button" data-field-lease-print="${escapeHtml(item.id)}" data-field-lease-audience="GENERAL">Reporte</button> <button type="button" class="small-button" data-field-lease-receipt="${escapeHtml(item.id)}" data-field-lease-receipt-role="ARRENDADOR">Recibo arr.</button> <button type="button" class="small-button" data-field-lease-receipt="${escapeHtml(item.id)}" data-field-lease-receipt-role="ARRENDATARIO">Recibo arrendat.</button> <button type="button" class="small-button danger-button" data-field-lease-delete="${escapeHtml(item.id)}">Eliminar</button></td>
       </tr>`).join("")
     : `<tr><td colspan="8">Sin calculos de arrendamiento cargados.</td></tr>`;
   updateFieldLeasePreview();
@@ -2473,8 +2502,13 @@ async function deleteFieldLease(id) {
   renderFieldLeases();
 }
 
-function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
-  const title = safePdfTitle("Calculo_arrendamiento", item.cliente || item.campo || "campos", item.fecha || "");
+function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTERNO") {
+  const reportAudience = String(audience || "INTERNO").toUpperCase();
+  const audienceRole = ["ARRENDADOR", "ARRENDATARIO"].includes(reportAudience) ? reportAudience : "";
+  const isInternalReport = reportAudience === "INTERNO";
+  const isGeneralReport = !isInternalReport && !audienceRole;
+  const audienceLabel = isInternalReport ? "Interno" : audienceRole ? fieldContractPartyTypeLabel(audienceRole) : "General de cuota";
+  const title = safePdfTitle(`Calculo_arrendamiento_${audienceLabel}`, item.cliente || item.campo || "campos", item.fecha || "");
   const popup = window.open("", "_blank", "width=1000,height=800");
   if (!popup) return;
   const fieldReportDate = (value) => {
@@ -2496,9 +2530,20 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
         cashTotal,
         commissionTotal
       );
-  const paymentRowsData = Array.isArray(item.pagos) ? item.pagos : [];
-  const landlordSummary = fieldLeasePartySummary(paymentRowsData, finalTotal, "ARRENDADOR");
-  const tenantSummary = fieldLeasePartySummary(paymentRowsData, finalTotal, "ARRENDATARIO");
+  const visibleDistributionRows = isInternalReport || isGeneralReport
+    ? distributionRowsData
+    : distributionRowsData.filter((row) => String(row.tipo || "").toUpperCase() === audienceRole);
+  const rawPaymentRowsData = Array.isArray(item.pagos) ? item.pagos : [];
+  const paymentRowsData = isInternalReport
+    ? rawPaymentRowsData
+    : audienceRole ? rawPaymentRowsData.filter((payment) => fieldLeasePaymentAppliesToParty(payment, audienceRole)) : [];
+  const visibleBilledTotal = isInternalReport || isGeneralReport ? billedTotal : visibleDistributionRows.reduce((sum, row) => sum + Number(row.facturado || 0), 0);
+  const visibleCashTotal = isInternalReport || isGeneralReport ? cashTotal : visibleDistributionRows.reduce((sum, row) => sum + Number(row.efectivo || 0), 0);
+  const visibleQuotaTotal = isInternalReport || isGeneralReport ? Number(item.totalPesos || 0) : visibleDistributionRows.reduce((sum, row) => sum + Number(row.totalCuota || 0), 0);
+  const visibleCommissionTotal = isInternalReport ? commissionTotal : audienceRole ? visibleDistributionRows.reduce((sum, row) => sum + Number(row.comision || 0), 0) : 0;
+  const visibleNetTotal = isInternalReport
+    ? finalTotal
+    : audienceRole ? visibleDistributionRows.reduce((sum, row) => sum + fieldLeaseMiniLedgerNet(row).neto, 0) : Number(item.totalPesos || 0);
   const paymentsTotals = paymentRowsData.reduce((acc, payment) => {
     const amount = parseMoneyInput(payment.importe || 0);
     acc.aplicado += amount;
@@ -2506,7 +2551,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     else acc.pagado += amount;
     return acc;
   }, { pagado: 0, comision: 0, aplicado: 0 });
-  const paymentBalance = finalTotal - paymentsTotals.aplicado;
+  const paymentBalance = visibleNetTotal - paymentsTotals.aplicado;
   const divisorText = item.frecuenciaDivisor && item.frecuenciaDivisor > 1
     ? `Importes de la cuota calculados sobre base anual / ${plainNumberValue(item.frecuenciaDivisor)}.`
     : "Importes calculados para el vencimiento informado.";
@@ -2543,13 +2588,17 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
         </tr>`).join("")}
       </tbody></table>`
     : "";
-  const commissionRows = [
-    item.comisionGeneralImporte ? `<tr><td>Comision general</td><td>${escapeHtml(item.comisionBase || "-")}</td><td>${plainNumberValue(item.comisionPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionBaseImporte || 0)}</td><td class="amount">${moneyValue(item.comisionGeneralImporte)}</td></tr>` : "",
-    item.comisionFacturadoImporte ? `<tr><td>Comision sobre facturado</td><td>Facturado / contrato</td><td>${plainNumberValue(item.comisionFacturadoPorcentaje || 0)}%</td><td class="amount">${moneyValue(billedTotal)}</td><td class="amount">${moneyValue(item.comisionFacturadoImporte)}</td></tr>` : "",
-    item.comisionEfectivoImporte ? `<tr><td>Comision sobre efectivo</td><td>Efectivo</td><td>${plainNumberValue(item.comisionEfectivoPorcentaje || 0)}%</td><td class="amount">${moneyValue(cashTotal)}</td><td class="amount">${moneyValue(item.comisionEfectivoImporte)}</td></tr>` : ""
-  ].join("");
-  const commissionBlock = commissionRows
-    ? `<h2>Comision</h2><table><thead><tr><th>Concepto</th><th>Aplica sobre</th><th>%</th><th>Base</th><th>Importe</th></tr></thead><tbody>${commissionRows}<tr class="total"><td colspan="4">Total comision</td><td class="amount">${moneyValue(commissionTotal)}</td></tr></tbody></table>`
+  const commissionRows = isInternalReport
+    ? [
+        item.comisionGeneralImporte ? `<tr><td>Comision general</td><td>${escapeHtml(item.comisionBase || "-")}</td><td>${plainNumberValue(item.comisionPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionBaseImporte || 0)}</td><td class="amount">${moneyValue(item.comisionGeneralImporte)}</td></tr>` : "",
+        item.comisionFacturadoImporte ? `<tr><td>Comision sobre facturado</td><td>Facturado / contrato</td><td>${plainNumberValue(item.comisionFacturadoPorcentaje || 0)}%</td><td class="amount">${moneyValue(billedTotal)}</td><td class="amount">${moneyValue(item.comisionFacturadoImporte)}</td></tr>` : "",
+        item.comisionEfectivoImporte ? `<tr><td>Comision sobre efectivo</td><td>Efectivo</td><td>${plainNumberValue(item.comisionEfectivoPorcentaje || 0)}%</td><td class="amount">${moneyValue(cashTotal)}</td><td class="amount">${moneyValue(item.comisionEfectivoImporte)}</td></tr>` : ""
+      ].join("")
+    : visibleCommissionTotal
+      ? `<tr><td>Comision correspondiente a ${escapeHtml(audienceLabel.toLowerCase())}</td><td>${audienceRole === "ARRENDADOR" ? "Se descuenta al cobrador" : "Se suma al pagador"}</td><td>-</td><td class="amount">${moneyValue(visibleQuotaTotal)}</td><td class="amount">${moneyValue(visibleCommissionTotal)}</td></tr>`
+      : "";
+  const commissionBlock = commissionRows && !isGeneralReport
+    ? `<h2>Comision</h2><table><thead><tr><th>Concepto</th><th>Aplica sobre</th><th>%</th><th>Base</th><th>Importe</th></tr></thead><tbody>${commissionRows}<tr class="total"><td colspan="4">Total comision</td><td class="amount">${moneyValue(visibleCommissionTotal)}</td></tr></tbody></table>`
     : "";
   const paymentRows = paymentRowsData.length
     ? paymentRowsData.map((payment) => {
@@ -2557,8 +2606,8 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
         return `<tr${cashPayment ? ' class="cash"' : ""}><td>${fieldReportDate(payment.fecha)}</td><td>${escapeHtml(fieldLeasePaymentConceptLabel(payment.concepto))}</td><td>${escapeHtml(fieldLeasePaymentPartyLabel(payment.parte))}</td><td>${escapeHtml(fieldLeaseCommissionApplicationLabel(payment.aplicacionComision))}</td><td>${escapeHtml(fieldLeasePaymentStatusLabel(payment.estado))}</td><td>${escapeHtml(payment.medio || "-")}</td><td>${escapeHtml(payment.referencia || "-")}</td><td class="amount">${moneyValue(payment.importe || 0)}</td></tr>`;
       }).join("")
     : `<tr><td colspan="8">Sin pagos registrados para esta cuota.</td></tr>`;
-  const partyNetRows = distributionRowsData.length
-    ? distributionRowsData.map((row) => {
+  const partyNetRows = visibleDistributionRows.length
+    ? visibleDistributionRows.map((row) => {
         const result = fieldLeaseMiniLedgerNet(row);
         return `<tr${String(row.tipo || "").toUpperCase() === "ARRENDADOR" ? ' class="cash-row-soft"' : ""}>
           <td>${escapeHtml(row.nombre || "-")}</td>
@@ -2573,7 +2622,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
           <td class="amount">${moneyValue(result.neto)}</td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="10">Sin partes cargadas.</td></tr>`;
+    : `<tr><td colspan="10">Sin partes cargadas para este reporte.</td></tr>`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
     body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22;font-size:10.5px}
     header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:10px}
@@ -2588,15 +2637,15 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     .total{background:#fff3e8;font-weight:700}.cash,.cash-row-soft{background:#fff8ed}.cash td,.cash-row-soft td{font-style:italic;font-weight:700}.note{border:1px solid #dbcbb8;padding:7px;margin-top:9px;font-size:9.5px;line-height:1.25}
     .print-actions{margin-top:14px}.print-actions button{padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}body{margin:0}.print-actions{display:none}h2{break-after:avoid}table{break-inside:auto}tr{break-inside:avoid}}
   </style></head><body>
-    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Calculo de arrendamiento</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.cliente || "-")} / ${escapeHtml(item.arrendatario || "-")} | ${escapeHtml(item.campo || "-")} | Fecha de calculo: ${fieldReportDate(item.fecha)}</p></div></header>
+    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Calculo de arrendamiento - ${escapeHtml(audienceLabel)}</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.cliente || "-")} / ${escapeHtml(item.arrendatario || "-")} | ${escapeHtml(item.campo || "-")} | Fecha de calculo: ${fieldReportDate(item.fecha)}</p></div></header>
     <section class="summary">
       <div class="box"><span>Vencimiento</span><strong>${fieldReportDate(item.vencimiento)}</strong></div>
-      <div class="box"><span>Facturado / contrato</span><strong>${moneyValue(billedTotal)}</strong></div>
-      <div class="box"><span>Efectivo</span><strong>${moneyValue(cashTotal)}</strong></div>
-      <div class="box main"><span>${commissionTotal ? "Total con comision" : "Total cuota"}</span><strong>${moneyValue(finalTotal)}</strong></div>
-      <div class="box"><span>Pagado</span><strong>${moneyValue(paymentsTotals.pagado)}</strong></div>
+      <div class="box"><span>Facturado / contrato</span><strong>${moneyValue(visibleBilledTotal)}</strong></div>
+      <div class="box"><span>Efectivo</span><strong>${moneyValue(visibleCashTotal)}</strong></div>
+      <div class="box main"><span>${visibleCommissionTotal ? "Neto con comision" : "Total cuota"}</span><strong>${moneyValue(visibleNetTotal)}</strong></div>
+      ${isGeneralReport ? "" : `<div class="box"><span>Pagado</span><strong>${moneyValue(paymentsTotals.pagado)}</strong></div>
       <div class="box"><span>Comision/descuento</span><strong>${moneyValue(paymentsTotals.comision)}</strong></div>
-      <div class="box main"><span>Saldo</span><strong>${moneyValue(paymentBalance)}</strong></div>
+      <div class="box main"><span>Saldo</span><strong>${moneyValue(paymentBalance)}</strong></div>`}
     </section>
     <div class="grid">
       <span>Contrato / referencia</span><strong>${escapeHtml(item.contrato || "-")}</strong>
@@ -2625,19 +2674,19 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
     <h2>Cotizaciones utilizadas</h2>
     <table><thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th></tr></thead><tbody>${quoteRows}<tr class="total"><td colspan="3">Promedio / cotizacion aplicada</td><td class="amount">${moneyValue(item.cotizacionPesos || item.cotizacion)}</td></tr></tbody></table>
     ${commissionBlock}
-    <h2>Resumen de cobro / pago por parte</h2>
+    ${isGeneralReport ? "" : `<h2>${isInternalReport ? "Resumen de cobro / pago por parte" : `Resumen correspondiente a ${escapeHtml(audienceLabel.toLowerCase())}`}</h2>
     <table><thead><tr><th>Parte</th><th>Rol</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision</th><th>Criterio</th><th>Neto informado</th></tr></thead><tbody>
       ${partyNetRows}
-    </tbody></table>
+    </tbody></table>`}
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
-    <h2>Pagos imputados a esta cuota</h2>
-    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Aplicacion</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="7">Total pagado</td><td class="amount">${moneyValue(paymentsTotals.pagado)}</td></tr><tr class="total"><td colspan="7">Comision/descuento aplicado</td><td class="amount">${moneyValue(paymentsTotals.comision)}</td></tr><tr class="total"><td colspan="7">Saldo pendiente general</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>
+    ${isGeneralReport ? "" : `<h2>Pagos imputados a esta cuota</h2>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Aplicacion</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="7">Total pagado</td><td class="amount">${moneyValue(paymentsTotals.pagado)}</td></tr><tr class="total"><td colspan="7">Comision/descuento aplicado</td><td class="amount">${moneyValue(paymentsTotals.comision)}</td></tr><tr class="total"><td colspan="7">Saldo pendiente general</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>`}
     <div class="print-actions"><button onclick="window.print()">Imprimir / guardar PDF</button></div>
   </body></html>`);
   popup.document.close();
 }
 
-function printCurrentFieldLeaseReport() {
+function printCurrentFieldLeaseReport(audience = "INTERNO") {
   try {
     updateFieldLeasePreview();
     const payload = fieldLeaseCurrentInput();
@@ -2647,9 +2696,137 @@ function printCurrentFieldLeaseReport() {
       return;
     }
     setFieldLeaseMessage("");
-    printFieldLeaseReport(payload);
+    printFieldLeaseReport(payload, audience);
   } catch (error) {
     setFieldLeaseMessage(error.message || "No se pudo generar el reporte del calculo.", "error");
+  }
+}
+
+function fieldLeaseReceiptRowsForRole(item = {}, role = "ARRENDADOR") {
+  const billedTotal = Number(item.facturadoTotal || 0);
+  const cashTotal = Number(item.efectivoTotal || 0);
+  const commissionTotal = Number(item.comisionImporte || 0);
+  const distributionRows = Array.isArray(item.distribucionPartes) && item.distribucionPartes.length
+    ? item.distribucionPartes
+    : calculateFieldLeasePartyDistribution(
+        fieldContractPartyRowsFromContract(item),
+        billedTotal,
+        cashTotal,
+        commissionTotal
+      );
+  return distributionRows.filter((row) => String(row.tipo || "").toUpperCase() === role);
+}
+
+function fieldLeaseReceiptPaymentRowsForRole(item = {}, role = "ARRENDADOR") {
+  return (Array.isArray(item.pagos) ? item.pagos : []).filter((payment) => fieldLeasePaymentAppliesToParty(payment, role));
+}
+
+function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDADOR") {
+  const receiptRole = String(role || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR";
+  const roleLabel = fieldContractPartyTypeLabel(receiptRole);
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    setFieldLeaseMessage("El navegador bloqueo la ventana del recibo. Habilite ventanas emergentes.", "error");
+    return;
+  }
+  const rows = fieldLeaseReceiptRowsForRole(item, receiptRole);
+  const payments = fieldLeaseReceiptPaymentRowsForRole(item, receiptRole);
+  const totals = rows.reduce((acc, row) => {
+    const result = fieldLeaseMiniLedgerNet(row);
+    acc.facturado += Number(row.facturado || 0);
+    acc.efectivo += Number(row.efectivo || 0);
+    acc.totalCuota += Number(row.totalCuota || 0);
+    acc.comision += Number(row.comision || 0);
+    acc.neto += result.neto;
+    return acc;
+  }, { facturado: 0, efectivo: 0, totalCuota: 0, comision: 0, neto: 0 });
+  const paymentTotals = payments.reduce((acc, payment) => {
+    const amount = parseMoneyInput(payment.importe || 0);
+    acc.total += amount;
+    if (isFieldLeaseCommissionPayment(payment)) acc.comision += amount;
+    else acc.pagos += amount;
+    return acc;
+  }, { pagos: 0, comision: 0, total: 0 });
+  const balance = totals.neto - paymentTotals.total;
+  const partyRows = rows.length
+    ? rows.map((row) => {
+        const result = fieldLeaseMiniLedgerNet(row);
+        return `<tr>
+          <td>${escapeHtml(row.nombre || "-")}</td>
+          <td>${escapeHtml(row.cuit || "-")}</td>
+          <td class="amount">${plainNumberValue(row.porcentaje || 0)}%</td>
+          <td class="amount">${moneyValue(row.facturado || 0)}</td>
+          <td class="amount">${moneyValue(row.efectivo || 0)}</td>
+          <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
+          <td class="amount">${moneyValue(row.comision || 0)}</td>
+          <td>${escapeHtml(result.criterio)}</td>
+          <td class="amount">${moneyValue(result.neto)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="9">Sin partes cargadas para ${escapeHtml(roleLabel.toLowerCase())}.</td></tr>`;
+  const paymentRows = payments.length
+    ? payments.map((payment) => {
+        const cashPayment = /EFECTIVO/i.test([payment.concepto, payment.medio, payment.referencia].filter(Boolean).join(" "));
+        return `<tr${cashPayment ? ' class="cash"' : ""}>
+          <td>${fieldReportDate(payment.fecha)}</td>
+          <td>${escapeHtml(fieldLeasePaymentConceptLabel(payment.concepto))}</td>
+          <td>${escapeHtml(fieldLeaseCommissionApplicationLabel(payment.aplicacionComision))}</td>
+          <td>${escapeHtml(fieldLeasePaymentStatusLabel(payment.estado))}</td>
+          <td>${escapeHtml(payment.medio || "-")}</td>
+          <td>${escapeHtml(payment.referencia || "-")}</td>
+          <td class="amount">${moneyValue(payment.importe || 0)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="7">Sin pagos o descuentos registrados para esta parte.</td></tr>`;
+  const commissionLabel = receiptRole === "ARRENDADOR" ? "Comision descontada" : "Comision a pagar / sumada";
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Recibo ${escapeHtml(roleLabel)} - ${escapeHtml(item.contrato || "cuota")}</title><style>
+    body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22;font-size:10.5px}
+    header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:10px}
+    img{width:185px;height:68px;object-fit:contain}
+    h1{font-size:18px;margin:0 0 3px} h2{font-size:12px;margin:12px 0 5px;color:#3d2d22} p{margin:2px 0;font-size:10px}.muted{color:#7b5a32}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0 10px}.box{border:1px solid #dbcbb8;background:#fffaf4;padding:7px;min-height:42px}.box span{display:block;font-size:9px;color:#7b5a32;text-transform:uppercase}.box strong{display:block;font-size:15px;margin-top:4px;color:#1f160f}.box.main{background:#fff3e8;border-color:#d4ac7a}.box.main strong{font-size:16px}
+    .grid{display:grid;grid-template-columns:150px 1fr 150px 1fr;border:1px solid #dbcbb8;margin-bottom:8px}.grid span,.grid strong{border-bottom:1px solid #dbcbb8;padding:4px;font-size:9.5px}.grid span{background:#f8f2ea;color:#7b5a32}.grid strong{font-size:10px}
+    table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:5px}th,td{border:1px solid #dbcbb8;padding:4px;text-align:left;vertical-align:top}th{background:#f8f2ea}.amount{text-align:right;font-weight:700;white-space:nowrap}.total{background:#fff3e8;font-weight:700}.cash td{font-style:italic;font-weight:700}.note{border:1px solid #dbcbb8;padding:7px;margin-top:9px;font-size:9.5px;line-height:1.25}.print-actions{margin-top:14px}.print-actions button{padding:8px 12px}
+    @media print{@page{size:A4 portrait;margin:9mm}body{margin:0}.print-actions{display:none}tr{break-inside:avoid}h2{break-after:avoid}}
+  </style></head><body>
+    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Recibo de cuota - ${escapeHtml(roleLabel)}</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.contrato || "-")} | ${escapeHtml(item.campo || "-")} | Vencimiento: ${fieldReportDate(item.vencimiento)}</p></div></header>
+    <section class="summary">
+      <div class="box"><span>Total cuota</span><strong>${moneyValue(totals.totalCuota)}</strong></div>
+      <div class="box"><span>${escapeHtml(commissionLabel)}</span><strong>${moneyValue(totals.comision)}</strong></div>
+      <div class="box main"><span>Neto de este recibo</span><strong>${moneyValue(totals.neto)}</strong></div>
+      <div class="box main"><span>Saldo</span><strong>${moneyValue(balance)}</strong></div>
+    </section>
+    <div class="grid">
+      <span>Contrato</span><strong>${escapeHtml(item.contrato || "-")}</strong>
+      <span>Campo</span><strong>${escapeHtml(item.campo || "-")}</strong>
+      <span>Arrendador</span><strong>${escapeHtml(item.cliente || "-")}</strong>
+      <span>Arrendatario</span><strong>${escapeHtml(item.arrendatario || "-")}</strong>
+      <span>Periodo</span><strong>${fieldReportDate(item.periodoDesde)} a ${fieldReportDate(item.periodoHasta)}</strong>
+      <span>Fecha calculo</span><strong>${fieldReportDate(item.fecha)}</strong>
+    </div>
+    <h2>Detalle correspondiente al ${escapeHtml(roleLabel.toLowerCase())}</h2>
+    <table><thead><tr><th>Parte</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision</th><th>Criterio</th><th>Neto</th></tr></thead><tbody>${partyRows}<tr class="total"><td colspan="3">Total</td><td class="amount">${moneyValue(totals.facturado)}</td><td class="amount">${moneyValue(totals.efectivo)}</td><td class="amount">${moneyValue(totals.totalCuota)}</td><td class="amount">${moneyValue(totals.comision)}</td><td></td><td class="amount">${moneyValue(totals.neto)}</td></tr></tbody></table>
+    <h2>Pagos, descuentos o comisiones imputadas</h2>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Aplicacion</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="6">Pagos registrados</td><td class="amount">${moneyValue(paymentTotals.pagos)}</td></tr><tr class="total"><td colspan="6">Comisiones / descuentos registrados</td><td class="amount">${moneyValue(paymentTotals.comision)}</td></tr><tr class="total"><td colspan="6">Total aplicado</td><td class="amount">${moneyValue(paymentTotals.total)}</td></tr><tr class="total"><td colspan="6">Saldo de la parte</td><td class="amount">${moneyValue(balance)}</td></tr></tbody></table>
+    ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
+    <div class="print-actions"><button onclick="window.print()">Imprimir / guardar PDF</button></div>
+  </body></html>`);
+  popup.document.close();
+}
+
+function printCurrentFieldLeaseReceipt(role = "ARRENDADOR") {
+  try {
+    updateFieldLeasePreview();
+    const payload = fieldLeaseCurrentInput();
+    const missingRule = fieldLeaseMissingRuleMessage(payload);
+    if (missingRule) {
+      setFieldLeaseMessage(missingRule, "error");
+      return;
+    }
+    setFieldLeaseMessage("");
+    printFieldLeaseReceipt(payload, role);
+  } catch (error) {
+    setFieldLeaseMessage(error.message || "No se pudo generar el recibo de la cuota.", "error");
   }
 }
 
@@ -8046,9 +8223,13 @@ async function init() {
   });
   $("#field-lease-form").addEventListener("submit", saveFieldLease);
   $("#field-lease-clear").addEventListener("click", resetFieldLeaseForm);
-  $("#field-lease-print").addEventListener("click", printCurrentFieldLeaseReport);
+  $("#field-lease-print-general")?.addEventListener("click", () => printCurrentFieldLeaseReport("GENERAL"));
+  $("#field-lease-receipt-landlord")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDADOR"));
+  $("#field-lease-receipt-tenant")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDATARIO"));
   $("#field-quote-add").addEventListener("click", addFieldQuoteRow);
   $("#field-payment-add").addEventListener("click", addFieldLeasePaymentRow);
+  $("#field-payment-commission-add")?.addEventListener("change", () => syncFieldPaymentCommissionShortcut("ADD"));
+  $("#field-payment-commission-deduct")?.addEventListener("change", () => syncFieldPaymentCommissionShortcut("DEDUCT"));
   $("#field-quote-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-field-quote-remove]");
     if (!button) return;
@@ -8077,6 +8258,7 @@ async function init() {
   $("#field-lease-body").addEventListener("click", (event) => {
     const openButton = event.target.closest("[data-field-lease-open]");
     const printButton = event.target.closest("[data-field-lease-print]");
+    const receiptButton = event.target.closest("[data-field-lease-receipt]");
     const deleteButton = event.target.closest("[data-field-lease-delete]");
     if (openButton) {
       const item = (state.fieldLeases || []).find((row) => row.id === openButton.dataset.fieldLeaseOpen);
@@ -8084,7 +8266,11 @@ async function init() {
     }
     if (printButton) {
       const item = (state.fieldLeases || []).find((row) => row.id === printButton.dataset.fieldLeasePrint);
-      if (item) printFieldLeaseReport(item);
+      if (item) printFieldLeaseReport(item, printButton.dataset.fieldLeaseAudience || "INTERNO");
+    }
+    if (receiptButton) {
+      const item = (state.fieldLeases || []).find((row) => row.id === receiptButton.dataset.fieldLeaseReceipt);
+      if (item) printFieldLeaseReceipt(item, receiptButton.dataset.fieldLeaseReceiptRole || "ARRENDADOR");
     }
     if (deleteButton) deleteFieldLease(deleteButton.dataset.fieldLeaseDelete);
   });

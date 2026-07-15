@@ -812,6 +812,8 @@
                     <option value="FACTURA_APARTE">Factura aparte</option>
                   </select>
                 </label>
+                <label class="inline-check"><input id="field-payment-commission-add" type="checkbox"> El arrendatario paga/suma la comision</label>
+                <label class="inline-check"><input id="field-payment-commission-deduct" type="checkbox"> Descontar comision al arrendador</label>
                 <label>Estado comision / registro
                   <select id="field-payment-status">
                     <option value="PENDIENTE">Pendiente</option>
@@ -844,7 +846,9 @@
               </div>
             </div>
             <div class="form-actions">
-              <button type="button" class="ghost-button" id="field-lease-print">Ver / imprimir calculo</button>
+              <button type="button" class="ghost-button" id="field-lease-print-general">Reporte de cuota</button>
+              <button type="button" class="ghost-button" id="field-lease-receipt-landlord">Recibo arrendador</button>
+              <button type="button" class="ghost-button" id="field-lease-receipt-tenant">Recibo arrendatario</button>
               <button type="submit" class="primary-button">Guardar calculo</button>
             </div>
             <p class="form-message" id="field-lease-message"></p>
@@ -2424,7 +2428,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260715-recibo-importe-original-v29"></script>
+    <script src="/app.js?v=20260715-campos-recibos-partes-v31"></script>
   </body>
 </html>
 
