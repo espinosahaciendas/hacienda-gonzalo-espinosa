@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260716-campos-pagos-recibos-partes-v45";
+const APP_BUILD = "20260716-campos-recibos-facturado-efectivo-v46";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2672,19 +2672,34 @@ function fieldLeaseQuickPaymentPresets(calc = fieldLeaseCurrentInput()) {
     const baseRef = name;
     const partyKey = fieldLeasePartyRowKey(row);
     const presets = [];
-    if (Number(row.totalCuota || 0)) {
+    if (Number(row.facturado || 0)) {
       presets.push({
-        id: `CUOTA-${partyKey || index}`,
+        id: `FACTURADO-${partyKey || index}`,
         partyKey,
-        concepto: "PAGO_CUOTA",
+        concepto: "PAGO_FACTURADO",
         parte: role,
         aplicacionComision: "NO_APLICA",
         estado: "PAGADA",
-        medio: "",
+        medio: "Transferencia",
         referencia: baseRef,
-        importe: Number(row.totalCuota || 0),
-        etiqueta: `Cuota - ${name}`,
-        detalle: role === "ARRENDATARIO" ? "Pago del arrendatario" : "Pago al arrendador"
+        importe: Number(row.facturado || 0),
+        etiqueta: `Facturado / contrato - ${name}`,
+        detalle: role === "ARRENDATARIO" ? "Transferencia del arrendatario por contrato" : "Transferencia al arrendador por contrato"
+      });
+    }
+    if (Number(row.efectivo || 0)) {
+      presets.push({
+        id: `EFECTIVO-${partyKey || index}`,
+        partyKey,
+        concepto: "PAGO_EFECTIVO",
+        parte: role,
+        aplicacionComision: "NO_APLICA",
+        estado: "PAGADA",
+        medio: "Efectivo",
+        referencia: baseRef,
+        importe: Number(row.efectivo || 0),
+        etiqueta: `Efectivo - ${name}`,
+        detalle: role === "ARRENDATARIO" ? "Efectivo entregado por el arrendatario" : "Efectivo a pagar al arrendador"
       });
     }
     if (Number(row.comision || 0)) {
@@ -2698,8 +2713,8 @@ function fieldLeaseQuickPaymentPresets(calc = fieldLeaseCurrentInput()) {
         medio: role === "ARRENDADOR" ? "Descuento" : "Comision",
         referencia: baseRef,
         importe: Number(row.comision || 0),
-        etiqueta: role === "ARRENDADOR" ? `Comision descontada - ${name}` : `Comision cobrada - ${name}`,
-        detalle: result.criterio
+        etiqueta: role === "ARRENDADOR" ? `Comision descontada del efectivo - ${name}` : `Comision cobrada - ${name}`,
+        detalle: role === "ARRENDADOR" ? "Puede descontarse del efectivo del arrendador" : result.criterio
       });
     }
     return presets;
@@ -3274,10 +3289,13 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
   const paymentTotals = payments.reduce((acc, payment) => {
     const amount = parseMoneyInput(payment.importe || 0);
     acc.total += amount;
+    const concept = String(payment.concepto || "").toUpperCase();
     if (isFieldLeaseCommissionPayment(payment)) acc.comision += amount;
+    else if (concept === "PAGO_FACTURADO") acc.facturado += amount;
+    else if (concept === "PAGO_EFECTIVO") acc.efectivo += amount;
     else acc.pagos += amount;
     return acc;
-  }, { pagos: 0, comision: 0, total: 0 });
+  }, { pagos: 0, facturado: 0, efectivo: 0, comision: 0, total: 0 });
   const balance = totals.neto - paymentTotals.total;
   const partyRows = rows.length
     ? rows.map((row) => {
@@ -3322,9 +3340,11 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
   </style></head><body>
     <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Recibo de cuota - ${escapeHtml(roleLabel)}</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.contrato || "-")} | ${escapeHtml(item.campo || "-")} | Vencimiento: ${fieldReportDate(item.vencimiento)}</p></div></header>
     <section class="summary">
-      <div class="box"><span>Total cuota</span><strong>${moneyValue(totals.totalCuota)}</strong></div>
+      <div class="box"><span>Facturado / contrato</span><strong>${moneyValue(totals.facturado)}</strong></div>
+      <div class="box"><span>Efectivo</span><strong>${moneyValue(totals.efectivo)}</strong></div>
       <div class="box"><span>${escapeHtml(commissionLabel)}</span><strong>${moneyValue(totals.comision)}</strong></div>
       <div class="box main"><span>Neto de este recibo</span><strong>${moneyValue(totals.neto)}</strong></div>
+      <div class="box"><span>Total cuota</span><strong>${moneyValue(totals.totalCuota)}</strong></div>
       <div class="box main"><span>Saldo</span><strong>${moneyValue(balance)}</strong></div>
     </section>
     <div class="grid">
@@ -3340,7 +3360,7 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
     <h2>Detalle correspondiente al ${escapeHtml(roleLabel.toLowerCase())}</h2>
     <table><thead><tr><th>Parte</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision</th><th>Criterio</th><th>Neto</th></tr></thead><tbody>${partyRows}<tr class="total"><td colspan="3">Total</td><td class="amount">${moneyValue(totals.facturado)}</td><td class="amount">${moneyValue(totals.efectivo)}</td><td class="amount">${moneyValue(totals.totalCuota)}</td><td class="amount">${moneyValue(totals.comision)}</td><td></td><td class="amount">${moneyValue(totals.neto)}</td></tr></tbody></table>
     <h2>Pagos, descuentos o comisiones imputadas</h2>
-    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="6">Pagos registrados</td><td class="amount">${moneyValue(paymentTotals.pagos)}</td></tr><tr class="total"><td colspan="6">Comisiones / descuentos registrados</td><td class="amount">${moneyValue(paymentTotals.comision)}</td></tr><tr class="total"><td colspan="6">Total aplicado</td><td class="amount">${moneyValue(paymentTotals.total)}</td></tr><tr class="total"><td colspan="6">Saldo de la parte</td><td class="amount">${moneyValue(balance)}</td></tr></tbody></table>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="6">Pagos por contrato / facturado</td><td class="amount">${moneyValue(paymentTotals.facturado)}</td></tr><tr class="total"><td colspan="6">Pagos en efectivo</td><td class="amount">${moneyValue(paymentTotals.efectivo)}</td></tr><tr class="total"><td colspan="6">Otros pagos registrados</td><td class="amount">${moneyValue(paymentTotals.pagos)}</td></tr><tr class="total"><td colspan="6">Comisiones / descuentos registrados</td><td class="amount">${moneyValue(paymentTotals.comision)}</td></tr><tr class="total"><td colspan="6">Total aplicado</td><td class="amount">${moneyValue(paymentTotals.total)}</td></tr><tr class="total"><td colspan="6">Saldo de la parte</td><td class="amount">${moneyValue(balance)}</td></tr></tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
     <div class="print-actions"><button onclick="window.print()">Imprimir / guardar PDF</button></div>
   </body></html>`);
