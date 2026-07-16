@@ -428,8 +428,8 @@
               <label>Arrendatario<input id="field-contract-tenant"></label>
               <label>Campo / establecimiento<input id="field-contract-farm"></label>
               <label>Hectareas totales<input id="field-contract-hectares" inputmode="decimal"></label>
-              <label>Inicio contrato<input id="field-contract-start" type="date"></label>
-              <label>Fin contrato<input id="field-contract-end" type="date"></label>
+              <label>Vigencia contrato desde<input id="field-contract-start" type="date"></label>
+              <label>Vigencia contrato hasta<input id="field-contract-end" type="date"></label>
               <label>Frecuencia base
                 <select id="field-contract-frequency">
                   <option value="MENSUAL">Mensual</option>
@@ -676,8 +676,8 @@
               <label>Cliente / arrendador<input id="field-lease-client" autocomplete="off"></label>
               <label>Campo / establecimiento<input id="field-lease-farm" autocomplete="off"></label>
               <label>Fecha de calculo<input id="field-lease-date" type="date"></label>
-              <label>Periodo desde<input id="field-lease-from" type="date"></label>
-              <label>Periodo hasta<input id="field-lease-to" type="date"></label>
+              <label>Periodo de cuota desde<input id="field-lease-from" type="date"></label>
+              <label>Periodo de cuota hasta<input id="field-lease-to" type="date"></label>
               <label>Vencimiento cuota<input id="field-lease-due-date" type="date"></label>
               <label>Proximo vencimiento informativo de la cuota<input id="field-lease-next-due" type="date"></label>
               <label>Cuota manual a calcular
@@ -702,7 +702,7 @@
                   <option value="USD">Dolares</option>
                 </select>
               </label>
-              <label>Promedio / cotizacion aplicada<input id="field-lease-price" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+              <label>Cotizacion base general, si aplica<input id="field-lease-price" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
               <label>Tipo de cambio<input id="field-lease-exchange" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
             </div>
             <div class="advanced-subpanel">
@@ -760,7 +760,7 @@
             </div>
             <label>Observaciones<textarea id="field-lease-notes" rows="3" placeholder="Condiciones, ajustes, cotizacion usada, observaciones del contrato."></textarea></label>
             <div class="cc-grid">
-              <div><span>Promedio aplicado</span><strong id="field-lease-average">$ 0,00</strong></div>
+              <div><span>Cotizacion base / productos</span><strong id="field-lease-average">$ 0,00</strong></div>
               <div><span>Facturado / contrato</span><strong id="field-lease-billed-total">$ 0,00</strong></div>
               <div><span>Efectivo</span><strong id="field-lease-cash-total">$ 0,00</strong></div>
               <div><span>Total cuota</span><strong id="field-lease-total">$ 0,00</strong></div>
@@ -798,6 +798,24 @@
                   <span>Pagado: <strong id="field-payment-paid">$ 0,00</strong></span>
                   <span>Comision/descuento: <strong id="field-payment-commission">$ 0,00</strong></span>
                   <span>Saldo: <strong id="field-payment-balance">$ 0,00</strong></span>
+                </div>
+              </div>
+              <div class="advanced-subpanel soft-panel">
+                <div class="panel-head">
+                  <div>
+                    <h4>Registrar por tilde</h4>
+                    <p class="subtle">Seleccione los items calculados de esta cuota y registre pagos, descuentos o comisiones sin cargarlos uno por uno.</p>
+                  </div>
+                  <span class="subtle" id="field-payment-preset-summary">Sin items disponibles</span>
+                </div>
+                <div class="table-wrap compact-table">
+                  <table>
+                    <thead><tr><th></th><th>Item</th><th>Parte</th><th>Detalle</th><th>Importe</th></tr></thead>
+                    <tbody id="field-payment-preset-body"></tbody>
+                  </table>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" id="field-payment-preset-add">Registrar seleccionados</button>
                 </div>
               </div>
               <div class="advanced-subpanel soft-panel">
@@ -866,7 +884,7 @@
               </div>
               <div class="table-wrap compact-table">
                 <table>
-                  <thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Aplicacion</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th><th>Accion</th></tr></thead>
+                  <thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th><th>Accion</th></tr></thead>
                   <tbody id="field-payment-body"></tbody>
                 </table>
               </div>
@@ -2454,7 +2472,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260716-campos-recibos-partes-v42"></script>
+    <script src="/app.js?v=20260716-campos-periodo-cotizaciones-v44"></script>
   </body>
 </html>
 
