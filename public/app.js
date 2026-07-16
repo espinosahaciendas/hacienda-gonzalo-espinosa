@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260716-campos-periodo-cotizaciones-v44";
+const APP_BUILD = "20260716-campos-pagos-recibos-partes-v45";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2440,9 +2440,17 @@ function renderFieldLeasePartyDistributionRows(rows = []) {
         <td class="amount">${moneyValue(row.efectivo || 0)}</td>
         <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
         <td class="amount">${moneyValue(row.comision || 0)}</td>
-        <td class="amount">${moneyValue(row.totalConComision || row.totalCuota || 0)}</td>
+        <td class="amount">${moneyValue(row.totalConComision || row.totalCuota || 0)}<br><button type="button" class="small-button" data-field-party-receipt="${escapeHtml(fieldLeasePartyRowKey(row))}">Recibo</button></td>
       </tr>`).join("")
     : `<tr><td colspan="8">Sin distribucion especial. Se usaran las partes principales del contrato.</td></tr>`;
+}
+
+function fieldLeasePartyRowKey(row = {}) {
+  return [
+    String(row.tipo || "").toUpperCase(),
+    String(row.nombre || "").trim().toUpperCase(),
+    String(row.cuit || "").replace(/[^\d]/g, "")
+  ].join("|");
 }
 
 function fieldLeaseMiniLedgerNet(row = {}) {
@@ -2622,6 +2630,15 @@ function fieldLeasePaymentAppliesToParty(item, party) {
   return itemParty === "GENERAL" || itemParty === "AMBAS" || itemParty === party;
 }
 
+function fieldLeasePaymentMatchesPartyRow(payment = {}, row = {}) {
+  if (!fieldLeasePaymentAppliesToParty(payment, String(row.tipo || "").toUpperCase())) return false;
+  const rowKey = fieldLeasePartyRowKey(row);
+  if (payment.partyKey && String(payment.partyKey) === rowKey) return true;
+  const reference = String(payment.referencia || "").toUpperCase();
+  const name = String(row.nombre || "").trim().toUpperCase();
+  return !!name && reference.includes(name);
+}
+
 function fieldLeasePartySummary(rows, baseTotal, party) {
   return (rows || []).reduce((acc, item) => {
     if (!fieldLeasePaymentAppliesToParty(item, party)) return acc;
@@ -2653,10 +2670,12 @@ function fieldLeaseQuickPaymentPresets(calc = fieldLeaseCurrentInput()) {
     const name = row.nombre || fieldLeasePaymentPartyLabel(role);
     const result = fieldLeaseMiniLedgerNet(row);
     const baseRef = name;
+    const partyKey = fieldLeasePartyRowKey(row);
     const presets = [];
     if (Number(row.totalCuota || 0)) {
       presets.push({
-        id: `CUOTA-${index}`,
+        id: `CUOTA-${partyKey || index}`,
+        partyKey,
         concepto: "PAGO_CUOTA",
         parte: role,
         aplicacionComision: "NO_APLICA",
@@ -2670,7 +2689,8 @@ function fieldLeaseQuickPaymentPresets(calc = fieldLeaseCurrentInput()) {
     }
     if (Number(row.comision || 0)) {
       presets.push({
-        id: `COMISION-${index}`,
+        id: `COMISION-${partyKey || index}`,
+        partyKey,
         concepto: role === "ARRENDADOR" ? "COMISION_DESCONTADA" : "COMISION_COBRADA",
         parte: role,
         aplicacionComision: role === "ARRENDADOR" ? "DESCUENTA_COBRADOR" : "SUMA_PAGADOR",
@@ -2686,12 +2706,31 @@ function fieldLeaseQuickPaymentPresets(calc = fieldLeaseCurrentInput()) {
   });
 }
 
+function fieldLeasePaymentEquivalentToPreset(payment = {}, preset = {}) {
+  if (payment.sourcePresetId && String(payment.sourcePresetId) === String(preset.id)) return true;
+  const sameConcept = String(payment.concepto || "").toUpperCase() === String(preset.concepto || "").toUpperCase();
+  const sameParty = String(payment.parte || "").toUpperCase() === String(preset.parte || "").toUpperCase();
+  const sameApplication = String(payment.aplicacionComision || "NO_APLICA").toUpperCase() === String(preset.aplicacionComision || "NO_APLICA").toUpperCase();
+  const sameAmount = Math.abs(parseMoneyInput(payment.importe || 0) - parseMoneyInput(preset.importe || 0)) < 0.01;
+  const samePartyKey = preset.partyKey && payment.partyKey && String(payment.partyKey) === String(preset.partyKey);
+  const referenceMatch = preset.referencia && String(payment.referencia || "").toUpperCase().includes(String(preset.referencia).toUpperCase());
+  const directTenantMatch = String(preset.parte || "").toUpperCase() === "ARRENDATARIO" && !preset.partyKey;
+  const looseTenantMatch = String(preset.parte || "").toUpperCase() === "ARRENDATARIO" && !payment.partyKey;
+  if (sameConcept && sameParty && sameApplication && sameAmount && (directTenantMatch || looseTenantMatch)) return true;
+  return sameConcept && sameParty && sameApplication && sameAmount && (samePartyKey || referenceMatch);
+}
+
+function filterRegisteredFieldLeasePresets(presets = []) {
+  const payments = state.fieldLeasePaymentRows || [];
+  return presets.filter((preset) => !payments.some((payment) => fieldLeasePaymentEquivalentToPreset(payment, preset)));
+}
+
 function renderFieldLeasePaymentPresetRows(calc = fieldLeaseCurrentInput()) {
   const body = $("#field-payment-preset-body");
   if (!body) return;
   let presets = [];
   try {
-    presets = fieldLeaseQuickPaymentPresets(calc);
+    presets = filterRegisteredFieldLeasePresets(fieldLeaseQuickPaymentPresets(calc));
   } catch (error) {
     presets = [];
   }
@@ -2710,10 +2749,32 @@ function renderFieldLeasePaymentPresetRows(calc = fieldLeaseCurrentInput()) {
         <td class="amount">${moneyValue(item.importe || 0)}</td>
       </tr>`).join("")
     : `<tr><td colspan="5">Complete o actualice el calculo para ver los items de pago disponibles.</td></tr>`;
+  updateSelectedFieldLeasePresetPaymentAmount();
+}
+
+function selectedFieldLeasePresetPayments() {
+  return Array.from(document.querySelectorAll("[data-field-payment-preset]:checked"))
+    .map((input) => state.fieldLeasePaymentPresetRows[Number(input.dataset.fieldPaymentPreset)])
+    .filter(Boolean);
+}
+
+function updateSelectedFieldLeasePresetPaymentAmount() {
+  const selected = selectedFieldLeasePresetPayments();
+  const total = selected.reduce((sum, preset) => sum + parseMoneyInput(preset.importe || 0), 0);
+  if ($("#field-payment-amount")) {
+    setMoneyInput("#field-payment-amount", total);
+  }
+  if ($("#field-payment-preset-summary")) {
+    $("#field-payment-preset-summary").textContent = selected.length
+      ? `${selected.length} item/s seleccionados - ${moneyValue(total)}`
+      : (state.fieldLeasePaymentPresetRows || []).length
+        ? `${state.fieldLeasePaymentPresetRows.length} item/s disponibles para registrar`
+        : "Sin items disponibles";
+  }
 }
 
 function addSelectedFieldLeasePresetPayments() {
-  const selected = Array.from(document.querySelectorAll("[data-field-payment-preset]:checked"));
+  const selected = selectedFieldLeasePresetPayments();
   if (!selected.length) {
     setFieldLeaseMessage("Tilde al menos un item para registrar.", "error");
     return;
@@ -2721,12 +2782,12 @@ function addSelectedFieldLeasePresetPayments() {
   const date = $("#field-payment-date")?.value || new Date().toISOString().slice(0, 10);
   const defaultMethod = $("#field-payment-method")?.value || "Transferencia";
   const detail = String($("#field-payment-reference")?.value || "").trim();
-  selected.forEach((input) => {
-    const preset = state.fieldLeasePaymentPresetRows[Number(input.dataset.fieldPaymentPreset)];
-    if (!preset) return;
+  selected.forEach((preset) => {
     const isCommission = isFieldLeaseCommissionPayment(preset);
     state.fieldLeasePaymentRows.push({
       id: `${isCommission ? "COMISION" : "PAGO"}-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      sourcePresetId: preset.id,
+      partyKey: preset.partyKey || "",
       fecha: date,
       concepto: preset.concepto,
       parte: preset.parte,
@@ -2737,6 +2798,7 @@ function addSelectedFieldLeasePresetPayments() {
       importe: preset.importe
     });
   });
+  if ($("#field-payment-amount")) $("#field-payment-amount").value = "";
   renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
   renderFieldLeasePaymentPresetRows(fieldLeaseCurrentInput());
   setFieldLeaseMessage("Items seleccionados registrados. Revise el detalle y guarde el calculo.", "ok");
@@ -2785,7 +2847,7 @@ function addFieldLeasePaymentRow() {
   });
   $("#field-payment-reference").value = "";
   $("#field-payment-amount").value = "";
-  renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
+  updateFieldLeasePreview();
   setFieldLeaseMessage("");
 }
 
@@ -2820,7 +2882,7 @@ function addFieldLeaseCommissionRow() {
   if ($("#field-payment-commission-amount")) $("#field-payment-commission-amount").value = "";
   if ($("#field-payment-commission-mode")) $("#field-payment-commission-mode").value = "NO_APLICA";
   if ($("#field-payment-commission-status")) $("#field-payment-commission-status").value = "PENDIENTE";
-  renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
+  updateFieldLeasePreview();
   setFieldLeaseMessage("");
 }
 
@@ -3156,7 +3218,7 @@ function printCurrentFieldLeaseReport(audience = "INTERNO") {
   }
 }
 
-function fieldLeaseReceiptRowsForRole(item = {}, role = "ARRENDADOR") {
+function fieldLeaseReceiptRowsForRole(item = {}, role = "ARRENDADOR", partyKey = "") {
   const billedTotal = Number(item.facturadoTotal || 0);
   const cashTotal = Number(item.efectivoTotal || 0);
   const commissionTotal = Number(item.comisionImporte || 0);
@@ -3168,14 +3230,29 @@ function fieldLeaseReceiptRowsForRole(item = {}, role = "ARRENDADOR") {
         cashTotal,
         commissionTotal
       );
-  return distributionRows.filter((row) => String(row.tipo || "").toUpperCase() === role);
+  return distributionRows.filter((row) => {
+    if (String(row.tipo || "").toUpperCase() !== role) return false;
+    return partyKey ? fieldLeasePartyRowKey(row) === partyKey : true;
+  });
 }
 
-function fieldLeaseReceiptPaymentRowsForRole(item = {}, role = "ARRENDADOR") {
-  return (Array.isArray(item.pagos) ? item.pagos : []).filter((payment) => fieldLeasePaymentAppliesToParty(payment, role));
+function fieldLeaseReceiptPaymentRowsForRole(item = {}, role = "ARRENDADOR", rows = [], specificParty = false) {
+  return (Array.isArray(item.pagos) ? item.pagos : []).filter((payment) => {
+    if (!specificParty) return fieldLeasePaymentAppliesToParty(payment, role);
+    if (!rows.length) return false;
+    if (rows.some((row) => payment.partyKey && String(payment.partyKey) === fieldLeasePartyRowKey(row))) return true;
+    if (String(role || "").toUpperCase() === "ARRENDADOR") {
+      return rows.some((row) => {
+        const reference = String(payment.referencia || "").toUpperCase();
+        const name = String(row.nombre || "").trim().toUpperCase();
+        return !!name && reference.includes(name);
+      });
+    }
+    return fieldLeasePaymentAppliesToParty(payment, role);
+  });
 }
 
-function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDADOR") {
+function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDADOR", partyKey = "") {
   const receiptRole = String(role || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR";
   const roleLabel = fieldContractPartyTypeLabel(receiptRole);
   const popup = window.open("", "_blank");
@@ -3183,8 +3260,8 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
     setFieldLeaseMessage("El navegador bloqueo la ventana del recibo. Habilite ventanas emergentes.", "error");
     return;
   }
-  const rows = fieldLeaseReceiptRowsForRole(item, receiptRole);
-  const payments = fieldLeaseReceiptPaymentRowsForRole(item, receiptRole);
+  const rows = fieldLeaseReceiptRowsForRole(item, receiptRole, partyKey);
+  const payments = fieldLeaseReceiptPaymentRowsForRole(item, receiptRole, rows, !!partyKey);
   const totals = rows.reduce((acc, row) => {
     const result = fieldLeaseMiniLedgerNet(row);
     acc.facturado += Number(row.facturado || 0);
@@ -3283,6 +3360,27 @@ function printCurrentFieldLeaseReceipt(role = "ARRENDADOR") {
     printFieldLeaseReceipt(payload, role);
   } catch (error) {
     setFieldLeaseMessage(error.message || "No se pudo generar el recibo de la cuota.", "error");
+  }
+}
+
+function printCurrentFieldLeasePartyReceipt(partyKey = "") {
+  try {
+    updateFieldLeasePreview();
+    const payload = fieldLeaseCurrentInput();
+    const row = (payload.distribucionPartes || []).find((item) => fieldLeasePartyRowKey(item) === partyKey);
+    if (!row) {
+      setFieldLeaseMessage("No se encontro la parte seleccionada para generar el recibo.", "error");
+      return;
+    }
+    const missingRule = fieldLeaseMissingRuleMessage(payload);
+    if (missingRule) {
+      setFieldLeaseMessage(missingRule, "error");
+      return;
+    }
+    setFieldLeaseMessage("");
+    printFieldLeaseReceipt(payload, String(row.tipo || "ARRENDADOR").toUpperCase(), partyKey);
+  } catch (error) {
+    setFieldLeaseMessage(error.message || "No se pudo generar el recibo de la parte seleccionada.", "error");
   }
 }
 
@@ -8733,6 +8831,9 @@ async function init() {
   $("#field-lease-receipt-tenant")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDATARIO"));
   $("#field-quote-add").addEventListener("click", addFieldQuoteRow);
   $("#field-payment-preset-add")?.addEventListener("click", addSelectedFieldLeasePresetPayments);
+  $("#field-payment-preset-body")?.addEventListener("change", (event) => {
+    if (event.target.closest("[data-field-payment-preset]")) updateSelectedFieldLeasePresetPaymentAmount();
+  });
   $("#field-payment-add").addEventListener("click", addFieldLeasePaymentRow);
   $("#field-payment-commission-register")?.addEventListener("click", addFieldLeaseCommissionRow);
   $("#field-payment-commission-mode")?.addEventListener("change", syncFieldPaymentCommissionMode);
@@ -8750,7 +8851,12 @@ async function init() {
     const button = event.target.closest("[data-field-payment-remove]");
     if (!button) return;
     state.fieldLeasePaymentRows = state.fieldLeasePaymentRows.filter((item) => String(item.id) !== String(button.dataset.fieldPaymentRemove));
-    renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
+    updateFieldLeasePreview();
+  });
+  $("#field-lease-party-distribution-body")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-party-receipt]");
+    if (!button) return;
+    printCurrentFieldLeasePartyReceipt(button.dataset.fieldPartyReceipt || "");
   });
   $("#field-line-quote-body")?.addEventListener("input", (event) => {
     if (!event.target.closest("[data-field-line-quote]")) return;
