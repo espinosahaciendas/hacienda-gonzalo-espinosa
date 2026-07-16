@@ -31,6 +31,7 @@
   fieldContractPartyRows: [],
   fieldContractInstallmentRows: [],
   fieldContractLineRows: [],
+  editingFieldContractLineId: "",
   activeFieldContract: null,
   fieldDataLoaded: false,
   usuario: null,
@@ -42,7 +43,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260715-campos-partes-reporte-v38";
+const APP_BUILD = "20260716-hacienda-recibo-entregas-cuenta-v41";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1262,12 +1263,40 @@ function renderFieldContractLineRows() {
         <td>${plainNumberValue(row.tasa || 0)}</td>
         <td class="amount">${row.cotizacion ? moneyValue(row.cotizacion) : "-"}</td>
         <td>${escapeHtml(row.observaciones || "-")}</td>
-        <td><button type="button" class="small-button danger-button" data-field-contract-line-remove="${escapeHtml(row.id)}">Quitar</button></td>
+        <td><button type="button" class="small-button" data-field-contract-line-edit="${escapeHtml(row.id)}">Modificar</button> <button type="button" class="small-button danger-button" data-field-contract-line-remove="${escapeHtml(row.id)}">Quitar</button></td>
       </tr>`).join("")
     : `<tr><td colspan="8">Sin lineas mixtas. Se usaran las reglas simples de facturado/efectivo.</td></tr>`;
   if ($("#field-contract-line-summary")) {
     $("#field-contract-line-summary").textContent = rows.length ? `${rows.length} linea/s mixta/s.` : "Sin lineas mixtas.";
   }
+  if ($("#field-contract-line-add")) {
+    $("#field-contract-line-add").textContent = state.editingFieldContractLineId ? "Guardar cambio" : "Agregar linea";
+  }
+}
+
+function clearFieldContractLineInputs() {
+  if ($("#field-contract-line-label")) $("#field-contract-line-label").value = "";
+  if ($("#field-contract-line-hectares")) $("#field-contract-line-hectares").value = "";
+  if ($("#field-contract-line-rate")) $("#field-contract-line-rate").value = "";
+  if ($("#field-contract-line-price")) $("#field-contract-line-price").value = "";
+  if ($("#field-contract-line-notes")) $("#field-contract-line-notes").value = "";
+  state.editingFieldContractLineId = "";
+  if ($("#field-contract-line-add")) $("#field-contract-line-add").textContent = "Agregar linea";
+}
+
+function editFieldContractLineRow(lineId) {
+  const row = (state.fieldContractLineRows || []).find((item) => String(item.id) === String(lineId));
+  if (!row) return;
+  state.editingFieldContractLineId = row.id;
+  if ($("#field-contract-line-applies")) $("#field-contract-line-applies").value = row.aplicaA || "FACTURADO";
+  if ($("#field-contract-line-label")) $("#field-contract-line-label").value = row.detalle || "";
+  if ($("#field-contract-line-hectares")) $("#field-contract-line-hectares").value = plainNumberValue(row.hectareas || 0);
+  if ($("#field-contract-line-base")) $("#field-contract-line-base").value = row.base || "KG_CARNE";
+  if ($("#field-contract-line-rate")) $("#field-contract-line-rate").value = plainNumberValue(row.tasa || 0);
+  if ($("#field-contract-line-price")) $("#field-contract-line-price").value = row.cotizacion ? moneyValue(row.cotizacion) : "";
+  if ($("#field-contract-line-notes")) $("#field-contract-line-notes").value = row.observaciones || "";
+  renderFieldContractLineRows();
+  setFieldContractMessage("Linea cargada para modificar. Cambie los datos y presione Guardar cambio.", "ok");
 }
 
 function addFieldContractLineRow() {
@@ -1283,7 +1312,8 @@ function addFieldContractLineRow() {
     setFieldContractMessage("Cargue kg/ha o importe base para agregar la linea mixta.", "error");
     return;
   }
-  state.fieldContractLineRows.push(normalizeFieldContractLine({
+  const nextLine = normalizeFieldContractLine({
+    id: state.editingFieldContractLineId || "",
     aplicaA: $("#field-contract-line-applies")?.value || "FACTURADO",
     detalle: detail || fieldContractBaseLabel(base),
     hectareas: hectares,
@@ -1291,16 +1321,18 @@ function addFieldContractLineRow() {
     tasa: rate,
     cotizacion: parseFieldDecimalInput($("#field-contract-line-price")?.value || 0),
     observaciones: $("#field-contract-line-notes")?.value || ""
-  }));
-  if ($("#field-contract-line-label")) $("#field-contract-line-label").value = "";
-  if ($("#field-contract-line-hectares")) $("#field-contract-line-hectares").value = "";
-  if ($("#field-contract-line-rate")) $("#field-contract-line-rate").value = "";
-  if ($("#field-contract-line-price")) $("#field-contract-line-price").value = "";
-  if ($("#field-contract-line-notes")) $("#field-contract-line-notes").value = "";
+  });
+  if (state.editingFieldContractLineId) {
+    state.fieldContractLineRows = (state.fieldContractLineRows || []).map((row) => String(row.id) === String(state.editingFieldContractLineId) ? nextLine : row);
+  } else {
+    state.fieldContractLineRows.push(nextLine);
+  }
+  const wasEditing = !!state.editingFieldContractLineId;
+  clearFieldContractLineInputs();
   renderFieldContractLineRows();
   syncFieldContractFormToActive();
   updateFieldLeasePreview();
-  setFieldContractMessage("Linea mixta agregada al contrato. Para conservarla, guarde el contrato.", "ok");
+  setFieldContractMessage(wasEditing ? "Linea mixta modificada. Para conservar el cambio, guarde el contrato." : "Linea mixta agregada al contrato. Para conservarla, guarde el contrato.", "ok");
 }
 
 function addFieldContractInstallmentRow() {
@@ -1607,6 +1639,7 @@ function fillFieldContractForm(item) {
   state.fieldContractPartyRows = Array.isArray(item.partes) ? item.partes.map(normalizeFieldContractParty) : [];
   renderFieldContractPartyRows();
   state.fieldContractLineRows = Array.isArray(item.lineas) ? item.lineas.map(normalizeFieldContractLine) : [];
+  clearFieldContractLineInputs();
   renderFieldContractLineRows();
   state.fieldContractInstallmentRows = Array.isArray(item.cuotas) ? item.cuotas.map(normalizeFieldContractInstallment) : [];
   renderFieldContractInstallmentRows();
@@ -1623,6 +1656,7 @@ function resetFieldContractForm() {
   state.fieldContractPartyRows = [];
   renderFieldContractPartyRows();
   state.fieldContractLineRows = [];
+  clearFieldContractLineInputs();
   renderFieldContractLineRows();
   state.fieldContractInstallmentRows = [];
   renderFieldContractInstallmentRows();
@@ -2895,16 +2929,22 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
   const partyNetRows = visibleDistributionRows.length
     ? visibleDistributionRows.map((row) => {
         const result = fieldLeaseMiniLedgerNet(row);
-        return `<tr${String(row.tipo || "").toUpperCase() === "ARRENDADOR" ? ' class="cash-row-soft"' : ""}>
+        const role = String(row.tipo || "").toUpperCase();
+        const roleShort = role === "ARRENDATARIO" ? "Arrendatario" : "Arrendador";
+        const cuitCompact = String(row.cuit || "-").replace(/[^\d]/g, "") || "-";
+        const criterionShort = Number(row.comision || 0)
+          ? (role === "ARRENDATARIO" ? "Suma com." : "Desc. com.")
+          : "-";
+        return `<tr>
           <td>${escapeHtml(row.nombre || "-")}</td>
-          <td>${escapeHtml(fieldContractPartyTypeLabel(row.tipo))}</td>
-          <td>${escapeHtml(row.cuit || "-")}</td>
+          <td>${escapeHtml(roleShort)}</td>
+          <td class="nowrap">${escapeHtml(cuitCompact)}</td>
           <td class="amount">${plainNumberValue(row.porcentaje || 0)}%</td>
           <td class="amount">${moneyValue(row.facturado || 0)}</td>
           <td class="amount">${moneyValue(row.efectivo || 0)}</td>
           <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
           <td class="amount">${moneyValue(row.comision || 0)}</td>
-          <td>${escapeHtml(result.criterio)}</td>
+          <td>${escapeHtml(criterionShort)}</td>
           <td class="amount">${moneyValue(result.neto)}</td>
         </tr>`;
       }).join("")
@@ -2920,6 +2960,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
     .grid{display:grid;grid-template-columns:155px 1fr 155px 1fr;border:1px solid #dbcbb8;margin-bottom:8px}
     .grid span,.grid strong{border-bottom:1px solid #dbcbb8;padding:4px;font-size:9.5px}.grid span{background:#f8f2ea;color:#7b5a32}.grid strong{font-size:10px}
     table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:5px}th,td{border:1px solid #dbcbb8;padding:4px;text-align:left;vertical-align:top}th{background:#f8f2ea}.amount{text-align:right;font-weight:700;white-space:nowrap}
+    .party-table{font-size:7.6px;table-layout:fixed}.party-table th,.party-table td{padding:2.5px}.party-table .party-name{width:22%}.party-table .party-role{width:8%}.party-table .party-cuit{width:9%}.party-table .party-percent{width:5%}.party-table .party-money{width:9.5%}.party-table .party-criterion{width:7%}.nowrap{white-space:nowrap}
     .total{background:#fff3e8;font-weight:700}.cash,.cash-row-soft{background:#fff8ed}.cash td,.cash-row-soft td{font-style:italic;font-weight:700}.note{border:1px solid #dbcbb8;padding:7px;margin-top:9px;font-size:9.5px;line-height:1.25}
     .print-actions{margin-top:14px}.print-actions button{padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}body{margin:0}.print-actions{display:none}h2{break-after:avoid}table{break-inside:auto}tr{break-inside:avoid}}
   </style></head><body>
@@ -2961,7 +3002,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
     ${quoteGroupsBlock}
     ${commissionBlock}
     <h2>${isInternalReport || isGeneralReport ? "Distribucion por partes de la cuota" : `Resumen correspondiente a ${escapeHtml(audienceLabel.toLowerCase())}`}</h2>
-    <table><thead><tr><th>Parte</th><th>Rol</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision</th><th>Criterio</th><th>Neto informado</th></tr></thead><tbody>
+    <table class="party-table"><thead><tr><th class="party-name">Parte</th><th class="party-role">Rol</th><th class="party-cuit">CUIT</th><th class="party-percent">%</th><th class="party-money">Fact.</th><th class="party-money">Efec.</th><th class="party-money">Total</th><th class="party-money">Com.</th><th class="party-criterion">Criterio</th><th class="party-money">Neto</th></tr></thead><tbody>
       ${partyNetRows}
     </tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
@@ -4864,11 +4905,52 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
     const pending = Math.abs(Number(item.saldoPendiente || 0));
     return applied + pending;
   };
+  const paymentsForDeliveryHistory = [...(state.cuenta?.pagos || [])];
+  if (payment.id && !paymentsForDeliveryHistory.some((row) => String(row.id || "") === String(payment.id || ""))) {
+    paymentsForDeliveryHistory.push(payment);
+  }
+  const imputationDeliveries = (item) => {
+    const movementId = String(item.movementId || "");
+    if (!movementId) return [];
+    return paymentsForDeliveryHistory
+      .filter((row) => !row.anulado)
+      .flatMap((row) => (row.imputaciones || [])
+        .filter((imputation) => String(imputation.movementId || "") === movementId)
+        .map((imputation) => ({
+          fecha: row.fecha || "",
+          recibo: row.id || "-",
+          medio: row.medio || "",
+          referencia: row.referencia || "",
+          importe: Number(imputation.importe || 0),
+          actual: String(row.id || "") === String(payment.id || "")
+        })))
+      .filter((row) => row.importe)
+      .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || String(a.recibo).localeCompare(String(b.recibo)));
+  };
+  const deliveryHistoryRows = (rows) => rows
+    .map((item) => {
+      const deliveries = imputationDeliveries(item);
+      const shouldShow = deliveries.length > 1 || Number(item.saldoPendiente || 0) > 0;
+      if (!shouldShow) return "";
+      const totalDelivered = deliveries.reduce((sum, row) => sum + Number(row.importe || 0), 0);
+      return `<tr class="history-title"><td colspan="5">${escapeHtml(item.comprobante || "-")} · ${escapeHtml(item.concepto || item.movementId || "-")}</td></tr>
+        ${deliveries.map((row) => `<tr${row.actual ? ' class="current-delivery"' : ""}>
+          <td>${escapeHtml(row.fecha || "-")}</td>
+          <td>${escapeHtml(row.recibo || "-")}</td>
+          <td>${escapeHtml([row.medio, row.referencia].filter(Boolean).join(" - ") || "-")}</td>
+          <td class="amount">${moneyValue(row.importe)}</td>
+          <td>${row.actual ? "Este recibo" : "Anterior"}</td>
+        </tr>`).join("")}
+        <tr class="history-total"><td colspan="3">Total entregado a cuenta</td><td class="amount">${moneyValue(totalDelivered)}</td><td>Saldo: ${moneyValue(item.saldoPendiente || 0)}</td></tr>`;
+    })
+    .filter(Boolean)
+    .join("");
   const imputationRows = (rows, emptyText) => rows.length
     ? rows.map((item) => `<tr><td>${escapeHtml(item.vencimiento || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td>${escapeHtml(item.concepto || item.movementId)}</td><td class="amount">${moneyValue(imputationOriginalAmount(item))}</td><td class="amount">${moneyValue(item.importe)}</td><td class="amount">${moneyValue(item.saldoPendiente)}</td></tr>`).join("")
     : `<tr><td colspan="6">${emptyText}</td></tr>`;
+  const paidDeliveryHistory = deliveryHistoryRows(paidImputations);
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(receiptTitle)}</title><style>
-    body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px} img{width:76px;height:76px;object-fit:contain;background:#173632;padding:6px} h1{font-size:18px;margin:0} h2{font-size:13px;margin-top:14px} p{margin:3px 0;font-size:11px} table{width:100%;border-collapse:collapse;font-size:10px} th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top} th{background:#edf3f1} .amount{text-align:right;font-weight:700;white-space:nowrap}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}.discount th{background:#f8ebe5}.discount-total{background:#fff3e8;font-weight:700}.net-total{background:#eaf2ff;font-weight:700} button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}button{display:none}body{margin:0}}
+    body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px} img{width:76px;height:76px;object-fit:contain;background:#173632;padding:6px} h1{font-size:18px;margin:0} h2{font-size:13px;margin-top:14px} p{margin:3px 0;font-size:11px} table{width:100%;border-collapse:collapse;font-size:10px} th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top} th{background:#edf3f1} .amount{text-align:right;font-weight:700;white-space:nowrap}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}.discount th{background:#f8ebe5}.discount-total{background:#fff3e8;font-weight:700}.net-total{background:#eaf2ff;font-weight:700}.history-title td{background:#edf3f1;font-weight:700}.history-total{background:#f8fbfa;font-weight:700}.current-delivery{background:#fff8ed} button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}button{display:none}body{margin:0}}
   </style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${payment.tipo === "COMPENSACION" ? "Comprobante de compensacion / aplicacion de saldo disponible" : payment.tipo === "PAGO" ? "Comprobante de pago" : "Comprobante de cobro"}</h1><p><strong>${escapeHtml(payment.id)}</strong></p><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p></div></header>
   ${payment.anulado ? `<p><strong>COMPROBANTE ANULADO</strong></p>` : ""}
@@ -4882,6 +4964,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   ${payment.tipo === "COMPENSACION" ? `<p><strong>Nota:</strong> La venta/liquidacion fue cobrada directamente por el cliente o aplicada por fuera. Este comprobante deja constancia de que esos gastos se pagan con plata disponible de esa venta; no representa un pago realizado por Gonzalo Espinosa ni plata adicional puesta por el cliente.</p>` : `<h2>Detalle de instrumentos</h2><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${instruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("")}</tbody></table>`}
   <h2>${payment.tipo === "COMPENSACION" ? "Liquidaciones / saldos aplicados" : payment.tipo === "PAGO" ? "Importes pagados / vencimientos cancelados" : "Importes cobrados / vencimientos cancelados"}</h2>
   <table><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe original</th><th>Importe aplicado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(paidImputations, "Sin vencimientos liquidados en este comprobante.")}</tbody></table>
+  ${paidDeliveryHistory ? `<h2>Entregas realizadas a cuenta</h2><table><thead><tr><th>Fecha</th><th>Recibo</th><th>Medio / referencia</th><th>Importe</th><th>Estado</th></tr></thead><tbody>${paidDeliveryHistory}</tbody></table>` : ""}
   <h2>Descuentos aplicados</h2>
   <table class="discount"><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe original</th><th>Importe descontado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(discountImputations, "Sin descuentos aplicados.")}<tr class="discount-total"><td colspan="4">Total descuentos / comisiones</td><td class="amount">${moneyValue(discountTotal)}</td><td></td></tr><tr class="net-total"><td colspan="4">Neto del comprobante</td><td class="amount">${moneyValue(instrumentTotal || payment.importe)}</td><td></td></tr></tbody></table>
   <button onclick="window.print()">Imprimir / guardar PDF</button>${autoPrint ? `<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),250));</script>` : ""}</body></html>`);
@@ -8494,9 +8577,16 @@ async function init() {
     syncFieldContractFormToActive();
   });
   $("#field-contract-line-body").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-field-contract-line-remove]");
-    if (!button) return;
-    state.fieldContractLineRows = state.fieldContractLineRows.filter((item) => String(item.id) !== String(button.dataset.fieldContractLineRemove));
+    const editButton = event.target.closest("[data-field-contract-line-edit]");
+    const removeButton = event.target.closest("[data-field-contract-line-remove]");
+    if (editButton) {
+      editFieldContractLineRow(editButton.dataset.fieldContractLineEdit);
+      return;
+    }
+    if (!removeButton) return;
+    const removedId = String(removeButton.dataset.fieldContractLineRemove);
+    state.fieldContractLineRows = state.fieldContractLineRows.filter((item) => String(item.id) !== removedId);
+    if (String(state.editingFieldContractLineId) === removedId) clearFieldContractLineInputs();
     renderFieldContractLineRows();
     syncFieldContractFormToActive();
   });
