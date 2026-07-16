@@ -43,7 +43,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260716-hacienda-recibo-entregas-cuenta-v41";
+const APP_BUILD = "20260716-campos-recibos-partes-v42";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2801,6 +2801,11 @@ async function deleteFieldLease(id) {
   renderFieldLeases();
 }
 
+function fieldReportDate(value) {
+  const date = parseAnyLocalDate(value);
+  return date ? formatDisplayDate(date) : escapeHtml(value || "-");
+}
+
 function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTERNO") {
   const reportAudience = String(audience || "INTERNO").toUpperCase();
   const audienceRole = ["ARRENDADOR", "ARRENDATARIO"].includes(reportAudience) ? reportAudience : "";
@@ -2810,10 +2815,6 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
   const title = safePdfTitle(`Calculo_arrendamiento_${audienceLabel}`, item.cliente || item.campo || "campos", item.fecha || "");
   const popup = window.open("", "_blank", "width=1000,height=800");
   if (!popup) return;
-  const fieldReportDate = (value) => {
-    const date = parseAnyLocalDate(value);
-    return date ? formatDisplayDate(date) : escapeHtml(value || "-");
-  };
   const cashTotal = Number(item.efectivoTotal || 0);
   const billedTotal = Number(item.facturadoTotal || 0);
   const commissionTotal = Number(item.comisionImporte || 0);
