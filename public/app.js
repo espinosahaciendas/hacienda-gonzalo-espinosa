@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260717-campos-recibos-comision-v50";
+const APP_BUILD = "20260717-campos-historial-abre-calculo-v51";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1905,6 +1905,7 @@ function fieldLeaseCurrentInput() {
   const distribucionPartes = calculateFieldLeasePartyDistribution(partes, billed.total, cash.total, commission);
   return {
     id: leaseId,
+    contratoId: rawContract.id || "",
     contrato: $("#field-lease-contract")?.value || "",
     cliente: $("#field-lease-client")?.value || "",
     arrendatario: contract.arrendatario || savedLease.arrendatario || "",
@@ -3027,8 +3028,52 @@ function renderFieldLeases() {
   updateFieldLeasePreview();
 }
 
+function findFieldContractForLease(item = {}) {
+  const contracts = state.fieldContracts || [];
+  if (item.contratoId) {
+    const byId = contracts.find((contract) => String(contract.id) === String(item.contratoId));
+    if (byId) return byId;
+  }
+  const leaseName = normalizeSearch(item.contrato || "");
+  const leaseOwner = normalizeSearch(item.cliente || "");
+  const leaseFarm = normalizeSearch(item.campo || "");
+  return contracts.find((contract) => (
+    leaseName && normalizeSearch(contract.nombre || "") === leaseName
+  )) || contracts.find((contract) => (
+    leaseFarm
+    && normalizeSearch(contract.campo || "") === leaseFarm
+    && (!leaseOwner || normalizeSearch(contract.arrendador || "") === leaseOwner)
+  )) || contracts.find((contract) => (
+    leaseName && normalizeSearch(fieldContractSearchLabel(contract)).includes(leaseName)
+  )) || null;
+}
+
 function fillFieldLeaseForm(item) {
   if (!item) return;
+  const relatedContract = findFieldContractForLease(item);
+  if (relatedContract) {
+    fillFieldContractForm(relatedContract);
+  } else {
+    state.activeFieldContract = {
+      id: item.contratoId || "",
+      nombre: item.contrato || "",
+      arrendador: item.cliente || "",
+      arrendatario: item.arrendatario || "",
+      campo: item.campo || "",
+      inicio: item.contratoDesde || item.periodoDesde || "",
+      fin: item.contratoHasta || item.periodoHasta || "",
+      frecuencia: item.frecuencia || "MENSUAL",
+      vencimientoHabitual: item.vencimientoHabitual || "",
+      criterioCotizacion: item.criterioCotizacion || item.mercado || "",
+      condiciones: item.observaciones || "",
+      partes: Array.isArray(item.partes) ? item.partes : [],
+      lineas: [
+        ...(Array.isArray(item.facturadoAnualDetalle?.lineas) ? item.facturadoAnualDetalle.lineas : []),
+        ...(Array.isArray(item.efectivoAnualDetalle?.lineas) ? item.efectivoAnualDetalle.lineas : [])
+      ],
+      cuotas: item.cuotaManual ? [item.cuotaManual] : []
+    };
+  }
   if ($("#field-lease-id")) $("#field-lease-id").value = item.id || "";
   $("#field-lease-contract").value = item.contrato || "";
   $("#field-lease-client").value = item.cliente || "";
@@ -3059,6 +3104,7 @@ function fillFieldLeaseForm(item) {
   renderFieldLeasePaymentRows(item.totalConComision || item.totalPesos || 0);
   if (state.fieldQuoteRows.length) syncFieldQuoteAverageToPrice();
   updateFieldLeasePreview();
+  showFieldsTab("calculo");
 }
 
 async function saveFieldLease(event) {
