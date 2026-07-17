@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260716-campos-recibos-facturado-efectivo-v46";
+const APP_BUILD = "20260716-campos-contratos-ordenados-v47";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1134,6 +1134,58 @@ function fieldContractPartyTotals(rows = state.fieldContractPartyRows || []) {
   }, { arrendadores: 0, arrendatarios: 0 });
 }
 
+function setFieldContractPanelDisabled(panel, disabled, message = "") {
+  if (!panel) return;
+  panel.classList.toggle("locked-panel", !!disabled);
+  panel.dataset.lockMessage = disabled ? message : "";
+  panel.querySelectorAll("input, select, textarea, button").forEach((node) => {
+    node.disabled = !!disabled;
+  });
+}
+
+function fieldContractRuleModeFromForm() {
+  const explicit = $("#field-contract-rule-type")?.value || "";
+  if (explicit) return explicit;
+  return (state.fieldContractLineRows || []).length ? "MIXTA" : "SIMPLE";
+}
+
+function syncFieldContractRuleMode() {
+  const ruleMode = fieldContractRuleModeFromForm();
+  const isMixed = ruleMode === "MIXTA";
+  const ruleTitle = $("#field-contract-rule-title");
+  const ruleHelp = $("#field-contract-rule-help");
+  if (ruleTitle) ruleTitle.textContent = isMixed ? "Lineas mixtas" : "Regla simple";
+  if (ruleHelp) {
+    ruleHelp.textContent = isMixed
+      ? "Use solo el bloque de lineas mixtas. Las reglas simples quedan apagadas para evitar duplicar criterios."
+      : "Use los bloques de parte facturada y parte efectivo. Las lineas mixtas quedan apagadas.";
+  }
+  setFieldContractPanelDisabled(
+    $("#field-contract-mixed-panel"),
+    !isMixed,
+    "Bloque deshabilitado: active 'Lineas mixtas de calculo' en Tipo de regla para cargarlo."
+  );
+  setFieldContractPanelDisabled(
+    $("#field-contract-simple-panel"),
+    isMixed,
+    "Bloque deshabilitado: este contrato usa lineas mixtas de calculo."
+  );
+
+  const frequency = String($("#field-contract-frequency")?.value || "").toUpperCase();
+  const manual = frequency === "MANUAL";
+  const installmentHelp = $("#field-contract-installment-help");
+  if (installmentHelp) {
+    installmentHelp.textContent = manual
+      ? "Plan manual habilitado: cargue cuotas con vencimientos fijos o condiciones especiales."
+      : "Plan manual deshabilitado: se usa la frecuencia base del contrato. Para cargar vencimientos fijos, seleccione 'Manual / sin vencimiento fijo'.";
+  }
+  setFieldContractPanelDisabled(
+    $("#field-contract-installment-panel"),
+    !manual,
+    "Bloque deshabilitado: solo se usa con frecuencia Manual / sin vencimiento fijo."
+  );
+}
+
 function renderFieldContractPartyRows() {
   const body = $("#field-contract-party-body");
   if (!body) return;
@@ -1199,6 +1251,7 @@ function renderFieldContractInstallmentRows() {
     $("#field-contract-installment-summary").textContent = rows.length ? `${rows.length} cuota/s manual/es.` : "Sin cuotas manuales.";
   }
   renderFieldLeaseInstallmentOptions();
+  syncFieldContractRuleMode();
 }
 
 function fieldContractLineAppliesLabel(value) {
@@ -1273,6 +1326,7 @@ function renderFieldContractLineRows() {
   if ($("#field-contract-line-add")) {
     $("#field-contract-line-add").textContent = state.editingFieldContractLineId ? "Guardar cambio" : "Agregar linea";
   }
+  syncFieldContractRuleMode();
 }
 
 function clearFieldContractLineInputs() {
@@ -1415,6 +1469,10 @@ function addFieldContractPartyRow() {
 }
 
 function fieldContractPayload() {
+  const reglaCalculo = fieldContractRuleModeFromForm();
+  const usesMixedLines = reglaCalculo === "MIXTA";
+  const frecuencia = $("#field-contract-frequency")?.value || "MENSUAL";
+  const usesManualInstallments = String(frecuencia || "").toUpperCase() === "MANUAL";
   return {
     id: $("#field-contract-id")?.value || "",
     nombre: $("#field-contract-name")?.value || "",
@@ -1424,22 +1482,23 @@ function fieldContractPayload() {
     hectareas: parseMoneyInput($("#field-contract-hectares")?.value || 0),
     inicio: $("#field-contract-start")?.value || "",
     fin: $("#field-contract-end")?.value || "",
-    frecuencia: $("#field-contract-frequency")?.value || "MENSUAL",
+    frecuencia,
     vencimientoHabitual: $("#field-contract-due-text")?.value || "",
     proximoVencimiento: "",
     criterioCotizacion: $("#field-contract-quote-criteria")?.value || "",
-    facturadoModo: $("#field-contract-billed-mode")?.value || "HECTAREAS",
-    facturadoValor: parseMoneyInput($("#field-contract-billed-value")?.value || 0),
-    facturadoBase: $("#field-contract-billed-base")?.value || "KG_SOJA",
-    facturadoTasa: parseMoneyInput($("#field-contract-billed-rate")?.value || 0),
-    efectivoModo: $("#field-contract-cash-mode")?.value || "NINGUNO",
-    efectivoValor: parseMoneyInput($("#field-contract-cash-value")?.value || 0),
-    efectivoBase: $("#field-contract-cash-base")?.value || "MISMA_FACTURADA",
-    efectivoTasa: parseMoneyInput($("#field-contract-cash-rate")?.value || 0),
+    reglaCalculo,
+    facturadoModo: usesMixedLines ? "HECTAREAS" : ($("#field-contract-billed-mode")?.value || "HECTAREAS"),
+    facturadoValor: usesMixedLines ? 0 : parseMoneyInput($("#field-contract-billed-value")?.value || 0),
+    facturadoBase: usesMixedLines ? "KG_SOJA" : ($("#field-contract-billed-base")?.value || "KG_SOJA"),
+    facturadoTasa: usesMixedLines ? 0 : parseMoneyInput($("#field-contract-billed-rate")?.value || 0),
+    efectivoModo: usesMixedLines ? "NINGUNO" : ($("#field-contract-cash-mode")?.value || "NINGUNO"),
+    efectivoValor: usesMixedLines ? 0 : parseMoneyInput($("#field-contract-cash-value")?.value || 0),
+    efectivoBase: usesMixedLines ? "MISMA_FACTURADA" : ($("#field-contract-cash-base")?.value || "MISMA_FACTURADA"),
+    efectivoTasa: usesMixedLines ? 0 : parseMoneyInput($("#field-contract-cash-rate")?.value || 0),
     condiciones: $("#field-contract-notes")?.value || "",
     partes: state.fieldContractPartyRows || [],
-    lineas: state.fieldContractLineRows || [],
-    cuotas: state.fieldContractInstallmentRows || []
+    lineas: usesMixedLines ? (state.fieldContractLineRows || []) : [],
+    cuotas: usesManualInstallments ? (state.fieldContractInstallmentRows || []) : []
   };
 }
 
@@ -1581,9 +1640,11 @@ function fieldContractPayloadForCalculation() {
     || (Array.isArray(visible.cuotas) && visible.cuotas.length)
   );
   if (!hasVisibleRule) return active;
+  const visibleRule = visible.reglaCalculo || active.reglaCalculo || "SIMPLE";
   return {
     ...active,
     ...visible,
+    reglaCalculo: visibleRule,
     hectareas: visible.hectareas || active.hectareas || 0,
     facturadoValor: visible.facturadoValor || active.facturadoValor || 0,
     facturadoTasa: visible.facturadoTasa || active.facturadoTasa || 0,
@@ -1594,7 +1655,7 @@ function fieldContractPayloadForCalculation() {
     facturadoModo: visible.facturadoModo || active.facturadoModo || "HECTAREAS",
     efectivoModo: visible.efectivoModo || active.efectivoModo || "NINGUNO",
     partes: Array.isArray(visible.partes) && visible.partes.length ? visible.partes : (active.partes || []),
-    lineas: Array.isArray(visible.lineas) && visible.lineas.length ? visible.lineas : (active.lineas || []),
+    lineas: visibleRule === "SIMPLE" ? [] : (Array.isArray(visible.lineas) && visible.lineas.length ? visible.lineas : (active.lineas || [])),
     cuotas: Array.isArray(visible.cuotas) && visible.cuotas.length ? visible.cuotas : (active.cuotas || [])
   };
 }
@@ -1628,6 +1689,8 @@ function fillFieldContractForm(item) {
   $("#field-contract-frequency").value = item.frecuencia || "MENSUAL";
   $("#field-contract-due-text").value = item.vencimientoHabitual || "";
   $("#field-contract-quote-criteria").value = item.criterioCotizacion || "";
+  const itemLineRows = Array.isArray(item.lineas) ? item.lineas.map(normalizeFieldContractLine) : [];
+  $("#field-contract-rule-type").value = item.reglaCalculo || (itemLineRows.length ? "MIXTA" : "SIMPLE");
   $("#field-contract-billed-mode").value = item.facturadoModo || "HECTAREAS";
   $("#field-contract-billed-value").value = item.facturadoValor || "";
   $("#field-contract-billed-base").value = item.facturadoBase || "KG_SOJA";
@@ -1639,18 +1702,20 @@ function fillFieldContractForm(item) {
   $("#field-contract-notes").value = item.condiciones || "";
   state.fieldContractPartyRows = Array.isArray(item.partes) ? item.partes.map(normalizeFieldContractParty) : [];
   renderFieldContractPartyRows();
-  state.fieldContractLineRows = Array.isArray(item.lineas) ? item.lineas.map(normalizeFieldContractLine) : [];
+  state.fieldContractLineRows = itemLineRows;
   clearFieldContractLineInputs();
   renderFieldContractLineRows();
   state.fieldContractInstallmentRows = Array.isArray(item.cuotas) ? item.cuotas.map(normalizeFieldContractInstallment) : [];
   renderFieldContractInstallmentRows();
   updateFieldContractPdfSummary(item.id || "");
+  syncFieldContractRuleMode();
 }
 
 function resetFieldContractForm() {
   $("#field-contract-form")?.reset();
   state.activeFieldContract = null;
   $("#field-contract-id").value = "";
+  if ($("#field-contract-rule-type")) $("#field-contract-rule-type").value = "SIMPLE";
   $("#field-contract-pdf").value = "";
   $("#field-contract-suggestions").hidden = true;
   $("#field-contract-suggestions").innerHTML = "";
@@ -1663,6 +1728,7 @@ function resetFieldContractForm() {
   renderFieldContractInstallmentRows();
   updateFieldContractPdfSummary("");
   setFieldContractMessage("");
+  syncFieldContractRuleMode();
 }
 
 function useFieldContractInCalculation(item = currentFieldContractForCalculation()) {
@@ -8776,9 +8842,16 @@ async function init() {
   $("#field-contract-pdf-open").addEventListener("click", () => openFieldContractPdf());
   $("#field-contract-party-add").addEventListener("click", addFieldContractPartyRow);
   $all("#field-contract-form input, #field-contract-form select, #field-contract-form textarea").forEach((node) => {
-    node.addEventListener("input", syncFieldContractFormToActive);
-    node.addEventListener("change", syncFieldContractFormToActive);
+    node.addEventListener("input", () => {
+      syncFieldContractFormToActive();
+      syncFieldContractRuleMode();
+    });
+    node.addEventListener("change", () => {
+      syncFieldContractFormToActive();
+      syncFieldContractRuleMode();
+    });
   });
+  syncFieldContractRuleMode();
   $("#field-contract-search").addEventListener("input", renderFieldContractSuggestions);
   $("#field-contract-search").addEventListener("change", () => {
     const item = findFieldContractBySearch();

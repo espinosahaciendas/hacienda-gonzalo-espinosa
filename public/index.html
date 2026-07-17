@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20260713-hacienda-campos-separado">
+    <link rel="stylesheet" href="/styles.css?v=20260716-campos-contratos-ordenados-v47">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -420,29 +420,46 @@
           </div>
           <form id="field-contract-form">
             <input id="field-contract-id" type="hidden">
-            <div class="form-grid">
-              <label>Buscar contrato<input id="field-contract-search" autocomplete="off" placeholder="Escriba cliente, campo, arrendatario o referencia"></label>
+            <div class="advanced-subpanel contract-search-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Buscar contrato cargado</h3>
+                  <p class="subtle">Use este campo solo para encontrar contratos existentes por referencia, campo o cualquiera de las partes.</p>
+                </div>
+                <span class="subtle">No modifica datos hasta elegir un contrato.</span>
+              </div>
+              <label class="span-2">Busqueda de contrato existente<input id="field-contract-search" autocomplete="off" placeholder="Escriba cliente, campo, arrendatario o referencia"></label>
               <div class="suggestions" id="field-contract-suggestions" hidden></div>
-              <label>Referencia / nombre contrato<input id="field-contract-name" placeholder="Ej.: LA BALBINA 2026-2029"></label>
-              <label>Arrendador / cliente<input id="field-contract-owner"></label>
-              <label>Arrendatario<input id="field-contract-tenant"></label>
-              <label>Campo / establecimiento<input id="field-contract-farm"></label>
-              <label>Hectareas totales<input id="field-contract-hectares" inputmode="decimal"></label>
-              <label>Vigencia contrato desde<input id="field-contract-start" type="date"></label>
-              <label>Vigencia contrato hasta<input id="field-contract-end" type="date"></label>
-              <label>Frecuencia base
-                <select id="field-contract-frequency">
-                  <option value="MENSUAL">Mensual</option>
-                  <option value="TRIMESTRAL">Trimestral</option>
-                  <option value="CUATRIMESTRAL">Cuatrimestral</option>
-                  <option value="SEMESTRAL">Semestral</option>
-                  <option value="ANUAL">Anual</option>
-                  <option value="UNICO">Unico pago</option>
-                  <option value="MANUAL">Manual / sin vencimiento fijo</option>
-                </select>
-              </label>
-              <label>Vencimiento habitual<input id="field-contract-due-text" placeholder="Ej.: del 5 al 10 de cada mes"></label>
-              <label>Criterio de cotizacion<input id="field-contract-quote-criteria" placeholder="Ej.: promedio semana anterior Quequen"></label>
+            </div>
+            <div class="advanced-subpanel contract-data-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Datos efectivos del contrato</h3>
+                  <p class="subtle">Estos son los datos fijos que quedan guardados y luego se usan para calcular cuotas.</p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>Referencia / nombre contrato<input id="field-contract-name" placeholder="Ej.: LA BALBINA 2026-2029"></label>
+                <label>Campo / establecimiento<input id="field-contract-farm"></label>
+                <label>Arrendador / cliente<input id="field-contract-owner"></label>
+                <label>Arrendatario<input id="field-contract-tenant"></label>
+                <label>Hectareas totales<input id="field-contract-hectares" inputmode="decimal"></label>
+                <label>Criterio de cotizacion<input id="field-contract-quote-criteria" placeholder="Ej.: promedio semana anterior Quequen"></label>
+                <label>Vigencia contrato desde<input id="field-contract-start" type="date"></label>
+                <label>Vigencia contrato hasta<input id="field-contract-end" type="date"></label>
+                <label>Frecuencia base
+                  <select id="field-contract-frequency">
+                    <option value="MENSUAL">Mensual</option>
+                    <option value="TRIMESTRAL">Trimestral</option>
+                    <option value="CUATRIMESTRAL">Cuatrimestral</option>
+                    <option value="SEMESTRAL">Semestral</option>
+                    <option value="ANUAL">Anual</option>
+                    <option value="UNICO">Unico pago</option>
+                    <option value="MANUAL">Manual / sin vencimiento fijo</option>
+                  </select>
+                </label>
+                <label>Vencimiento habitual<input id="field-contract-due-text" placeholder="Ej.: del 5 al 10 de cada mes"></label>
+              </div>
             </div>
             <div class="advanced-subpanel">
               <div class="panel-head">
@@ -478,6 +495,26 @@
               </div>
             </div>
             <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Regla de calculo del contrato</h3>
+                  <p class="subtle">Elija regla simple para contratos uniformes, o lineas mixtas cuando haya carne, soja, trigo, efectivo o hectareas diferenciadas.</p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>Tipo de regla
+                  <select id="field-contract-rule-type">
+                    <option value="SIMPLE">Regla simple facturado / efectivo</option>
+                    <option value="MIXTA">Lineas mixtas de calculo</option>
+                  </select>
+                </label>
+                <div class="info-box">
+                  <strong id="field-contract-rule-title">Regla simple</strong>
+                  <span id="field-contract-rule-help">Use los bloques de parte facturada y parte efectivo.</span>
+                </div>
+              </div>
+            </div>
+            <div class="advanced-subpanel" id="field-contract-mixed-panel">
               <div class="panel-head">
                 <div>
                   <h3>Lineas mixtas de calculo</h3>
@@ -520,7 +557,7 @@
                 </table>
               </div>
             </div>
-            <div class="field-contract-rules">
+            <div class="field-contract-rules" id="field-contract-simple-panel">
               <div class="advanced-subpanel">
                 <h3>Parte facturada / contrato</h3>
                 <div class="form-grid">
@@ -570,7 +607,7 @@
                 </div>
               </div>
             </div>
-            <div class="advanced-subpanel">
+            <div class="advanced-subpanel" id="field-contract-installment-panel">
               <div class="panel-head">
                 <div>
                   <h3>Plan manual de cuotas</h3>
@@ -578,6 +615,7 @@
                 </div>
                 <span class="subtle" id="field-contract-installment-summary">Sin cuotas manuales.</span>
               </div>
+              <p class="subtle" id="field-contract-installment-help"></p>
               <div class="form-grid">
                 <label>Nro. cuota<input id="field-contract-installment-number" inputmode="numeric" placeholder="Ej.: 1"></label>
                 <label>Vencimiento<input id="field-contract-installment-due" type="date"></label>
@@ -2472,7 +2510,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260716-campos-recibos-facturado-efectivo-v46"></script>
+    <script src="/app.js?v=20260716-campos-contratos-ordenados-v47"></script>
   </body>
 </html>
 

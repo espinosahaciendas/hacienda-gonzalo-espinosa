@@ -344,6 +344,43 @@ h2 {
   margin-top: 12px;
 }
 
+.contract-search-panel {
+  border-color: #c9b088;
+  background: #fffaf2;
+}
+
+.contract-data-panel {
+  border-color: #decdb7;
+}
+
+.info-box {
+  align-self: end;
+  background: #fffaf2;
+  border: 1px solid #decdb7;
+  border-radius: 6px;
+  color: var(--fields-ink);
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.info-box span {
+  color: var(--fields-muted);
+  font-size: 13px;
+}
+
+.locked-panel {
+  opacity: 0.56;
+}
+
+.locked-panel::after {
+  color: var(--fields-muted);
+  content: attr(data-lock-message);
+  display: block;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
