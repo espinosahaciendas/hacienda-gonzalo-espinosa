@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260717-campos-agenda-vencimientos-v60";
+const APP_BUILD = "20260717-campos-agenda-vencimientos-v61";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1755,8 +1755,8 @@ function useFieldContractInCalculation(item = currentFieldContractForCalculation
   $("#field-lease-farm").value = item.campo || "";
   const calculationDate = $("#field-lease-date")?.value || new Date().toISOString().slice(0, 10);
   $("#field-lease-date").value = calculationDate;
-  $("#field-lease-from").value = formatDateForInput(item.inicio);
-  $("#field-lease-to").value = formatDateForInput(item.fin);
+  $("#field-lease-from").value = formatDateForInput(fieldContractStartValue(item));
+  $("#field-lease-to").value = formatDateForInput(fieldContractEndValue(item));
   $("#field-lease-due-date").value = calculationDate;
   $("#field-lease-next-due").value = formatDateForInput(item.proximoVencimiento);
   renderFieldLeaseInstallmentOptions("");
@@ -3083,12 +3083,36 @@ function fieldDateValue(value) {
   return date.getTime();
 }
 
+function firstFieldContractValue(contract = {}, keys = []) {
+  for (const key of keys) {
+    const value = contract[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+  }
+  return "";
+}
+
+function fieldContractStartValue(contract = {}) {
+  return firstFieldContractValue(contract, ["inicio", "fechaInicio", "vigenciaDesde", "contratoDesde", "periodoDesde", "desde", "start"]);
+}
+
+function fieldContractEndValue(contract = {}) {
+  return firstFieldContractValue(contract, ["fin", "fechaFin", "vigenciaHasta", "contratoHasta", "periodoHasta", "hasta", "end"]);
+}
+
+function fieldContractFrequencyValue(contract = {}) {
+  return firstFieldContractValue(contract, ["frecuencia", "frecuenciaBase", "periodicidad", "formaPago"]) || "MENSUAL";
+}
+
+function fieldContractDueTextValue(contract = {}) {
+  return firstFieldContractValue(contract, ["vencimientoHabitual", "diaVencimiento", "vencimientoTexto", "vencimiento"]);
+}
+
 function fieldContractFrequencyMonths(frequency) {
-  const key = String(frequency || "").toUpperCase();
-  if (key === "TRIMESTRAL") return 3;
-  if (key === "CUATRIMESTRAL") return 4;
-  if (key === "SEMESTRAL") return 6;
-  if (key === "ANUAL" || key === "UNICO") return 12;
+  const key = normalizeSearch(frequency || "");
+  if (key.includes("trimestral")) return 3;
+  if (key.includes("cuatrimestral")) return 4;
+  if (key.includes("semestral")) return 6;
+  if (key.includes("anual") || key.includes("unico")) return 12;
   return 1;
 }
 
@@ -3099,11 +3123,11 @@ function addFieldMonths(date, months) {
 }
 
 function fieldContractDueDay(contract = {}) {
-  const text = String(contract.vencimientoHabitual || "").trim();
+  const text = String(fieldContractDueTextValue(contract) || "").trim();
   const numbers = text.match(/\d{1,2}/g) || [];
   const firstValid = numbers.map(Number).find((value) => value >= 1 && value <= 31);
   if (firstValid) return firstValid;
-  const start = parseAnyLocalDate(contract.inicio);
+  const start = parseAnyLocalDate(fieldContractStartValue(contract));
   return start ? start.getDate() : 1;
 }
 
@@ -3144,14 +3168,15 @@ function fieldContractDueManualRows(contract = {}) {
 }
 
 function fieldContractDueRegularRows(contract = {}) {
-  const frequency = String(contract.frecuencia || "MENSUAL").toUpperCase();
-  if (frequency === "MANUAL") return [];
-  const start = parseAnyLocalDate(contract.inicio);
-  const end = parseAnyLocalDate(contract.fin);
+  const frequency = fieldContractFrequencyValue(contract);
+  const frequencyKey = normalizeSearch(frequency);
+  if (frequencyKey.includes("manual")) return [];
+  const start = parseAnyLocalDate(fieldContractStartValue(contract));
+  const end = parseAnyLocalDate(fieldContractEndValue(contract));
   if (!start) return [];
   const interval = fieldContractFrequencyMonths(frequency);
   const dueDay = fieldContractDueDay(contract);
-  const limit = end || addFieldMonths(start, frequency === "UNICO" ? 0 : 24);
+  const limit = end || addFieldMonths(start, frequencyKey.includes("unico") ? 0 : 24);
   const rows = [];
   let base = new Date(start.getFullYear(), start.getMonth(), 1);
   let number = 1;
@@ -3162,13 +3187,13 @@ function fieldContractDueRegularRows(contract = {}) {
         contract,
         dueDate: formatDateForInput(due),
         cuotaNumero: number,
-        cuotaTipo: frequency === "UNICO" ? "Unico pago" : fieldContractInstallmentTypeLabel("MIXTA"),
+        cuotaTipo: frequencyKey.includes("unico") ? "Unico pago" : fieldContractInstallmentTypeLabel("MIXTA"),
         cuotaDetalle: frequency,
         cuotaManualId: "",
         source: "FRECUENCIA"
       });
     }
-    if (frequency === "UNICO") break;
+    if (frequencyKey.includes("unico")) break;
     base = addFieldMonths(base, interval);
     number += 1;
   }
@@ -3176,9 +3201,17 @@ function fieldContractDueRegularRows(contract = {}) {
 }
 
 function fieldContractDueRows(contract = {}) {
+  const frequencyKey = normalizeSearch(fieldContractFrequencyValue(contract));
   const manualRows = fieldContractDueManualRows(contract);
-  if (manualRows.length) return manualRows;
-  return fieldContractDueRegularRows(contract);
+  const regularRows = fieldContractDueRegularRows(contract);
+  if (frequencyKey.includes("manual")) return manualRows;
+  const seen = new Set();
+  return [...regularRows, ...manualRows].filter((row) => {
+    const key = `${formatDateForInput(row.dueDate) || row.dueDate}|${row.cuotaNumero || ""}|${row.cuotaTipo || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function fieldLeaseMatchesDue(lease = {}, due = {}) {
@@ -3191,7 +3224,8 @@ function fieldLeaseMatchesDue(lease = {}, due = {}) {
   const sameContract = normalizeSearch(lease.contrato || "") && normalizeSearch(lease.contrato || "") === normalizeSearch(contract.nombre || "");
   const sameFarm = normalizeSearch(lease.campo || "") && normalizeSearch(lease.campo || "") === normalizeSearch(contract.campo || "");
   const sameOwner = normalizeSearch(lease.cliente || "") && normalizeSearch(lease.cliente || "") === normalizeSearch(contract.arrendador || "");
-  return sameContract || (sameFarm && sameOwner);
+  const sameTenant = normalizeSearch(lease.arrendatario || "") && normalizeSearch(lease.arrendatario || "") === normalizeSearch(contract.arrendatario || "");
+  return sameContract || (sameFarm && (sameOwner || sameTenant));
 }
 
 function findFieldLeaseForDue(due = {}) {
@@ -3264,6 +3298,7 @@ function filteredFieldDueAgendaRows() {
           contract.campo,
           contract.arrendador,
           contract.arrendatario,
+          fieldContractFrequencyValue(contract),
           row.cuotaTipo,
           row.cuotaDetalle
         ].filter(Boolean).join(" "));
@@ -9973,8 +10008,9 @@ async function init() {
   $("#commissionist-to").value = today;
   $("#commissionist-due").value = today;
   $("#commissionist-invoice-date").value = today;
-  if ($("#field-due-from")) $("#field-due-from").value = dateToInputValue(new Date());
-  if ($("#field-due-to")) $("#field-due-to").value = dateToInputValue(addDateDays(new Date(), 90));
+  const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  if ($("#field-due-from")) $("#field-due-from").value = dateToInputValue(currentMonthStart);
+  if ($("#field-due-to")) $("#field-due-to").value = dateToInputValue(addFieldMonths(currentMonthStart, 6));
   renderOperationSearch();
   renderRealCommissionSummary();
   renderCommissionistStatus();
