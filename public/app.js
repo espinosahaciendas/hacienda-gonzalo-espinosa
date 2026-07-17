@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260717-hacienda-vencimientos-rango-v57";
+const APP_BUILD = "20260717-hacienda-calendar-google-v58";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -5927,6 +5927,8 @@ function dateToInputValue(date) {
 
 function escapeIcsText(value) {
   return String(value || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
     .replace(/\\/g, "\\\\")
     .replace(/\r?\n/g, "\\n")
     .replace(/,/g, "\\,")
@@ -5935,24 +5937,45 @@ function escapeIcsText(value) {
 
 function foldIcsLine(line) {
   const text = String(line || "");
+  if (text.length <= 70) return text;
   const chunks = [];
-  for (let index = 0; index < text.length; index += 72) {
-    chunks.push(`${index ? " " : ""}${text.slice(index, index + 72)}`);
+  chunks.push(text.slice(0, 70));
+  for (let index = 70; index < text.length; index += 69) {
+    chunks.push(` ${text.slice(index, index + 69)}`);
   }
   return chunks.join("\r\n");
+}
+
+function calendarPlainMoney(value) {
+  const amount = Number(value || 0);
+  const sign = amount < 0 ? "-" : "";
+  return `${sign}$ ${Math.abs(amount).toLocaleString("es-AR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+
+function safeCalendarUid(value, fallback) {
+  const text = String(value || fallback || Date.now())
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 90);
+  return text || `vencimiento-${Date.now()}`;
 }
 
 function calendarEventSummary(movement) {
   const kind = currentAccountDueKind(movement);
   const label = kind === "COMISION" ? "COMISION" : kind === "EFECTIVO" ? "EFECTIVO" : "VTO";
-  return `${label} - ${movement.cliente || "Sin cliente"} - ${moneyValue(signedPendingAmount(movement))}`;
+  return `${label} - ${movement.cliente || "Sin cliente"} - ${calendarPlainMoney(signedPendingAmount(movement))}`;
 }
 
 function calendarEventDescription(movement) {
   return [
     `Cliente: ${movement.cliente || "-"}`,
     `Concepto: ${currentAccountDueDetailText(movement)}`,
-    `Importe pendiente: ${moneyValue(signedPendingAmount(movement))}`,
+    `Importe pendiente: ${calendarPlainMoney(signedPendingAmount(movement))}`,
     `Comprobante: ${movement.comprobante || "-"}`,
     `Operacion: ${movement.operacion || "-"}`,
     `Vendedor: ${movement.vendedor || "-"}`,
@@ -6007,16 +6030,20 @@ function exportCurrentAccountCalendar() {
     const date = parseDisplayDate(movement.vencimiento);
     if (!date) return;
     const endDate = addDateDays(date, 1);
-    const uid = `${movement.id || index}-${dateToIcsDate(date)}@gonzalo-espinosa-hacienda`;
+    const uid = `${safeCalendarUid(movement.id, index)}-${dateToIcsDate(date)}@gonzalo-espinosa-hacienda`;
     lines.push(
       "BEGIN:VEVENT",
-      foldIcsLine(`UID:${escapeIcsText(uid)}`),
+      `UID:${uid}`,
       `DTSTAMP:${now}`,
+      `CREATED:${now}`,
+      `LAST-MODIFIED:${now}`,
       `DTSTART;VALUE=DATE:${dateToIcsDate(date)}`,
       `DTEND;VALUE=DATE:${dateToIcsDate(endDate)}`,
       foldIcsLine(`SUMMARY:${escapeIcsText(calendarEventSummary(movement))}`),
       foldIcsLine(`DESCRIPTION:${escapeIcsText(calendarEventDescription(movement))}`),
       foldIcsLine(`CATEGORIES:${escapeIcsText(currentAccountDueKind(movement))}`),
+      "TRANSP:TRANSPARENT",
+      "STATUS:CONFIRMED",
       "END:VEVENT"
     );
   });
@@ -6024,6 +6051,50 @@ function exportCurrentAccountCalendar() {
   const filename = `vencimientos_${String(range.label || "calendario").replace(/[^a-zA-Z0-9_-]/g, "_")}.ics`;
   downloadTextFile(filename, `${lines.join("\r\n")}\r\n`, "text/calendar;charset=utf-8");
   message.textContent = `Archivo generado con ${movements.length} vencimiento/s. Importalo en Google Calendar.`;
+  message.className = "form-message ok";
+}
+
+function escapeCsvValue(value) {
+  const text = String(value ?? "").replace(/\u00a0/g, " ");
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function dateToGoogleCsvDate(date) {
+  const value = dateOnly(date);
+  return `${String(value.getMonth() + 1).padStart(2, "0")}/${String(value.getDate()).padStart(2, "0")}/${value.getFullYear()}`;
+}
+
+function exportCurrentAccountCalendarCsv() {
+  if (!state.cuenta) return;
+  const { movements, range } = calendarFilteredDueMovements();
+  const message = $("#cc-calendar-message");
+  if (!movements.length) {
+    message.textContent = "No hay vencimientos para exportar con esas opciones.";
+    message.className = "form-message error";
+    return;
+  }
+  const rows = [
+    ["Subject", "Start Date", "Start Time", "End Date", "End Time", "All Day Event", "Description", "Location", "Private"]
+  ];
+  movements.forEach((movement) => {
+    const date = parseDisplayDate(movement.vencimiento);
+    if (!date) return;
+    rows.push([
+      calendarEventSummary(movement),
+      dateToGoogleCsvDate(date),
+      "",
+      dateToGoogleCsvDate(date),
+      "",
+      "True",
+      calendarEventDescription(movement).replace(/\n/g, " | "),
+      "",
+      "False"
+    ]);
+  });
+  const content = rows.map((row) => row.map(escapeCsvValue).join(",")).join("\r\n");
+  const filename = `vencimientos_google_${String(range.label || "calendario").replace(/[^a-zA-Z0-9_-]/g, "_")}.csv`;
+  downloadTextFile(filename, `${content}\r\n`, "text/csv;charset=utf-8");
+  message.textContent = `CSV generado con ${movements.length} vencimiento/s. Usalo en Google Calendar si el .ics no importa.`;
   message.className = "form-message ok";
 }
 
@@ -8959,6 +9030,7 @@ async function init() {
   $("#cc-print-report").addEventListener("click", () => printCurrentAccountReport());
   $("#cc-print-due-report").addEventListener("click", printCurrentAccountDueReport);
   $("#cc-export-calendar").addEventListener("click", exportCurrentAccountCalendar);
+  $("#cc-export-calendar-csv").addEventListener("click", exportCurrentAccountCalendarCsv);
   $("#cc-calendar-range").addEventListener("change", () => {
     const mode = $("#cc-calendar-range").value;
     const range = calendarRangeDates();
