@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260716-campos-contratos-ordenados-v47";
+const APP_BUILD = "20260717-campos-solapas-v48";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -160,6 +160,16 @@ function setView(view) {
   if (!state.restoringHistory && previousView !== view) {
     window.history.pushState({ view }, "", `#${view}`);
   }
+}
+
+function showFieldsTab(tab = "contratos") {
+  const target = tab || "contratos";
+  $all("[data-fields-tab]").forEach((button) => {
+    button.classList.toggle("active", String(button.dataset.fieldsTab) === String(target));
+  });
+  $all("[data-fields-tab-panel]").forEach((panel) => {
+    panel.classList.toggle("active", String(panel.dataset.fieldsTabPanel) === String(target));
+  });
 }
 
 function preferredInitialView() {
@@ -8835,8 +8845,20 @@ async function init() {
     const deleteButton = event.target.closest("[data-document-delete]");
     if (deleteButton) deleteDocument(deleteButton.dataset.documentDelete);
   });
+  $all("[data-fields-tab]").forEach((button) => {
+    button.addEventListener("click", () => showFieldsTab(button.dataset.fieldsTab || "contratos"));
+  });
+  $all("[data-fields-tab-go]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.fieldsTabGo === "nuevo") resetFieldContractForm();
+      showFieldsTab(button.dataset.fieldsTabGo || "contratos");
+    });
+  });
   $("#field-contract-form").addEventListener("submit", saveFieldContract);
-  $("#field-contract-clear").addEventListener("click", resetFieldContractForm);
+  $("#field-contract-clear").addEventListener("click", () => {
+    resetFieldContractForm();
+    showFieldsTab("nuevo");
+  });
   $("#field-contract-use").addEventListener("click", () => useFieldContractInCalculation());
   $("#field-contract-pdf-upload").addEventListener("click", uploadFieldContractPdf);
   $("#field-contract-pdf-open").addEventListener("click", () => openFieldContractPdf());
@@ -8857,6 +8879,7 @@ async function init() {
     const item = findFieldContractBySearch();
     if (item) {
       fillFieldContractForm(item);
+      showFieldsTab("nuevo");
       useFieldContractInCalculation(item);
     }
   });
@@ -8868,6 +8891,7 @@ async function init() {
     fillFieldContractForm(item);
     $("#field-contract-suggestions").hidden = true;
     $("#field-contract-suggestions").innerHTML = "";
+    showFieldsTab("nuevo");
     useFieldContractInCalculation(item);
   });
   $("#field-contract-body").addEventListener("click", (event) => {
@@ -8883,9 +8907,13 @@ async function init() {
     const item = (state.fieldContracts || []).find((row) => String(row.id) === String(id));
     if (editButton && item) {
       fillFieldContractForm(item);
+      showFieldsTab("nuevo");
       setFieldContractMessage("Contrato cargado para editar.", "ok");
     }
-    if (useButton && item) useFieldContractInCalculation(item);
+    if (useButton && item) {
+      useFieldContractInCalculation(item);
+      showFieldsTab("calculo");
+    }
     if (docButton) openFieldContractPdf(id);
     if (deleteButton) deleteFieldContract(id);
   });
@@ -8922,6 +8950,8 @@ async function init() {
   $("#field-lease-print-general")?.addEventListener("click", () => printCurrentFieldLeaseReport("GENERAL"));
   $("#field-lease-receipt-landlord")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDADOR"));
   $("#field-lease-receipt-tenant")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDATARIO"));
+  $("#field-receipt-tab-landlord")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDADOR"));
+  $("#field-receipt-tab-tenant")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDATARIO"));
   $("#field-quote-add").addEventListener("click", addFieldQuoteRow);
   $("#field-payment-preset-add")?.addEventListener("click", addSelectedFieldLeasePresetPayments);
   $("#field-payment-preset-body")?.addEventListener("change", (event) => {

@@ -344,6 +344,24 @@ h2 {
   margin-top: 12px;
 }
 
+.fields-tabs {
+  margin: 0 0 14px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.fields-tabs button {
+  white-space: nowrap;
+}
+
+.fields-tab-panel {
+  display: none;
+}
+
+.fields-tab-panel.active {
+  display: block;
+}
+
 .contract-search-panel {
   border-color: #c9b088;
   background: #fffaf2;

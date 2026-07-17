@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20260716-campos-contratos-ordenados-v47">
+    <link rel="stylesheet" href="/styles.css?v=20260717-campos-solapas-v48">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -410,6 +410,14 @@
             <p>Base independiente de Hacienda para contratos rurales, cotizaciones, vencimientos y reportes de calculo.</p>
           </div>
         </div>
+        <div class="fields-tabs segmented" role="tablist" aria-label="Navegacion de Campos">
+          <button type="button" class="active" data-fields-tab="contratos">Contratos / busqueda</button>
+          <button type="button" data-fields-tab="nuevo">Nuevo / editar contrato</button>
+          <button type="button" data-fields-tab="calculo">Calculo de cuotas</button>
+          <button type="button" data-fields-tab="recibos">Recibos y pagos</button>
+          <button type="button" data-fields-tab="historial">Historial</button>
+        </div>
+        <div class="fields-tab-panel" data-fields-tab-panel="nuevo">
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -420,17 +428,6 @@
           </div>
           <form id="field-contract-form">
             <input id="field-contract-id" type="hidden">
-            <div class="advanced-subpanel contract-search-panel">
-              <div class="panel-head">
-                <div>
-                  <h3>Buscar contrato cargado</h3>
-                  <p class="subtle">Use este campo solo para encontrar contratos existentes por referencia, campo o cualquiera de las partes.</p>
-                </div>
-                <span class="subtle">No modifica datos hasta elegir un contrato.</span>
-              </div>
-              <label class="span-2">Busqueda de contrato existente<input id="field-contract-search" autocomplete="off" placeholder="Escriba cliente, campo, arrendatario o referencia"></label>
-              <div class="suggestions" id="field-contract-suggestions" hidden></div>
-            </div>
             <div class="advanced-subpanel contract-data-panel">
               <div class="panel-head">
                 <div>
@@ -672,7 +669,22 @@
             <p class="form-message" id="field-contract-message"></p>
           </form>
         </div>
+        </div>
 
+        <div class="fields-tab-panel active" data-fields-tab-panel="contratos">
+        <div class="panel">
+          <div class="advanced-subpanel contract-search-panel">
+            <div class="panel-head">
+              <div>
+                <h3>Buscar contrato cargado</h3>
+                <p class="subtle">Use este campo para encontrar contratos existentes por referencia, campo, arrendador o arrendatario.</p>
+              </div>
+              <button type="button" class="ghost-button" data-fields-tab-go="nuevo">Cargar contrato nuevo</button>
+            </div>
+            <label class="span-2">Busqueda de contrato existente<input id="field-contract-search" autocomplete="off" placeholder="Escriba cliente, campo, arrendatario o referencia"></label>
+            <div class="suggestions" id="field-contract-suggestions" hidden></div>
+          </div>
+        </div>
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -698,7 +710,9 @@
             </table>
           </div>
         </div>
+        </div>
 
+        <div class="fields-tab-panel" data-fields-tab-panel="calculo">
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -822,11 +836,11 @@
               <div class="table-wrap compact-table">
                 <table>
                   <thead><tr><th>Parte</th><th>Rol</th><th>Base cuota</th><th>Comision</th><th>Criterio</th><th>Neto informado</th></tr></thead>
-                  <tbody id="field-lease-mini-ledger-body"></tbody>
+              <tbody id="field-lease-mini-ledger-body"></tbody>
                 </table>
               </div>
             </div>
-            <div class="advanced-subpanel">
+            <div class="advanced-subpanel fields-receipts-block">
               <div class="panel-head">
                 <div>
                   <h3>Pagos de esta cuota</h3>
@@ -936,7 +950,9 @@
             <p class="form-message" id="field-lease-message"></p>
           </form>
         </div>
+        </div>
 
+        <div class="fields-tab-panel" data-fields-tab-panel="historial">
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -961,6 +977,27 @@
               </thead>
               <tbody id="field-lease-body"></tbody>
             </table>
+          </div>
+        </div>
+        </div>
+        <div class="fields-tab-panel" data-fields-tab-panel="recibos">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Recibos y pagos de cuotas</h2>
+                <p class="subtle">Para registrar o imprimir recibos, primero abra o guarde un calculo de cuota. Los controles de pago estan dentro del calculo para mantener el contexto de la cuota seleccionada.</p>
+              </div>
+              <button type="button" class="primary-button" data-fields-tab-go="calculo">Ir al calculo de cuota</button>
+            </div>
+            <div class="advanced-subpanel">
+              <h3>Como usar esta parte</h3>
+              <p class="subtle">1. Busque o cargue el contrato. 2. Use el contrato en el calculo. 3. Registre pagos y genere recibos desde el bloque inferior del calculo.</p>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-receipt-tab-landlord">Recibo arrendador</button>
+                <button type="button" class="ghost-button" id="field-receipt-tab-tenant">Recibo arrendatario</button>
+                <button type="button" class="primary-button" data-fields-tab-go="calculo">Registrar pagos</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -2510,7 +2547,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260716-campos-contratos-ordenados-v47"></script>
+    <script src="/app.js?v=20260717-campos-solapas-v48"></script>
   </body>
 </html>
 
