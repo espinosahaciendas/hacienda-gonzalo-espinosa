@@ -418,6 +418,7 @@
           <button type="button" data-fields-tab="nuevo">Nuevo / editar contrato</button>
           <button type="button" data-fields-tab="calculo">Calculo de cuotas</button>
           <button type="button" data-fields-tab="recibos">Recibos y pagos</button>
+          <button type="button" data-fields-tab="vencimientos">Vencimientos</button>
           <button type="button" data-fields-tab="historial">Historial</button>
         </div>
         <div class="fields-tab-panel" data-fields-tab-panel="nuevo">
@@ -952,6 +953,56 @@
             </div>
             <p class="form-message" id="field-lease-message"></p>
           </form>
+        </div>
+        </div>
+
+        <div class="fields-tab-panel" data-fields-tab-panel="vencimientos">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Agenda de vencimientos de Campos</h2>
+              <p class="subtle">Control propio de arrendamientos. No impacta ni se mezcla con Hacienda.</p>
+            </div>
+            <button type="button" class="ghost-button" id="field-due-refresh">Actualizar agenda</button>
+          </div>
+          <div class="form-grid">
+            <label>Desde<input id="field-due-from" type="date"></label>
+            <label>Hasta<input id="field-due-to" type="date"></label>
+            <label>Estado
+              <select id="field-due-status">
+                <option value="TODOS">Todos</option>
+                <option value="PENDIENTE_CALCULO">Pendiente de calcular</option>
+                <option value="VENCIDA">Vencida sin calcular</option>
+                <option value="CALCULADA">Calculada / pendiente pago</option>
+                <option value="PARCIAL">Parcialmente pagada</option>
+                <option value="PAGADA">Pagada</option>
+              </select>
+            </label>
+            <label>Buscar contrato / parte / campo<input id="field-due-search" placeholder="Ej.: La Balbina, arrendador, campo"></label>
+          </div>
+          <div class="cc-grid">
+            <div><span>Vencimientos</span><strong id="field-due-count">-</strong></div>
+            <div><span>Pendientes de calcular</span><strong id="field-due-pending-count">-</strong></div>
+            <div><span>Vencidos sin calcular</span><strong id="field-due-overdue-count">-</strong></div>
+            <div><span>Total calculado en rango</span><strong id="field-due-calculated-total">$ 0,00</strong></div>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Vto.</th>
+                  <th>Contrato / campo</th>
+                  <th>Partes</th>
+                  <th>Cuota</th>
+                  <th>Estado</th>
+                  <th>Importe calculado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="field-due-body"></tbody>
+            </table>
+          </div>
+          <p class="form-message" id="field-due-message"></p>
         </div>
         </div>
 
@@ -2551,7 +2602,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260717-hacienda-vencimientos-ejecutivo-v59"></script>
+    <script src="/app.js?v=20260717-campos-agenda-vencimientos-v60"></script>
   </body>
 </html>
 

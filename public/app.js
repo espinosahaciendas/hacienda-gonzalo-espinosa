@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260717-hacienda-vencimientos-ejecutivo-v59";
+const APP_BUILD = "20260717-campos-agenda-vencimientos-v60";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -276,6 +276,7 @@ async function loadFieldModuleData(force = false) {
   state.fieldDataLoaded = true;
   renderFieldContracts();
   renderFieldLeases();
+  renderFieldDueAgenda();
 }
 
 function downloadBackup() {
@@ -3075,6 +3076,251 @@ function renderFieldLeases() {
   updateFieldLeasePreview();
 }
 
+function fieldDateValue(value) {
+  const date = parseAnyLocalDate(value);
+  if (!date || Number.isNaN(date.getTime())) return 0;
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function fieldContractFrequencyMonths(frequency) {
+  const key = String(frequency || "").toUpperCase();
+  if (key === "TRIMESTRAL") return 3;
+  if (key === "CUATRIMESTRAL") return 4;
+  if (key === "SEMESTRAL") return 6;
+  if (key === "ANUAL" || key === "UNICO") return 12;
+  return 1;
+}
+
+function addFieldMonths(date, months) {
+  const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  result.setMonth(result.getMonth() + Number(months || 0));
+  return result;
+}
+
+function fieldContractDueDay(contract = {}) {
+  const text = String(contract.vencimientoHabitual || "").trim();
+  const numbers = text.match(/\d{1,2}/g) || [];
+  const firstValid = numbers.map(Number).find((value) => value >= 1 && value <= 31);
+  if (firstValid) return firstValid;
+  const start = parseAnyLocalDate(contract.inicio);
+  return start ? start.getDate() : 1;
+}
+
+function fieldContractDueDateForMonth(baseDate, dueDay) {
+  const year = baseDate.getFullYear();
+  const month = baseDate.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  return new Date(year, month, Math.min(Math.max(Number(dueDay || 1), 1), lastDay));
+}
+
+function fieldContractLabel(contract = {}) {
+  return contract.nombre || [contract.arrendador, contract.arrendatario, contract.campo].filter(Boolean).join(" / ") || "Contrato sin nombre";
+}
+
+function fieldContractDueManualRows(contract = {}) {
+  const rows = Array.isArray(contract.cuotas) ? contract.cuotas.map(normalizeFieldContractInstallment) : [];
+  const grouped = new Map();
+  rows.forEach((row) => {
+    if (!row.vencimiento) return;
+    const key = `${row.numero || ""}|${formatDateForInput(row.vencimiento) || row.vencimiento}`;
+    const current = grouped.get(key) || {
+      contract,
+      dueDate: formatDateForInput(row.vencimiento) || row.vencimiento,
+      cuotaNumero: row.numero || "",
+      cuotaTipo: "",
+      cuotaDetalle: "",
+      cuotaManualId: row.id || "",
+      source: "MANUAL"
+    };
+    const typeLabel = fieldContractInstallmentTypeLabel(row.tipo);
+    if (!String(current.cuotaTipo || "").includes(typeLabel)) {
+      current.cuotaTipo = [current.cuotaTipo, typeLabel].filter(Boolean).join(" / ");
+    }
+    current.cuotaDetalle = [current.cuotaDetalle, row.detalle].filter(Boolean).join(" - ");
+    grouped.set(key, current);
+  });
+  return Array.from(grouped.values());
+}
+
+function fieldContractDueRegularRows(contract = {}) {
+  const frequency = String(contract.frecuencia || "MENSUAL").toUpperCase();
+  if (frequency === "MANUAL") return [];
+  const start = parseAnyLocalDate(contract.inicio);
+  const end = parseAnyLocalDate(contract.fin);
+  if (!start) return [];
+  const interval = fieldContractFrequencyMonths(frequency);
+  const dueDay = fieldContractDueDay(contract);
+  const limit = end || addFieldMonths(start, frequency === "UNICO" ? 0 : 24);
+  const rows = [];
+  let base = new Date(start.getFullYear(), start.getMonth(), 1);
+  let number = 1;
+  while (base <= limit && number <= 120) {
+    const due = fieldContractDueDateForMonth(base, dueDay);
+    if (due >= start && due <= limit) {
+      rows.push({
+        contract,
+        dueDate: formatDateForInput(due),
+        cuotaNumero: number,
+        cuotaTipo: frequency === "UNICO" ? "Unico pago" : fieldContractInstallmentTypeLabel("MIXTA"),
+        cuotaDetalle: frequency,
+        cuotaManualId: "",
+        source: "FRECUENCIA"
+      });
+    }
+    if (frequency === "UNICO") break;
+    base = addFieldMonths(base, interval);
+    number += 1;
+  }
+  return rows;
+}
+
+function fieldContractDueRows(contract = {}) {
+  const manualRows = fieldContractDueManualRows(contract);
+  if (manualRows.length) return manualRows;
+  return fieldContractDueRegularRows(contract);
+}
+
+function fieldLeaseMatchesDue(lease = {}, due = {}) {
+  const contract = due.contract || {};
+  const leaseDue = formatDateForInput(lease.vencimiento);
+  const dueDate = formatDateForInput(due.dueDate);
+  if (!leaseDue || !dueDate || leaseDue !== dueDate) return false;
+  if (due.cuotaManualId && lease.cuotaManualId && String(lease.cuotaManualId) === String(due.cuotaManualId)) return true;
+  if (contract.id && lease.contratoId && String(contract.id) === String(lease.contratoId)) return true;
+  const sameContract = normalizeSearch(lease.contrato || "") && normalizeSearch(lease.contrato || "") === normalizeSearch(contract.nombre || "");
+  const sameFarm = normalizeSearch(lease.campo || "") && normalizeSearch(lease.campo || "") === normalizeSearch(contract.campo || "");
+  const sameOwner = normalizeSearch(lease.cliente || "") && normalizeSearch(lease.cliente || "") === normalizeSearch(contract.arrendador || "");
+  return sameContract || (sameFarm && sameOwner);
+}
+
+function findFieldLeaseForDue(due = {}) {
+  return (state.fieldLeases || []).find((lease) => fieldLeaseMatchesDue(lease, due)) || null;
+}
+
+function fieldDueStatus(due = {}, lease = null) {
+  const today = dateOnly(new Date()).getTime();
+  const dueTime = fieldDateValue(due.dueDate);
+  if (!lease) return dueTime && dueTime < today ? "VENCIDA" : "PENDIENTE_CALCULO";
+  const total = Number(lease.totalConComision || lease.totalPesos || 0);
+  const applied = fieldLeaseHistoryAppliedAmount(lease);
+  if (total && applied >= total - 0.01) return "PAGADA";
+  if (applied > 0) return "PARCIAL";
+  return "CALCULADA";
+}
+
+function fieldDueStatusLabel(status) {
+  const key = String(status || "").toUpperCase();
+  if (key === "PENDIENTE_CALCULO") return "Pendiente de calcular";
+  if (key === "VENCIDA") return "Vencida sin calcular";
+  if (key === "CALCULADA") return "Calculada / pendiente pago";
+  if (key === "PARCIAL") return "Parcialmente pagada";
+  if (key === "PAGADA") return "Pagada";
+  return "-";
+}
+
+function fieldDueStatusClass(status) {
+  const key = String(status || "").toUpperCase();
+  if (key === "VENCIDA") return "danger";
+  if (key === "PENDIENTE_CALCULO") return "warning";
+  if (key === "PAGADA") return "ok";
+  if (key === "PARCIAL") return "info";
+  return "";
+}
+
+function fieldDueAgendaRows() {
+  return (state.fieldContracts || []).flatMap((contract) =>
+    fieldContractDueRows(contract).map((due) => {
+      const lease = findFieldLeaseForDue(due);
+      const status = fieldDueStatus(due, lease);
+      return {
+        ...due,
+        lease,
+        status,
+        importe: lease ? Number(lease.totalConComision || lease.totalPesos || 0) : 0,
+        aplicado: lease ? fieldLeaseHistoryAppliedAmount(lease) : 0
+      };
+    })
+  );
+}
+
+function filteredFieldDueAgendaRows() {
+  const from = parseAnyLocalDate($("#field-due-from")?.value || "");
+  const to = parseAnyLocalDate($("#field-due-to")?.value || "");
+  const statusFilter = String($("#field-due-status")?.value || "TODOS").toUpperCase();
+  const search = normalizeSearch($("#field-due-search")?.value || "");
+  const fromTime = from ? dateOnly(from).getTime() : 0;
+  const toTime = to ? dateOnly(to).getTime() : 0;
+  return fieldDueAgendaRows()
+    .filter((row) => {
+      const dueTime = fieldDateValue(row.dueDate);
+      if (fromTime && dueTime < fromTime) return false;
+      if (toTime && dueTime > toTime) return false;
+      if (statusFilter !== "TODOS" && String(row.status || "").toUpperCase() !== statusFilter) return false;
+      if (search) {
+        const contract = row.contract || {};
+        const text = normalizeSearch([
+          contract.nombre,
+          contract.campo,
+          contract.arrendador,
+          contract.arrendatario,
+          row.cuotaTipo,
+          row.cuotaDetalle
+        ].filter(Boolean).join(" "));
+        if (!text.includes(search)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => fieldDateValue(a.dueDate) - fieldDateValue(b.dueDate) || normalizeSearch(fieldContractLabel(a.contract)).localeCompare(normalizeSearch(fieldContractLabel(b.contract))));
+}
+
+function renderFieldDueAgenda() {
+  const body = $("#field-due-body");
+  if (!body) return;
+  const rows = filteredFieldDueAgendaRows();
+  const pending = rows.filter((row) => row.status === "PENDIENTE_CALCULO").length;
+  const overdue = rows.filter((row) => row.status === "VENCIDA").length;
+  const calculatedTotal = rows.reduce((sum, row) => sum + Number(row.importe || 0), 0);
+  if ($("#field-due-count")) $("#field-due-count").textContent = String(rows.length);
+  if ($("#field-due-pending-count")) $("#field-due-pending-count").textContent = String(pending);
+  if ($("#field-due-overdue-count")) $("#field-due-overdue-count").textContent = String(overdue);
+  if ($("#field-due-calculated-total")) $("#field-due-calculated-total").textContent = moneyValue(calculatedTotal);
+  body.innerHTML = rows.length
+    ? rows.map((row) => {
+        const contract = row.contract || {};
+        const parts = [contract.arrendador, contract.arrendatario].filter(Boolean).join(" / ");
+        const statusClass = fieldDueStatusClass(row.status);
+        const action = row.lease
+          ? `<button type="button" class="small-button" data-field-due-open="${escapeHtml(row.lease.id)}">Abrir calculo</button>`
+          : `<button type="button" class="small-button" data-field-due-calc="${escapeHtml(contract.id || "")}" data-field-due-date="${escapeHtml(formatDateForInput(row.dueDate))}" data-field-due-installment="${escapeHtml(row.cuotaManualId || "")}">Calcular cuota</button>`;
+        return `<tr>
+          <td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(row.dueDate)) || row.dueDate || "-")}</td>
+          <td><strong>${escapeHtml(fieldContractLabel(contract))}</strong><br><small>${escapeHtml(contract.campo || "-")}</small></td>
+          <td>${escapeHtml(parts || "-")}</td>
+          <td>${escapeHtml(row.cuotaNumero ? `Cuota ${row.cuotaNumero}` : "-")}<br><small>${escapeHtml([row.cuotaTipo, row.cuotaDetalle].filter(Boolean).join(" - ") || "-")}</small></td>
+          <td><span class="status-pill ${statusClass}">${escapeHtml(fieldDueStatusLabel(row.status))}</span></td>
+          <td class="amount">${row.importe ? moneyValue(row.importe) : "-"}</td>
+          <td>${action}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="7">Sin vencimientos de Campos para los filtros seleccionados.</td></tr>`;
+}
+
+function openFieldDueCalculation(contractId = "", dueDate = "", installmentId = "") {
+  const contract = (state.fieldContracts || []).find((item) => String(item.id) === String(contractId));
+  if (!contract) {
+    $("#field-due-message").textContent = "No se encontro el contrato para calcular la cuota.";
+    $("#field-due-message").className = "form-message error";
+    return;
+  }
+  useFieldContractInCalculation(contract);
+  if ($("#field-lease-due-date")) $("#field-lease-due-date").value = formatDateForInput(dueDate);
+  if ($("#field-lease-date")) $("#field-lease-date").value = formatDateForInput(dueDate) || new Date().toISOString().slice(0, 10);
+  if ($("#field-lease-installment") && installmentId) $("#field-lease-installment").value = installmentId;
+  updateFieldLeasePreview();
+  showFieldsTab("calculo");
+}
+
 function findFieldContractForLease(item = {}) {
   const contracts = state.fieldContracts || [];
   if (item.contratoId) {
@@ -3175,6 +3421,7 @@ async function saveFieldLease(event) {
     if (saved.item?.id && $("#field-lease-id")) $("#field-lease-id").value = saved.item.id;
     state.fieldLeases = saved.items || [];
     renderFieldLeases();
+    renderFieldDueAgenda();
     setFieldLeaseMessage("Calculo guardado correctamente.", "ok");
   } catch (error) {
     setFieldLeaseMessage(error.message, "error");
@@ -3186,6 +3433,7 @@ async function deleteFieldLease(id) {
   const saved = await fetchJson(`/api/campos/arrendamientos/${encodeURIComponent(id)}`, { method: "DELETE" });
   state.fieldLeases = saved.items || [];
   renderFieldLeases();
+  renderFieldDueAgenda();
 }
 
 function fieldReportDate(value) {
@@ -9346,6 +9594,26 @@ async function init() {
     }
     if (deleteButton) deleteFieldLease(deleteButton.dataset.fieldLeaseDelete);
   });
+  $("#field-due-refresh")?.addEventListener("click", renderFieldDueAgenda);
+  ["#field-due-from", "#field-due-to", "#field-due-status", "#field-due-search"].forEach((selector) => {
+    $(selector)?.addEventListener("input", renderFieldDueAgenda);
+    $(selector)?.addEventListener("change", renderFieldDueAgenda);
+  });
+  $("#field-due-body")?.addEventListener("click", (event) => {
+    const openButton = event.target.closest("[data-field-due-open]");
+    const calcButton = event.target.closest("[data-field-due-calc]");
+    if (openButton) {
+      const item = (state.fieldLeases || []).find((row) => String(row.id) === String(openButton.dataset.fieldDueOpen));
+      if (item) fillFieldLeaseForm(item);
+    }
+    if (calcButton) {
+      openFieldDueCalculation(
+        calcButton.dataset.fieldDueCalc || "",
+        calcButton.dataset.fieldDueDate || "",
+        calcButton.dataset.fieldDueInstallment || ""
+      );
+    }
+  });
   $("#cc-open-external").addEventListener("click", () => openCurrentAccountPanel("#cc-external-panel"));
   $("#cc-close-external").addEventListener("click", () => {
     state.editingExternalMovementId = "";
@@ -9705,6 +9973,8 @@ async function init() {
   $("#commissionist-to").value = today;
   $("#commissionist-due").value = today;
   $("#commissionist-invoice-date").value = today;
+  if ($("#field-due-from")) $("#field-due-from").value = dateToInputValue(new Date());
+  if ($("#field-due-to")) $("#field-due-to").value = dateToInputValue(addDateDays(new Date(), 90));
   renderOperationSearch();
   renderRealCommissionSummary();
   renderCommissionistStatus();

@@ -199,6 +199,44 @@ h2 {
   font-size: 13px;
 }
 
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.status-pill.ok {
+  border-color: #b7d7c4;
+  background: #edf8f1;
+  color: #0f6b43;
+}
+
+.status-pill.warning {
+  border-color: #ead6a4;
+  background: #fff8e7;
+  color: #795500;
+}
+
+.status-pill.danger {
+  border-color: #efb8b8;
+  background: #fff0f0;
+  color: #9b1c1c;
+}
+
+.status-pill.info {
+  border-color: #bad2e6;
+  background: #eef7ff;
+  color: #235a82;
+}
+
 .view {
   display: none;
 }
