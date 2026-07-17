@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260717-campos-cotizacion-sin-valor-v55";
+const APP_BUILD = "20260717-hacienda-vencimientos-rango-v57";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2659,6 +2659,11 @@ function isFieldLeaseCommissionPayment(item) {
   return concept === "COMISION_COBRADA" || concept === "COMISION_DESCONTADA";
 }
 
+function isFieldLeaseSettledPayment(item) {
+  const status = String(item?.estado || "").toUpperCase();
+  return status !== "PENDIENTE" && status !== "ANULADO";
+}
+
 function fieldLeasePaymentTotals() {
   return (state.fieldLeasePaymentRows || []).reduce((acc, item) => {
     const amount = parseMoneyInput(item.importe || 0);
@@ -2667,6 +2672,24 @@ function fieldLeasePaymentTotals() {
     else acc.pagado += amount;
     return acc;
   }, { pagado: 0, comision: 0, aplicado: 0 });
+}
+
+function fieldLeaseHistoryAppliedAmount(item = {}) {
+  const totals = (item.pagos || []).reduce((acc, payment) => {
+    if (!isFieldLeaseSettledPayment(payment)) return acc;
+    const amount = parseMoneyInput(payment.importe || 0);
+    if (isFieldLeaseCommissionPayment(payment)) {
+      acc.comision += amount;
+      return acc;
+    }
+    const party = String(payment.parte || "").toUpperCase();
+    if (party === "ARRENDADOR") acc.arrendador += amount;
+    else if (party === "ARRENDATARIO") acc.arrendatario += amount;
+    else acc.general += amount;
+    return acc;
+  }, { arrendador: 0, arrendatario: 0, general: 0, comision: 0 });
+  const cuotaAplicada = Math.max(totals.arrendador, totals.arrendatario, totals.general);
+  return cuotaAplicada + totals.comision;
 }
 
 function syncFieldPaymentCommissionShortcut(source = "") {
@@ -3045,7 +3068,7 @@ function renderFieldLeases() {
         <td>${escapeHtml(item.cereal || "-")}</td>
         <td>${plainNumberValue(item.hectareas)}</td>
         <td>${moneyValue(item.totalConComision || item.totalPesos)}</td>
-        <td>${moneyValue((item.pagos || []).reduce((sum, payment) => sum + parseMoneyInput(payment.importe || 0), 0))}</td>
+        <td>${moneyValue(fieldLeaseHistoryAppliedAmount(item))}</td>
         <td><button type="button" class="small-button" data-field-lease-open="${escapeHtml(item.id)}">Abrir</button> <button type="button" class="small-button" data-field-lease-print="${escapeHtml(item.id)}" data-field-lease-audience="GENERAL">Reporte</button> <button type="button" class="small-button" data-field-lease-receipt="${escapeHtml(item.id)}" data-field-lease-receipt-role="ARRENDADOR">Recibo arr.</button> <button type="button" class="small-button" data-field-lease-receipt="${escapeHtml(item.id)}" data-field-lease-receipt-role="ARRENDATARIO">Recibo arrendat.</button> <button type="button" class="small-button danger-button" data-field-lease-delete="${escapeHtml(item.id)}">Eliminar</button></td>
       </tr>`).join("")
     : `<tr><td colspan="8">Sin calculos de arrendamiento cargados.</td></tr>`;
@@ -5650,8 +5673,20 @@ function getCurrentAccountDuePanelRange() {
   };
 }
 
+function getDashboardDueReportRange() {
+  return {
+    from: parseInputDate($("#dashboard-due-from")?.value || ""),
+    to: parseInputDate($("#dashboard-due-to")?.value || "")
+  };
+}
+
 function currentAccountDuePanelRangeLabel(range) {
   if (!range.from && !range.to) return "";
+  return `${range.from ? formatDisplayDate(range.from) : "inicio"} a ${range.to ? formatDisplayDate(range.to) : "fin"}`;
+}
+
+function dueReportRangeLabel(range) {
+  if (!range?.from && !range?.to) return "";
   return `${range.from ? formatDisplayDate(range.from) : "inicio"} a ${range.to ? formatDisplayDate(range.to) : "fin"}`;
 }
 
@@ -5696,13 +5731,15 @@ function printCurrentAccountDueReport(options = {}) {
     : currentFilters;
   const quickRange = dueReportQuickRange(options.range);
   const hasForcedRange = Boolean(quickRange.dateFrom || quickRange.dateTo);
+  const customRange = options.customRange || {};
+  const hasCustomRange = Boolean(customRange.from || customRange.to);
   const panelRange = getCurrentAccountDuePanelRange();
   const hasPanelRange = Boolean(panelRange.from || panelRange.to);
   const effectiveFilters = {
     ...filters,
-    dateFrom: quickRange.dateFrom || panelRange.from || filters.dateFrom,
-    dateTo: quickRange.dateTo || panelRange.to || filters.dateTo,
-    dueFilter: (hasForcedRange || hasPanelRange) ? "TODOS" : filters.dueFilter === "TODOS" && !filters.dateFrom && !filters.dateTo ? "7" : filters.dueFilter
+    dateFrom: quickRange.dateFrom || customRange.from || panelRange.from || filters.dateFrom,
+    dateTo: quickRange.dateTo || customRange.to || panelRange.to || filters.dateTo,
+    dueFilter: (hasForcedRange || hasCustomRange || hasPanelRange) ? "TODOS" : filters.dueFilter === "TODOS" && !filters.dateFrom && !filters.dateTo ? "7" : filters.dueFilter
   };
   const baseFilters = { ...effectiveFilters, dateFrom: null, dateTo: null };
   const rows = (state.cuenta.movimientos || [])
@@ -5765,10 +5802,11 @@ function printCurrentAccountDueReport(options = {}) {
   }, { factura: 0, efectivo: 0, total: 0 });
   const filterLabel = options.all ? "Todos" : $("#cc-client-search").value.trim() || "Todos";
   const panelPeriodLabel = currentAccountDuePanelRangeLabel(panelRange);
+  const customPeriodLabel = dueReportRangeLabel(customRange);
   const periodLabel = effectiveFilters.dateFrom || effectiveFilters.dateTo
     ? `${effectiveFilters.dateFrom ? formatDisplayDate(effectiveFilters.dateFrom) : "inicio"} a ${effectiveFilters.dateTo ? formatDisplayDate(effectiveFilters.dateTo) : "fin"}`
     : effectiveFilters.dueFilter === "7" ? "Proximos 7 dias" : $("#cc-due-filter option:checked").textContent;
-  const finalPeriodLabel = quickRange.label || panelPeriodLabel || periodLabel;
+  const finalPeriodLabel = quickRange.label || customPeriodLabel || panelPeriodLabel || periodLabel;
   const rowsByDate = new Map();
   dueRows.forEach((row) => {
     const key = row.vencimiento || "Sin fecha";
@@ -8929,8 +8967,10 @@ async function init() {
       $("#cc-calendar-to").value = range.to ? dateToInputValue(range.to) : "";
     }
   });
-  $("#dashboard-print-next7").addEventListener("click", () => printCurrentAccountDueReport({ range: "NEXT_7", all: true }));
-  $("#dashboard-print-next-week").addEventListener("click", () => printCurrentAccountDueReport({ range: "NEXT_WEEK", all: true }));
+  $("#dashboard-print-due-range")?.addEventListener("click", () => {
+    const range = getDashboardDueReportRange();
+    printCurrentAccountDueReport({ customRange: range, all: true });
+  });
   $("#cash-form").addEventListener("submit", saveCashMovement);
   $("#cash-clear").addEventListener("click", resetCashForm);
   $("#cash-print").addEventListener("click", printCashReport);
@@ -9540,6 +9580,8 @@ async function init() {
   $("#cash-rec-report-to").value = today;
   $("#cc-calendar-from").value = dateToInputValue(new Date());
   $("#cc-calendar-to").value = dateToInputValue(addDateDays(new Date(), 7));
+  if ($("#dashboard-due-from")) $("#dashboard-due-from").value = dateToInputValue(new Date());
+  if ($("#dashboard-due-to")) $("#dashboard-due-to").value = dateToInputValue(addDateDays(new Date(), 7));
   $("#real-commission-from").value = today.slice(0, 8) + "01";
   $("#real-commission-to").value = today;
   $("#commissionist-from").value = today.slice(0, 8) + "01";

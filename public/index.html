@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20260717-campos-cotizacion-sin-valor-v55">
+    <link rel="stylesheet" href="/styles.css?v=20260717-hacienda-vencimientos-rango-v57">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -219,11 +219,14 @@
         <div class="panel dashboard-report-panel">
           <div>
             <h2>Reporte para jefatura</h2>
-            <p class="subtle">Agenda clara de vencimientos, separando factura, efectivo y comisiones.</p>
+            <p class="subtle">Agenda clara de vencimientos por rango de fechas, separando factura, efectivo y comisiones.</p>
           </div>
-          <div class="form-actions">
-            <button type="button" class="ghost-button" id="dashboard-print-next7">PDF proximos 7 dias</button>
-            <button type="button" class="ghost-button" id="dashboard-print-next-week">PDF semana proxima</button>
+          <div class="form-grid cc-filters">
+            <label>Desde<input id="dashboard-due-from" type="date"></label>
+            <label>Hasta<input id="dashboard-due-to" type="date"></label>
+            <div class="form-actions inline-actions">
+              <button type="button" class="ghost-button" id="dashboard-print-due-range">PDF vencimientos</button>
+            </div>
           </div>
         </div>
 
@@ -2547,7 +2550,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260717-campos-cotizacion-sin-valor-v55"></script>
+    <script src="/app.js?v=20260717-hacienda-vencimientos-rango-v57"></script>
   </body>
 </html>
 
