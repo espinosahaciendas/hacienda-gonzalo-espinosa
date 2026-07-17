@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260717-campos-historial-abre-calculo-v51";
+const APP_BUILD = "20260717-campos-recibos-saldo-comision-v52";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2572,6 +2572,14 @@ function fieldLeaseMiniLedgerNet(row = {}) {
   };
 }
 
+function fieldLeaseAppliedAmountForBalance(totals = {}, role = "ARRENDADOR") {
+  const normalizedRole = String(role || "").toUpperCase();
+  const paid = Number(totals.pagado || 0) + Number(totals.pagos || 0) + Number(totals.facturado || 0) + Number(totals.efectivo || 0);
+  const commission = Number(totals.comision || 0);
+  if (normalizedRole === "ARRENDADOR") return paid - commission;
+  return paid + commission;
+}
+
 function renderFieldLeaseMiniLedgerRows(rows = []) {
   const body = $("#field-lease-mini-ledger-body");
   if (!body) return;
@@ -3197,7 +3205,10 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
     else acc.pagado += amount;
     return acc;
   }, { pagado: 0, comision: 0, aplicado: 0 });
-  const paymentBalance = visibleNetTotal - paymentsTotals.aplicado;
+  const paymentsAppliedToBalance = isInternalReport || isGeneralReport
+    ? paymentsTotals.aplicado
+    : fieldLeaseAppliedAmountForBalance(paymentsTotals, audienceRole);
+  const paymentBalance = visibleNetTotal - paymentsAppliedToBalance;
   const divisorText = item.frecuenciaDivisor && item.frecuenciaDivisor > 1
     ? `Importes de la cuota calculados sobre base anual / ${plainNumberValue(item.frecuenciaDivisor)}.`
     : "Importes calculados para el vencimiento informado.";
@@ -3370,7 +3381,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
     </tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
     ${isGeneralReport ? "" : `<h2>Pagos imputados a esta cuota</h2>
-    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="7">Total pagado</td><td class="amount">${moneyValue(paymentsTotals.pagado)}</td></tr><tr class="total"><td colspan="7">Comision/descuento aplicado</td><td class="amount">${moneyValue(paymentsTotals.comision)}</td></tr><tr class="total"><td colspan="7">Saldo pendiente general</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>`}
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="7">Total pagado</td><td class="amount">${moneyValue(paymentsTotals.pagado)}</td></tr><tr class="total"><td colspan="7">Comision/descuento registrado</td><td class="amount">${moneyValue(paymentsTotals.comision)}</td></tr><tr class="total"><td colspan="7">Total aplicado al saldo</td><td class="amount">${moneyValue(paymentsAppliedToBalance)}</td></tr><tr class="total"><td colspan="7">Saldo pendiente general</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>`}
     <div class="print-actions"><button onclick="window.print()">Imprimir / guardar PDF</button></div>
   </body></html>`);
   popup.document.close();
@@ -3462,7 +3473,8 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
     else acc.pagos += amount;
     return acc;
   }, { pagos: 0, facturado: 0, efectivo: 0, comision: 0, total: 0 });
-  const balance = totals.neto - paymentTotals.total;
+  const paymentAppliedToBalance = fieldLeaseAppliedAmountForBalance(paymentTotals, receiptRole);
+  const balance = totals.neto - paymentAppliedToBalance;
   const partyRows = rows.length
     ? rows.map((row) => {
         const result = fieldLeaseMiniLedgerNet(row);
@@ -3528,7 +3540,7 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
     <h2>Detalle correspondiente al ${escapeHtml(roleLabel.toLowerCase())}</h2>
     <table><thead><tr><th>Parte</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Com. fact.</th><th>Com. efect.</th><th>Total com.</th><th>Criterio</th><th>Neto</th></tr></thead><tbody>${partyRows}<tr class="total"><td colspan="3">Total</td><td class="amount">${moneyValue(totals.facturado)}</td><td class="amount">${moneyValue(totals.efectivo)}</td><td class="amount">${moneyValue(totals.totalCuota)}</td><td class="amount">${moneyValue(totals.comisionFacturado)}</td><td class="amount">${moneyValue(totals.comisionEfectivo)}</td><td class="amount">${moneyValue(totals.comision)}</td><td></td><td class="amount">${moneyValue(totals.neto)}</td></tr></tbody></table>
     <h2>Pagos, descuentos o comisiones imputadas</h2>
-    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="6">Pagos por contrato / facturado</td><td class="amount">${moneyValue(paymentTotals.facturado)}</td></tr><tr class="total"><td colspan="6">Pagos en efectivo</td><td class="amount">${moneyValue(paymentTotals.efectivo)}</td></tr><tr class="total"><td colspan="6">Otros pagos registrados</td><td class="amount">${moneyValue(paymentTotals.pagos)}</td></tr><tr class="total"><td colspan="6">Comisiones / descuentos registrados</td><td class="amount">${moneyValue(paymentTotals.comision)}</td></tr><tr class="total"><td colspan="6">Total aplicado</td><td class="amount">${moneyValue(paymentTotals.total)}</td></tr><tr class="total"><td colspan="6">Saldo de la parte</td><td class="amount">${moneyValue(balance)}</td></tr></tbody></table>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="6">Pagos por contrato / facturado</td><td class="amount">${moneyValue(paymentTotals.facturado)}</td></tr><tr class="total"><td colspan="6">Pagos en efectivo</td><td class="amount">${moneyValue(paymentTotals.efectivo)}</td></tr><tr class="total"><td colspan="6">Otros pagos registrados</td><td class="amount">${moneyValue(paymentTotals.pagos)}</td></tr><tr class="total"><td colspan="6">Comisiones / descuentos registrados</td><td class="amount">${moneyValue(paymentTotals.comision)}</td></tr><tr class="total"><td colspan="6">Total aplicado al saldo</td><td class="amount">${moneyValue(paymentAppliedToBalance)}</td></tr><tr class="total"><td colspan="6">Saldo de la parte</td><td class="amount">${moneyValue(balance)}</td></tr></tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
     <div class="print-actions"><button onclick="window.print()">Imprimir / guardar PDF</button></div>
   </body></html>`);
