@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260717-hacienda-calendar-google-v58";
+const APP_BUILD = "20260717-hacienda-vencimientos-ejecutivo-v59";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -5714,6 +5714,29 @@ function dueReportQuickRange(mode) {
   return {};
 }
 
+function dueReportAbsMoney(value) {
+  return moneyValue(Math.abs(Number(value || 0)));
+}
+
+function dueReportDirection(value) {
+  const amount = Number(value || 0);
+  if (amount < -0.01) return { label: "A pagar", className: "payable" };
+  if (amount > 0.01) return { label: "A cobrar", className: "receivable" };
+  return { label: "Sin saldo", className: "" };
+}
+
+function dueReportClientRole(row) {
+  const pieces = [];
+  if (row.vendedor && normalizeSearch(row.vendedor) === normalizeSearch(row.cliente)) pieces.push("Vendedor");
+  if (row.comprador && normalizeSearch(row.comprador) === normalizeSearch(row.cliente)) pieces.push("Comprador");
+  if (row.consignataria && normalizeSearch(row.consignataria) === normalizeSearch(row.cliente)) pieces.push("Consignataria");
+  return pieces.length ? pieces.join(" / ") : "";
+}
+
+function dueReportExecutiveStyles() {
+  return `body{font-family:Arial,sans-serif;margin:9mm;color:#173632}header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px;margin-bottom:8px}img{width:72px;height:72px;object-fit:contain;background:#173632;padding:6px}h1{font-size:18px;margin:0}h2{font-size:13px;margin:10px 0 5px}p{margin:2px 0;font-size:10.5px}.summary{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin:7px 0 9px}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}table{width:100%;border-collapse:collapse;font-size:9.4px;table-layout:fixed}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.date-row td{background:#173632;color:#fff;font-weight:700;font-size:10.5px}.client strong{display:block;font-size:10px}.muted{color:#52706b;font-size:8.5px}.business{font-size:9px}.amount{text-align:right;font-weight:700;white-space:nowrap}.receivable{color:#0f6b43}.payable{color:#9b1c1c}.cash-row td{font-style:italic}.direction{font-weight:700}.small{font-size:8.5px;color:#52706b}button{margin-top:12px;padding:8px 12px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}tr{break-inside:avoid}h2{break-after:avoid}}`;
+}
+
 function printCurrentAccountDueReport(options = {}) {
   const currentFilters = getCurrentAccountReportFilters();
   const filters = options.all
@@ -5797,9 +5820,12 @@ function printCurrentAccountDueReport(options = {}) {
   const totals = dueRows.reduce((acc, row) => {
     acc.factura += Number(row.factura || 0);
     acc.efectivo += Number(row.efectivo || 0);
-    acc.total += Number(row.factura || 0) + Number(row.efectivo || 0);
+    const total = Number(row.factura || 0) + Number(row.efectivo || 0);
+    acc.total += total;
+    if (total > 0) acc.cobrar += total;
+    if (total < 0) acc.pagar += Math.abs(total);
     return acc;
-  }, { factura: 0, efectivo: 0, total: 0 });
+  }, { factura: 0, efectivo: 0, total: 0, cobrar: 0, pagar: 0 });
   const filterLabel = options.all ? "Todos" : $("#cc-client-search").value.trim() || "Todos";
   const panelPeriodLabel = currentAccountDuePanelRangeLabel(panelRange);
   const customPeriodLabel = dueReportRangeLabel(customRange);
@@ -5816,25 +5842,44 @@ function printCurrentAccountDueReport(options = {}) {
   const dueRowsHtml = rowsByDate.size
     ? Array.from(rowsByDate.entries()).map(([date, dateRows]) => {
         const dateTotals = dateRows.reduce((acc, row) => {
-          acc.factura += Number(row.factura || 0);
-          acc.efectivo += Number(row.efectivo || 0);
-          acc.total += Number(row.factura || 0) + Number(row.efectivo || 0);
-          return acc;
-        }, { factura: 0, efectivo: 0, total: 0 });
-        return `<tr class="due-date-row"><td colspan="7">${escapeHtml(date)} - Total del dia ${moneyValue(dateTotals.total)}</td></tr>${dateRows.map((row) => {
-          const rowClass = row.efectivo ? "movement-cash due-compact" : "due-compact";
           const total = Number(row.factura || 0) + Number(row.efectivo || 0);
-          return `<tr class="${rowClass}"><td>${escapeHtml(row.cliente || "-")}</td><td>${escapeHtml(row.concepto || "-")}<br><span class="subtle-line">${escapeHtml(row.contraparte || "-")}</span></td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount ${row.factura < 0 ? "negative" : "positive"}">${row.factura ? moneyValue(row.factura) : "-"}</td><td class="amount ${row.efectivo < 0 ? "negative" : "positive"}">${row.efectivo ? moneyValue(row.efectivo) : "-"}</td><td class="amount ${total < 0 ? "negative" : "positive"}">${moneyValue(total)}</td><td>${escapeHtml(row.operacion || "-")}</td></tr>`;
+          if (total > 0) acc.cobrar += total;
+          if (total < 0) acc.pagar += Math.abs(total);
+          return acc;
+        }, { cobrar: 0, pagar: 0 });
+        const dateSummary = [
+          dateTotals.cobrar ? `A cobrar ${moneyValue(dateTotals.cobrar)}` : "",
+          dateTotals.pagar ? `A pagar ${moneyValue(dateTotals.pagar)}` : ""
+        ].filter(Boolean).join(" | ") || "Sin saldo";
+        return `<tr class="date-row"><td colspan="6">${escapeHtml(date)} - ${escapeHtml(dateSummary)}</td></tr>${dateRows.map((row) => {
+          const rowClass = row.efectivo ? "cash-row" : "";
+          const total = Number(row.factura || 0) + Number(row.efectivo || 0);
+          const direction = dueReportDirection(total);
+          const role = dueReportClientRole(row);
+          const business = [
+            row.concepto || "-",
+            row.vendedor ? `V: ${row.vendedor}` : "",
+            row.comprador ? `C: ${row.comprador}` : "",
+            row.consignataria ? `Consig.: ${row.consignataria}` : ""
+          ].filter(Boolean).join(" | ");
+          return `<tr class="${rowClass}">
+            <td class="client"><strong>${escapeHtml(row.cliente || "-")}</strong>${role ? `<span class="muted">${escapeHtml(role)}</span>` : ""}</td>
+            <td class="business">${escapeHtml(business)}${row.operacion ? `<br><span class="small">Operacion ${escapeHtml(row.operacion)}</span>` : ""}</td>
+            <td class="amount">${row.factura ? dueReportAbsMoney(row.factura) : "-"}</td>
+            <td class="amount">${row.efectivo ? dueReportAbsMoney(row.efectivo) : "-"}</td>
+            <td class="amount ${direction.className}"><span class="direction">${escapeHtml(direction.label)}</span><br>${dueReportAbsMoney(total)}</td>
+            <td>${escapeHtml(row.comprobante || "-")}</td>
+          </tr>`;
         }).join("")}`;
       }).join("")
-    : `<tr><td colspan="7">Sin vencimientos para el periodo.</td></tr>`;
+    : `<tr><td colspan="6">Sin vencimientos para el periodo.</td></tr>`;
   const popup = window.open("", "_blank", "width=1100,height=850");
   if (!popup) return;
-  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(safePdfTitle("Vencimientos", finalPeriodLabel))}</title><style>${currentAccountReportStyles()}</style></head><body>
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(safePdfTitle("Vencimientos", finalPeriodLabel))}</title><style>${dueReportExecutiveStyles()}</style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>Reporte de vencimientos</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
-  <div class="summary"><div><span>Periodo</span><strong>${escapeHtml(finalPeriodLabel)}</strong></div><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Total facturado</span><strong>${moneyValue(totals.factura)}</strong></div><div><span>Total efectivo</span><strong>${moneyValue(totals.efectivo)}</strong></div><div><span>Total general</span><strong>${moneyValue(totals.total)}</strong></div></div>
-  <h2>Agenda de vencimientos</h2>
-  <table><thead><tr><th>Cliente</th><th>Negocio</th><th>Comprobante</th><th>Facturado</th><th>Efectivo</th><th>Total</th><th>Op.</th></tr></thead><tbody>${dueRowsHtml}</tbody></table>
+  <div class="summary"><div><span>Periodo</span><strong>${escapeHtml(finalPeriodLabel)}</strong></div><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>A cobrar</span><strong class="receivable">${moneyValue(totals.cobrar)}</strong></div><div><span>A pagar</span><strong class="payable">${moneyValue(totals.pagar)}</strong></div><div><span>Movimientos</span><strong>${dueRows.length}</strong></div></div>
+  <h2>Agenda resumida</h2>
+  <table><thead><tr><th style="width:18%">Cliente</th><th style="width:35%">Negocio</th><th style="width:11%">Facturado</th><th style="width:11%">Efectivo</th><th style="width:12%">Total</th><th style="width:13%">Comprobante</th></tr></thead><tbody>${dueRowsHtml}</tbody></table>
   <button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
   popup.document.close();
 }
