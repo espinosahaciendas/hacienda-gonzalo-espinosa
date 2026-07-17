@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260717-campos-solapas-v48";
+const APP_BUILD = "20260717-campos-cotizaciones-producto-v49";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2211,12 +2211,13 @@ function fieldLeaseProductQuoteRowsFromContract(contract = {}) {
     const product = fieldContractLineProductKey(line.base);
     const savedQuote = parseMoneyInput(saved.get(product)?.cotizacion || 0);
     if (product === "FIJO" || product === "PESOS") return;
+    const productAverage = parseMoneyInput(quoteAverages.get(product) || 0);
     const existing = groups.get(product) || {
       producto: product,
       etiqueta: fieldContractLineProductLabel(product),
       lineas: 0,
       unidad: saved.get(product)?.unidad || fieldLeaseDefaultQuoteUnitForProduct(product),
-      cotizacion: savedQuote || quoteAverages.get(product) || 0
+      cotizacion: productAverage || savedQuote || 0
     };
     existing.lineas += 1;
     groups.set(product, existing);
