@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260717-campos-cotizaciones-producto-v49";
+const APP_BUILD = "20260717-campos-recibos-comision-v50";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1902,7 +1902,7 @@ function fieldLeaseCurrentInput() {
   const totalPesos = billed.total + cash.total;
   const commission = calculateFieldLeaseCommission(totalPesos, billed.total, cash.total);
   const partes = fieldContractPartyRowsFromContract(contract);
-  const distribucionPartes = calculateFieldLeasePartyDistribution(partes, billed.total, cash.total, commission.total);
+  const distribucionPartes = calculateFieldLeasePartyDistribution(partes, billed.total, cash.total, commission);
   return {
     id: leaseId,
     contrato: $("#field-lease-contract")?.value || "",
@@ -2106,9 +2106,25 @@ function calculateFieldLeaseCommission(total, billed, cash) {
   return { base, rate, baseAmount, generalTotal, billedRate, billedTotal, cashRate, cashTotal, total: commissionTotal };
 }
 
-function calculateFieldLeasePartyDistribution(partes = [], billedTotal = 0, cashTotal = 0, commissionTotal = 0) {
+function fieldLeaseCommissionParts(commission = 0) {
+  if (commission && typeof commission === "object") {
+    const general = Number(commission.generalTotal || 0);
+    const billed = Number(commission.billedTotal || 0);
+    const cash = Number(commission.cashTotal || 0);
+    return {
+      general,
+      billed,
+      cash,
+      total: Number(commission.total || 0) || general + billed + cash
+    };
+  }
+  return { general: Number(commission || 0), billed: 0, cash: 0, total: Number(commission || 0) };
+}
+
+function calculateFieldLeasePartyDistribution(partes = [], billedTotal = 0, cashTotal = 0, commission = 0) {
   const rows = (partes || []).map(normalizeFieldContractParty).filter((row) => row.nombre || row.porcentaje);
   const totals = fieldContractPartyTotals(rows);
+  const commissionParts = fieldLeaseCommissionParts(commission);
   return rows.map((row) => {
     const type = String(row.tipo || "").toUpperCase();
     const typeTotal = type === "ARRENDATARIO" ? totals.arrendatarios : totals.arrendadores;
@@ -2116,15 +2132,24 @@ function calculateFieldLeasePartyDistribution(partes = [], billedTotal = 0, cash
     const factor = typeTotal > 0 ? percent / typeTotal : percent / 100;
     const facturado = Number(billedTotal || 0) * factor;
     const efectivo = Number(cashTotal || 0) * factor;
-    const comision = Number(commissionTotal || 0) * factor;
+    const comisionGeneral = commissionParts.general * factor;
+    const comisionFacturado = commissionParts.billed * factor;
+    const comisionEfectivo = commissionParts.cash * factor;
+    const comision = comisionGeneral + comisionFacturado + comisionEfectivo;
+    const totalCuota = facturado + efectivo;
+    const netoInformado = type === "ARRENDATARIO" ? totalCuota + comision : totalCuota - comision;
     return {
       ...row,
       porcentajeNormalizado: factor * 100,
       facturado,
       efectivo,
-      totalCuota: facturado + efectivo,
+      totalCuota,
+      comisionGeneral,
+      comisionFacturado,
+      comisionEfectivo,
       comision,
-      totalConComision: facturado + efectivo + comision
+      netoInformado,
+      totalConComision: netoInformado
     };
   });
 }
@@ -2517,7 +2542,7 @@ function renderFieldLeasePartyDistributionRows(rows = []) {
         <td class="amount">${moneyValue(row.efectivo || 0)}</td>
         <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
         <td class="amount">${moneyValue(row.comision || 0)}</td>
-        <td class="amount">${moneyValue(row.totalConComision || row.totalCuota || 0)}<br><button type="button" class="small-button" data-field-party-receipt="${escapeHtml(fieldLeasePartyRowKey(row))}">Recibo</button></td>
+        <td class="amount">${moneyValue(row.netoInformado ?? row.totalConComision ?? row.totalCuota ?? 0)}<br><button type="button" class="small-button" data-field-party-receipt="${escapeHtml(fieldLeasePartyRowKey(row))}">Recibo</button></td>
       </tr>`).join("")
     : `<tr><td colspan="8">Sin distribucion especial. Se usaran las partes principales del contrato.</td></tr>`;
 }
@@ -2779,21 +2804,26 @@ function fieldLeaseQuickPaymentPresets(calc = fieldLeaseCurrentInput()) {
         detalle: role === "ARRENDATARIO" ? "Efectivo entregado por el arrendatario" : "Efectivo a pagar al arrendador"
       });
     }
-    if (Number(row.comision || 0)) {
+    [
+      ["GENERAL", "Comision general", Number(row.comisionGeneral || 0)],
+      ["FACTURADO", "Comision sobre facturado", Number(row.comisionFacturado || 0)],
+      ["EFECTIVO", "Comision sobre efectivo", Number(row.comisionEfectivo || 0)]
+    ].forEach(([bucket, label, amount]) => {
+      if (!amount) return;
       presets.push({
-        id: `COMISION-${partyKey || index}`,
+        id: `COMISION-${bucket}-${partyKey || index}`,
         partyKey,
         concepto: role === "ARRENDADOR" ? "COMISION_DESCONTADA" : "COMISION_COBRADA",
         parte: role,
         aplicacionComision: role === "ARRENDADOR" ? "DESCUENTA_COBRADOR" : "SUMA_PAGADOR",
-        estado: role === "ARRENDADOR" ? "DESCONTADA" : "PAGADA",
+        estado: role === "ARRENDADOR" ? "DESCONTADA" : "PENDIENTE",
         medio: role === "ARRENDADOR" ? "Descuento" : "Comision",
-        referencia: baseRef,
-        importe: Number(row.comision || 0),
-        etiqueta: role === "ARRENDADOR" ? `Comision descontada del efectivo - ${name}` : `Comision cobrada - ${name}`,
-        detalle: role === "ARRENDADOR" ? "Puede descontarse del efectivo del arrendador" : result.criterio
+        referencia: `${baseRef} - ${label}`,
+        importe: amount,
+        etiqueta: role === "ARRENDADOR" ? `${label} descontada - ${name}` : `${label} a cobrar - ${name}`,
+        detalle: role === "ARRENDADOR" ? "Se descuenta al arrendador que cobra" : "Se suma al arrendatario que paga"
       });
-    }
+    });
     return presets;
   });
 }
@@ -3081,7 +3111,13 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
   if (!popup) return;
   const cashTotal = Number(item.efectivoTotal || 0);
   const billedTotal = Number(item.facturadoTotal || 0);
-  const commissionTotal = Number(item.comisionImporte || 0);
+  const commissionData = {
+    generalTotal: Number(item.comisionGeneralImporte || 0),
+    billedTotal: Number(item.comisionFacturadoImporte || 0),
+    cashTotal: Number(item.comisionEfectivoImporte || 0),
+    total: Number(item.comisionImporte || 0)
+  };
+  const commissionTotal = Number(commissionData.total || 0);
   const finalTotal = Number(item.totalConComision || item.totalPesos || 0);
   const distributionRowsData = Array.isArray(item.distribucionPartes) && item.distribucionPartes.length
     ? item.distribucionPartes
@@ -3092,7 +3128,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
         }),
         billedTotal,
         cashTotal,
-        commissionTotal
+        commissionData
       );
   const visibleDistributionRows = isInternalReport || isGeneralReport
     ? distributionRowsData
@@ -3313,14 +3349,19 @@ function printCurrentFieldLeaseReport(audience = "INTERNO") {
 function fieldLeaseReceiptRowsForRole(item = {}, role = "ARRENDADOR", partyKey = "") {
   const billedTotal = Number(item.facturadoTotal || 0);
   const cashTotal = Number(item.efectivoTotal || 0);
-  const commissionTotal = Number(item.comisionImporte || 0);
+  const commissionData = {
+    generalTotal: Number(item.comisionGeneralImporte || 0),
+    billedTotal: Number(item.comisionFacturadoImporte || 0),
+    cashTotal: Number(item.comisionEfectivoImporte || 0),
+    total: Number(item.comisionImporte || 0)
+  };
   const distributionRows = Array.isArray(item.distribucionPartes) && item.distribucionPartes.length
     ? item.distribucionPartes
     : calculateFieldLeasePartyDistribution(
         fieldContractPartyRowsFromContract(item),
         billedTotal,
         cashTotal,
-        commissionTotal
+        commissionData
       );
   return distributionRows.filter((row) => {
     if (String(row.tipo || "").toUpperCase() !== role) return false;
@@ -3359,10 +3400,12 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
     acc.facturado += Number(row.facturado || 0);
     acc.efectivo += Number(row.efectivo || 0);
     acc.totalCuota += Number(row.totalCuota || 0);
+    acc.comisionFacturado += Number(row.comisionFacturado || 0);
+    acc.comisionEfectivo += Number(row.comisionEfectivo || 0);
     acc.comision += Number(row.comision || 0);
     acc.neto += result.neto;
     return acc;
-  }, { facturado: 0, efectivo: 0, totalCuota: 0, comision: 0, neto: 0 });
+  }, { facturado: 0, efectivo: 0, totalCuota: 0, comisionFacturado: 0, comisionEfectivo: 0, comision: 0, neto: 0 });
   const paymentTotals = payments.reduce((acc, payment) => {
     const amount = parseMoneyInput(payment.importe || 0);
     acc.total += amount;
@@ -3384,12 +3427,14 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
           <td class="amount">${moneyValue(row.facturado || 0)}</td>
           <td class="amount">${moneyValue(row.efectivo || 0)}</td>
           <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
+          <td class="amount">${moneyValue(row.comisionFacturado || 0)}</td>
+          <td class="amount">${moneyValue(row.comisionEfectivo || 0)}</td>
           <td class="amount">${moneyValue(row.comision || 0)}</td>
           <td>${escapeHtml(result.criterio)}</td>
           <td class="amount">${moneyValue(result.neto)}</td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="9">Sin partes cargadas para ${escapeHtml(roleLabel.toLowerCase())}.</td></tr>`;
+    : `<tr><td colspan="11">Sin partes cargadas para ${escapeHtml(roleLabel.toLowerCase())}.</td></tr>`;
   const paymentRows = payments.length
     ? payments.map((payment) => {
         const cashPayment = /EFECTIVO/i.test([payment.concepto, payment.medio, payment.referencia].filter(Boolean).join(" "));
@@ -3435,7 +3480,7 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
       <span>Fecha calculo</span><strong>${fieldReportDate(item.fecha)}</strong>
     </div>
     <h2>Detalle correspondiente al ${escapeHtml(roleLabel.toLowerCase())}</h2>
-    <table><thead><tr><th>Parte</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision</th><th>Criterio</th><th>Neto</th></tr></thead><tbody>${partyRows}<tr class="total"><td colspan="3">Total</td><td class="amount">${moneyValue(totals.facturado)}</td><td class="amount">${moneyValue(totals.efectivo)}</td><td class="amount">${moneyValue(totals.totalCuota)}</td><td class="amount">${moneyValue(totals.comision)}</td><td></td><td class="amount">${moneyValue(totals.neto)}</td></tr></tbody></table>
+    <table><thead><tr><th>Parte</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Com. fact.</th><th>Com. efect.</th><th>Total com.</th><th>Criterio</th><th>Neto</th></tr></thead><tbody>${partyRows}<tr class="total"><td colspan="3">Total</td><td class="amount">${moneyValue(totals.facturado)}</td><td class="amount">${moneyValue(totals.efectivo)}</td><td class="amount">${moneyValue(totals.totalCuota)}</td><td class="amount">${moneyValue(totals.comisionFacturado)}</td><td class="amount">${moneyValue(totals.comisionEfectivo)}</td><td class="amount">${moneyValue(totals.comision)}</td><td></td><td class="amount">${moneyValue(totals.neto)}</td></tr></tbody></table>
     <h2>Pagos, descuentos o comisiones imputadas</h2>
     <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="6">Pagos por contrato / facturado</td><td class="amount">${moneyValue(paymentTotals.facturado)}</td></tr><tr class="total"><td colspan="6">Pagos en efectivo</td><td class="amount">${moneyValue(paymentTotals.efectivo)}</td></tr><tr class="total"><td colspan="6">Otros pagos registrados</td><td class="amount">${moneyValue(paymentTotals.pagos)}</td></tr><tr class="total"><td colspan="6">Comisiones / descuentos registrados</td><td class="amount">${moneyValue(paymentTotals.comision)}</td></tr><tr class="total"><td colspan="6">Total aplicado</td><td class="amount">${moneyValue(paymentTotals.total)}</td></tr><tr class="total"><td colspan="6">Saldo de la parte</td><td class="amount">${moneyValue(balance)}</td></tr></tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
