@@ -2202,6 +2202,17 @@ class BackupDataSource {
   }
 
   normalizeFieldContract(input = {}) {
+    const firstText = (...keys) => {
+      for (const key of keys) {
+        const value = input[key];
+        if (value !== undefined && value !== null && String(value).trim() !== "") return normalizeText(value);
+      }
+      return "";
+    };
+    const firstDate = (...keys) => {
+      const value = firstText(...keys);
+      return value ? formatDateForDisplay(value) : "";
+    };
     return {
       id: normalizeText(input.id) || `CAMPOS-CONTR-${Date.now()}`,
       nombre: normalizeText(input.nombre),
@@ -2209,11 +2220,11 @@ class BackupDataSource {
       arrendatario: normalizeText(input.arrendatario),
       campo: normalizeText(input.campo),
       hectareas: parseMoney(input.hectareas),
-      inicio: input.inicio ? formatDateForDisplay(input.inicio) : "",
-      fin: input.fin ? formatDateForDisplay(input.fin) : "",
-      frecuencia: normalizeText(input.frecuencia || "MENSUAL").toUpperCase(),
-      vencimientoHabitual: normalizeText(input.vencimientoHabitual),
-      proximoVencimiento: input.proximoVencimiento ? formatDateForDisplay(input.proximoVencimiento) : "",
+      inicio: firstDate("inicio", "fechaInicio", "fechaDesde", "vigenciaDesde", "vigenciaContratoDesde", "contratoDesde", "periodoDesde", "desde", "start"),
+      fin: firstDate("fin", "fechaFin", "fechaHasta", "vigenciaHasta", "vigenciaContratoHasta", "contratoHasta", "periodoHasta", "hasta", "end"),
+      frecuencia: (firstText("frecuencia", "frecuenciaBase", "periodicidad", "formaPago") || "MENSUAL").toUpperCase(),
+      vencimientoHabitual: firstText("vencimientoHabitual", "vencimientoBase", "diaVencimiento", "diaVto", "vencimientoTexto", "vencimiento"),
+      proximoVencimiento: firstDate("proximoVencimiento", "proximoVto", "siguienteVencimiento"),
       criterioCotizacion: normalizeText(input.criterioCotizacion),
       facturadoModo: normalizeText(input.facturadoModo || "HECTAREAS").toUpperCase(),
       facturadoValor: parseMoney(input.facturadoValor),
