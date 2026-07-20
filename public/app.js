@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260720-campos-vencimientos-contratos-v64";
+const APP_BUILD = "20260720-campos-vencimientos-contratos-v65";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -7541,6 +7541,9 @@ function parseDisplayDate(value) {
 }
 
 function parseAnyLocalDate(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
   const text = String(value || "").trim();
   const inputMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (inputMatch) return new Date(Number(inputMatch[1]), Number(inputMatch[2]) - 1, Number(inputMatch[3]));
@@ -10121,5 +10124,6 @@ bootstrap().catch((error) => {
   $("#status").textContent = error.message;
   $("#status").style.color = "#9b1c1c";
 });
+
 
 
