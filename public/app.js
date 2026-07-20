@@ -26,6 +26,7 @@
   commissionistRows: [],
   fieldQuoteRows: [],
   fieldLeasePaymentRows: [],
+  fieldLeaseAdjustmentRows: [],
   fieldLeaseProductQuoteRows: [],
   fieldLeaseLineQuoteRows: [],
   fieldContractPartyRows: [],
@@ -44,7 +45,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260720-campos-vencimientos-contratos-v67";
+const APP_BUILD = "20260720-campos-reliquidaciones-v68";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1945,6 +1946,7 @@ function fieldLeaseCurrentInput() {
     productQuotes,
     lineQuotes,
     pagos: state.fieldLeasePaymentRows || [],
+    ajustes: state.fieldLeaseAdjustmentRows || [],
     partes,
     distribucionPartes,
     cotizacionPesos: priceInPesos,
@@ -2551,6 +2553,7 @@ function updateFieldLeasePreview() {
   renderFieldLeaseMiniLedgerRows(calc.distribucionPartes || []);
   renderFieldLeasePaymentPresetRows(calc);
   renderFieldLeasePaymentRows(calc.totalConComision);
+  renderFieldLeaseAdjustmentRows();
   const messageNode = $("#field-lease-message");
   if (messageNode && calc.totalPesos && /Falta|promedio esta cargado/i.test(messageNode.textContent || "")) {
     setFieldLeaseMessage("");
@@ -2649,6 +2652,7 @@ function resetFieldLeaseForm() {
   if ($("#field-payment-concept-simple")) $("#field-payment-concept-simple").value = "PAGO_CUOTA";
   state.fieldQuoteRows = [];
   state.fieldLeasePaymentRows = [];
+  state.fieldLeaseAdjustmentRows = [];
   state.fieldLeasePaymentPresetRows = [];
   state.fieldLeaseProductQuoteRows = [];
   state.fieldLeaseLineQuoteRows = [];
@@ -2656,6 +2660,7 @@ function resetFieldLeaseForm() {
   renderFieldLeaseLineQuoteRows({}, true);
   renderFieldLeasePaymentPresetRows({});
   renderFieldLeasePaymentRows(0);
+  renderFieldLeaseAdjustmentRows();
   updateFieldLeasePreview();
   setFieldLeaseMessage("");
 }
@@ -3006,6 +3011,87 @@ function renderFieldLeasePaymentRows(totalDue = fieldLeaseCurrentInput().totalCo
   if ($("#field-payment-paid")) $("#field-payment-paid").textContent = moneyValue(totals.pagado);
   if ($("#field-payment-commission")) $("#field-payment-commission").textContent = moneyValue(totals.comision);
   if ($("#field-payment-balance")) $("#field-payment-balance").textContent = moneyValue(balance);
+}
+
+function fieldLeaseAdjustmentPartLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "EFECTIVO") return "Efectivo";
+  if (key === "TOTAL") return "Total cuota";
+  return "Facturado / contrato";
+}
+
+function fieldLeaseAdjustmentStatusLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "PAGADO") return "Pagado";
+  if (key === "COMPENSADO") return "Compensado";
+  if (key === "INFORMATIVO") return "Informativo";
+  return "Pendiente";
+}
+
+function syncFieldLeaseAdjustmentDifference() {
+  const originalAmount = parseMoneyInput($("#field-adjustment-original-amount")?.value || 0);
+  const newAmount = parseMoneyInput($("#field-adjustment-new-amount")?.value || 0);
+  const diffInput = $("#field-adjustment-difference");
+  if (diffInput && originalAmount && newAmount) setMoneyInput("#field-adjustment-difference", newAmount - originalAmount);
+}
+
+function renderFieldLeaseAdjustmentRows() {
+  const body = $("#field-adjustment-body");
+  if (!body) return;
+  const rows = state.fieldLeaseAdjustmentRows || [];
+  if ($("#field-adjustment-summary")) {
+    const totalDiff = rows.reduce((sum, item) => sum + parseMoneyInput(item.diferencia || 0), 0);
+    $("#field-adjustment-summary").textContent = rows.length
+      ? `${rows.length} ajuste/s - diferencia total ${moneyValue(totalDiff)}`
+      : "Sin ajustes cargados";
+  }
+  body.innerHTML = rows.length
+    ? rows.map((item) => `<tr>
+        <td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(item.fecha)) || item.fecha || "-")}</td>
+        <td>${escapeHtml(fieldLeaseAdjustmentPartLabel(item.parte))}</td>
+        <td>${escapeHtml(item.motivo || "-")}</td>
+        <td class="amount">${moneyValue(item.promedioOriginal || 0)}</td>
+        <td class="amount">${moneyValue(item.promedioNuevo || 0)}</td>
+        <td class="amount">${moneyValue(item.importeOriginal || 0)}</td>
+        <td class="amount">${moneyValue(item.importeReajustado || 0)}</td>
+        <td class="amount">${moneyValue(item.diferencia || 0)}</td>
+        <td>${escapeHtml(fieldLeaseAdjustmentStatusLabel(item.estado))}</td>
+        <td><button type="button" class="small-button danger-button" data-field-adjustment-remove="${escapeHtml(item.id)}">Quitar</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="10">Sin ajustes o reliquidaciones para esta cuota.</td></tr>`;
+}
+
+function addFieldLeaseAdjustmentRow() {
+  const originalAmount = parseMoneyInput($("#field-adjustment-original-amount")?.value || 0);
+  const newAmount = parseMoneyInput($("#field-adjustment-new-amount")?.value || 0);
+  const manualDiff = parseMoneyInput($("#field-adjustment-difference")?.value || 0);
+  const difference = manualDiff || (newAmount || originalAmount ? newAmount - originalAmount : 0);
+  const reason = String($("#field-adjustment-reason")?.value || "").trim();
+  if (!reason && !difference && !originalAmount && !newAmount) {
+    setFieldLeaseMessage("Cargue al menos un motivo o importes para registrar el ajuste.", "error");
+    return;
+  }
+  state.fieldLeaseAdjustmentRows.push({
+    id: `AJUSTE-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    fecha: $("#field-adjustment-date")?.value || new Date().toISOString().slice(0, 10),
+    parte: $("#field-adjustment-part")?.value || "FACTURADO",
+    motivo: reason || "Reajuste posterior de cuota",
+    referencia: $("#field-adjustment-reference")?.value || "",
+    promedioOriginal: parseMoneyInput($("#field-adjustment-original-quote")?.value || 0),
+    promedioNuevo: parseMoneyInput($("#field-adjustment-new-quote")?.value || 0),
+    importeOriginal: originalAmount,
+    importeReajustado: newAmount,
+    diferencia: difference,
+    estado: $("#field-adjustment-status")?.value || "PENDIENTE",
+    observaciones: $("#field-adjustment-notes")?.value || ""
+  });
+  ["#field-adjustment-reason", "#field-adjustment-reference", "#field-adjustment-original-quote", "#field-adjustment-new-quote", "#field-adjustment-original-amount", "#field-adjustment-new-amount", "#field-adjustment-difference", "#field-adjustment-notes"].forEach((selector) => {
+    const node = $(selector);
+    if (node) node.value = "";
+  });
+  if ($("#field-adjustment-status")) $("#field-adjustment-status").value = "PENDIENTE";
+  renderFieldLeaseAdjustmentRows();
+  setFieldLeaseMessage("Ajuste agregado. Guarde el calculo para conservarlo.", "ok");
 }
 
 function addFieldLeasePaymentRow() {
@@ -3535,10 +3621,12 @@ function fillFieldLeaseForm(item) {
   state.fieldLeaseProductQuoteRows = Array.isArray(item.productQuotes) ? item.productQuotes : [];
   state.fieldLeaseLineQuoteRows = Array.isArray(item.lineQuotes) ? item.lineQuotes : [];
   state.fieldLeasePaymentRows = Array.isArray(item.pagos) ? item.pagos : [];
+  state.fieldLeaseAdjustmentRows = Array.isArray(item.ajustes) ? item.ajustes : [];
   renderFieldLeaseInstallmentOptions(item.cuotaManualId || "");
   renderFieldQuoteRows();
   renderFieldLeaseLineQuoteRows(currentFieldContractForCalculation() || {}, true);
   renderFieldLeasePaymentRows(item.totalConComision || item.totalPesos || 0);
+  renderFieldLeaseAdjustmentRows();
   if (state.fieldQuoteRows.length) syncFieldQuoteAverageToPrice();
   updateFieldLeasePreview();
   showFieldsTab("calculo");
@@ -3731,6 +3819,29 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
         return `<tr${cashPayment ? ' class="cash"' : ""}><td>${fieldReportDate(payment.fecha)}</td><td>${escapeHtml(fieldLeasePaymentConceptLabel(payment.concepto))}</td><td>${escapeHtml(fieldLeasePaymentPartyLabel(payment.parte))}</td><td>${escapeHtml(fieldLeasePaymentCommissionDetail(payment.aplicacionComision))}</td><td>${escapeHtml(fieldLeasePaymentStatusLabel(payment.estado))}</td><td>${escapeHtml(payment.medio || "-")}</td><td>${escapeHtml(payment.referencia || "-")}</td><td class="amount">${moneyValue(payment.importe || 0)}</td></tr>`;
       }).join("")
     : `<tr><td colspan="8">Sin pagos registrados para esta cuota.</td></tr>`;
+  const adjustmentRowsData = Array.isArray(item.ajustes) ? item.ajustes : [];
+  const adjustmentRows = adjustmentRowsData.length
+    ? adjustmentRowsData.map((adjustment) => `<tr>
+        <td>${fieldReportDate(adjustment.fecha)}</td>
+        <td>${escapeHtml(fieldLeaseAdjustmentPartLabel(adjustment.parte))}</td>
+        <td>${escapeHtml(adjustment.motivo || "-")}</td>
+        <td>${escapeHtml(adjustment.referencia || "-")}</td>
+        <td class="amount">${adjustment.promedioOriginal ? moneyValue(adjustment.promedioOriginal) : "-"}</td>
+        <td class="amount">${adjustment.promedioNuevo ? moneyValue(adjustment.promedioNuevo) : "-"}</td>
+        <td class="amount">${adjustment.importeOriginal ? moneyValue(adjustment.importeOriginal) : "-"}</td>
+        <td class="amount">${adjustment.importeReajustado ? moneyValue(adjustment.importeReajustado) : "-"}</td>
+        <td class="amount">${moneyValue(adjustment.diferencia || 0)}</td>
+        <td>${escapeHtml(fieldLeaseAdjustmentStatusLabel(adjustment.estado))}</td>
+      </tr>`).join("")
+    : "";
+  const adjustmentTotal = adjustmentRowsData.reduce((sum, adjustment) => sum + Number(adjustment.diferencia || 0), 0);
+  const adjustmentBlock = adjustmentRowsData.length
+    ? `<h2>Ajustes / reliquidaciones</h2>
+      <table><thead><tr><th>Fecha</th><th>Parte ajustada</th><th>Motivo</th><th>Referencia</th><th>Prom. original</th><th>Prom. reajustado</th><th>Importe original</th><th>Importe reajustado</th><th>Diferencia</th><th>Estado</th></tr></thead><tbody>
+        ${adjustmentRows}
+        <tr class="total"><td colspan="8">Diferencia total por ajustes</td><td class="amount">${moneyValue(adjustmentTotal)}</td><td></td></tr>
+      </tbody></table>`
+    : "";
   const partyNetRows = visibleDistributionRows.length
     ? visibleDistributionRows.map((row) => {
         const result = fieldLeaseMiniLedgerNet(row);
@@ -3807,6 +3918,7 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
     <h2>Cotizaciones utilizadas</h2>
     ${quoteGroupsBlock}
     ${commissionBlock}
+    ${adjustmentBlock}
     <h2>${isInternalReport || isGeneralReport ? "Distribucion por partes de la cuota" : `Resumen correspondiente a ${escapeHtml(audienceLabel.toLowerCase())}`}</h2>
     <table class="party-table"><thead><tr><th class="party-name">Parte</th><th class="party-role">Rol</th><th class="party-cuit">CUIT</th><th class="party-percent">%</th><th class="party-money">Fact.</th><th class="party-money">Efec.</th><th class="party-money">Total</th><th class="party-money">Com.</th><th class="party-criterion">Criterio</th><th class="party-money">Neto</th></tr></thead><tbody>
       ${partyNetRows}
@@ -9675,6 +9787,11 @@ async function init() {
   });
   $("#field-payment-add").addEventListener("click", addFieldLeasePaymentRow);
   $("#field-payment-commission-register")?.addEventListener("click", addFieldLeaseCommissionRow);
+  $("#field-adjustment-add")?.addEventListener("click", addFieldLeaseAdjustmentRow);
+  ["#field-adjustment-original-amount", "#field-adjustment-new-amount"].forEach((selector) => {
+    $(selector)?.addEventListener("input", syncFieldLeaseAdjustmentDifference);
+    $(selector)?.addEventListener("change", syncFieldLeaseAdjustmentDifference);
+  });
   $("#field-payment-commission-mode")?.addEventListener("change", syncFieldPaymentCommissionMode);
   $("#field-payment-commission-add")?.addEventListener("change", () => syncFieldPaymentCommissionShortcut("ADD"));
   $("#field-payment-commission-deduct")?.addEventListener("change", () => syncFieldPaymentCommissionShortcut("DEDUCT"));
@@ -9691,6 +9808,12 @@ async function init() {
     if (!button) return;
     state.fieldLeasePaymentRows = state.fieldLeasePaymentRows.filter((item) => String(item.id) !== String(button.dataset.fieldPaymentRemove));
     updateFieldLeasePreview();
+  });
+  $("#field-adjustment-body")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-adjustment-remove]");
+    if (!button) return;
+    state.fieldLeaseAdjustmentRows = state.fieldLeaseAdjustmentRows.filter((item) => String(item.id) !== String(button.dataset.fieldAdjustmentRemove));
+    renderFieldLeaseAdjustmentRows();
   });
   $("#field-lease-party-distribution-body")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-field-party-receipt]");

@@ -945,6 +945,50 @@
                 </table>
               </div>
             </div>
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Ajustes / reliquidaciones</h3>
+                  <p class="subtle">Use este bloque cuando una parte de la cuota se paga fuera de termino y se acuerda recalcularla con otro promedio. No modifica el calculo original.</p>
+                </div>
+                <span class="subtle" id="field-adjustment-summary">Sin ajustes cargados</span>
+              </div>
+              <div class="form-grid">
+                <label>Fecha del ajuste / pago<input id="field-adjustment-date" type="date"></label>
+                <label>Parte afectada
+                  <select id="field-adjustment-part">
+                    <option value="FACTURADO">Facturado / contrato</option>
+                    <option value="EFECTIVO">Efectivo</option>
+                    <option value="TOTAL">Total cuota</option>
+                  </select>
+                </label>
+                <label>Motivo<input id="field-adjustment-reason" placeholder="Ej.: reajuste por pago fuera de termino"></label>
+                <label>Referencia / acuerdo<input id="field-adjustment-reference" placeholder="Transferencia, acuerdo entre partes, observacion"></label>
+                <label>Promedio original<input id="field-adjustment-original-quote" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Promedio nuevo<input id="field-adjustment-new-quote" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Importe original<input id="field-adjustment-original-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Importe reajustado<input id="field-adjustment-new-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Diferencia calculada<input id="field-adjustment-difference" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Estado
+                  <select id="field-adjustment-status">
+                    <option value="PENDIENTE">Pendiente</option>
+                    <option value="PAGADO">Pagado</option>
+                    <option value="COMPENSADO">Compensado</option>
+                    <option value="INFORMATIVO">Informativo</option>
+                  </select>
+                </label>
+                <label>Observaciones<textarea id="field-adjustment-notes" rows="2" placeholder="Detalle de cotizaciones usadas o acuerdo aplicado."></textarea></label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-adjustment-add">Agregar ajuste</button>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Fecha</th><th>Parte</th><th>Motivo</th><th>Prom. original</th><th>Prom. nuevo</th><th>Original</th><th>Reajustado</th><th>Diferencia</th><th>Estado</th><th></th></tr></thead>
+                  <tbody id="field-adjustment-body"></tbody>
+                </table>
+              </div>
+            </div>
             <div class="form-actions">
               <button type="button" class="ghost-button" id="field-lease-print-general">Reporte de cuota</button>
               <button type="button" class="ghost-button" id="field-lease-receipt-landlord">Recibo arrendador</button>
@@ -2602,7 +2646,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260720-campos-vencimientos-contratos-v67"></script>
+    <script src="/app.js?v=20260720-campos-reliquidaciones-v68"></script>
   </body>
 </html>
 
