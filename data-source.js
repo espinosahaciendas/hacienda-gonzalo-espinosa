@@ -2389,6 +2389,7 @@ class BackupDataSource {
         concepto: normalizeText(item.concepto || "PAGO_CUOTA").toUpperCase(),
         parte: normalizeText(item.parte || "GENERAL").toUpperCase(),
         aplicacionComision: normalizeText(item.aplicacionComision || "NO_APLICA").toUpperCase(),
+        comisionTipo: ["FACTURADO", "EFECTIVO"].includes(normalizeText(item.comisionTipo).toUpperCase()) ? normalizeText(item.comisionTipo).toUpperCase() : "GENERAL",
         estado: normalizeText(item.estado || "PENDIENTE").toUpperCase(),
         medio: normalizeText(item.medio || "Transferencia"),
         referencia: normalizeText(item.referencia),
@@ -2405,9 +2406,12 @@ class BackupDataSource {
         importeOriginal: parseMoney(item.importeOriginal),
         importeReajustado: parseMoney(item.importeReajustado),
         diferencia: parseMoney(item.diferencia),
+        comisionOriginal: parseMoney(item.comisionOriginal),
+        comisionReajustada: parseMoney(item.comisionReajustada),
+        diferenciaComision: parseMoney(item.diferenciaComision),
         estado: ["PAGADO", "COMPENSADO", "INFORMATIVO"].includes(normalizeText(item.estado).toUpperCase()) ? normalizeText(item.estado).toUpperCase() : "PENDIENTE",
         observaciones: normalizeText(item.observaciones)
-      })).filter((item) => item.motivo || item.diferencia || item.importeOriginal || item.importeReajustado),
+      })).filter((item) => item.motivo || item.diferencia || item.importeOriginal || item.importeReajustado || item.comisionOriginal || item.comisionReajustada || item.diferenciaComision),
       partes: asArray(input.partes).map((item, index) => ({
         id: normalizeText(item.id) || `PARTE-CAMPO-${Date.now()}-${index}`,
         tipo: normalizeText(item.tipo || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR",
