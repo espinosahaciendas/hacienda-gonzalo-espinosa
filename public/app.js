@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260717-campos-agenda-vencimientos-v61";
+const APP_BUILD = "20260720-campos-vencimientos-contratos-v62";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -170,6 +170,14 @@ function showFieldsTab(tab = "contratos") {
   $all("[data-fields-tab-panel]").forEach((panel) => {
     panel.classList.toggle("active", String(panel.dataset.fieldsTabPanel) === String(target));
   });
+  if (target === "vencimientos") {
+    loadFieldModuleData(true).catch((error) => {
+      const node = $("#field-due-message");
+      if (!node) return;
+      node.textContent = error.message;
+      node.className = "form-message error";
+    });
+  }
 }
 
 function preferredInitialView() {
@@ -3092,11 +3100,31 @@ function firstFieldContractValue(contract = {}, keys = []) {
 }
 
 function fieldContractStartValue(contract = {}) {
-  return firstFieldContractValue(contract, ["inicio", "fechaInicio", "vigenciaDesde", "contratoDesde", "periodoDesde", "desde", "start"]);
+  return firstFieldContractValue(contract, [
+    "inicio",
+    "fechaInicio",
+    "fechaDesde",
+    "vigenciaDesde",
+    "vigenciaContratoDesde",
+    "contratoDesde",
+    "periodoDesde",
+    "desde",
+    "start"
+  ]);
 }
 
 function fieldContractEndValue(contract = {}) {
-  return firstFieldContractValue(contract, ["fin", "fechaFin", "vigenciaHasta", "contratoHasta", "periodoHasta", "hasta", "end"]);
+  return firstFieldContractValue(contract, [
+    "fin",
+    "fechaFin",
+    "fechaHasta",
+    "vigenciaHasta",
+    "vigenciaContratoHasta",
+    "contratoHasta",
+    "periodoHasta",
+    "hasta",
+    "end"
+  ]);
 }
 
 function fieldContractFrequencyValue(contract = {}) {
@@ -3104,7 +3132,7 @@ function fieldContractFrequencyValue(contract = {}) {
 }
 
 function fieldContractDueTextValue(contract = {}) {
-  return firstFieldContractValue(contract, ["vencimientoHabitual", "diaVencimiento", "vencimientoTexto", "vencimiento"]);
+  return firstFieldContractValue(contract, ["vencimientoHabitual", "vencimientoBase", "diaVencimiento", "diaVto", "vencimientoTexto", "vencimiento"]);
 }
 
 function fieldContractFrequencyMonths(frequency) {
@@ -7471,9 +7499,11 @@ function parseDisplayDate(value) {
 }
 
 function parseAnyLocalDate(value) {
-  const text = String(value || "");
+  const text = String(value || "").trim();
   const inputMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (inputMatch) return new Date(Number(inputMatch[1]), Number(inputMatch[2]) - 1, Number(inputMatch[3]));
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+  if (isoMatch) return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
   return parseDisplayDate(text);
 }
 
@@ -9629,7 +9659,14 @@ async function init() {
     }
     if (deleteButton) deleteFieldLease(deleteButton.dataset.fieldLeaseDelete);
   });
-  $("#field-due-refresh")?.addEventListener("click", renderFieldDueAgenda);
+  $("#field-due-refresh")?.addEventListener("click", () => {
+    loadFieldModuleData(true).catch((error) => {
+      const node = $("#field-due-message");
+      if (!node) return;
+      node.textContent = error.message;
+      node.className = "form-message error";
+    });
+  });
   ["#field-due-from", "#field-due-to", "#field-due-status", "#field-due-search"].forEach((selector) => {
     $(selector)?.addEventListener("input", renderFieldDueAgenda);
     $(selector)?.addEventListener("change", renderFieldDueAgenda);
