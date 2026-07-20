@@ -2394,6 +2394,20 @@ class BackupDataSource {
         referencia: normalizeText(item.referencia),
         importe: Math.abs(parseMoney(item.importe))
       })).filter((item) => item.importe > 0),
+      ajustes: asArray(input.ajustes).map((item, index) => ({
+        id: normalizeText(item.id) || `AJUSTE-CAMPO-${Date.now()}-${index}`,
+        fecha: item.fecha ? fieldDate(item.fecha) : "",
+        parte: ["EFECTIVO", "TOTAL"].includes(normalizeText(item.parte).toUpperCase()) ? normalizeText(item.parte).toUpperCase() : "FACTURADO",
+        motivo: normalizeText(item.motivo || "Reajuste posterior de cuota"),
+        referencia: normalizeText(item.referencia),
+        promedioOriginal: parseMoney(item.promedioOriginal),
+        promedioNuevo: parseMoney(item.promedioNuevo),
+        importeOriginal: parseMoney(item.importeOriginal),
+        importeReajustado: parseMoney(item.importeReajustado),
+        diferencia: parseMoney(item.diferencia),
+        estado: ["PAGADO", "COMPENSADO", "INFORMATIVO"].includes(normalizeText(item.estado).toUpperCase()) ? normalizeText(item.estado).toUpperCase() : "PENDIENTE",
+        observaciones: normalizeText(item.observaciones)
+      })).filter((item) => item.motivo || item.diferencia || item.importeOriginal || item.importeReajustado),
       partes: asArray(input.partes).map((item, index) => ({
         id: normalizeText(item.id) || `PARTE-CAMPO-${Date.now()}-${index}`,
         tipo: normalizeText(item.tipo || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR",
