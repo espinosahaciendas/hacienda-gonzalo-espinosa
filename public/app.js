@@ -44,7 +44,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260720-campos-vencimientos-contratos-v65";
+const APP_BUILD = "20260720-campos-vencimientos-contratos-v67";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -3159,6 +3159,15 @@ function addFieldMonths(date, months) {
   return result;
 }
 
+function nextFieldBusinessDay(date) {
+  const result = parseAnyLocalDate(date);
+  if (!result) return null;
+  const day = result.getDay();
+  if (day === 6) result.setDate(result.getDate() + 2);
+  if (day === 0) result.setDate(result.getDate() + 1);
+  return result;
+}
+
 function fieldContractDueDay(contract = {}) {
   const text = String(fieldContractDueTextValue(contract) || "").trim();
   const numbers = text.match(/\d{1,2}/g) || [];
@@ -3172,7 +3181,7 @@ function fieldContractDueDateForMonth(baseDate, dueDay) {
   const year = baseDate.getFullYear();
   const month = baseDate.getMonth();
   const lastDay = new Date(year, month + 1, 0).getDate();
-  return new Date(year, month, Math.min(Math.max(Number(dueDay || 1), 1), lastDay));
+  return nextFieldBusinessDay(new Date(year, month, Math.min(Math.max(Number(dueDay || 1), 1), lastDay)));
 }
 
 function fieldContractLabel(contract = {}) {
@@ -3217,10 +3226,12 @@ function fieldContractDueManualRows(contract = {}) {
   const grouped = new Map();
   rows.forEach((row) => {
     if (!row.vencimiento) return;
-    const key = `${row.numero || ""}|${formatDateForInput(row.vencimiento) || row.vencimiento}`;
+    const adjustedDue = nextFieldBusinessDay(row.vencimiento) || row.vencimiento;
+    const adjustedDueText = formatDateForInput(adjustedDue) || row.vencimiento;
+    const key = `${row.numero || ""}|${adjustedDueText}`;
     const current = grouped.get(key) || {
       contract,
-      dueDate: formatDateForInput(row.vencimiento) || row.vencimiento,
+      dueDate: adjustedDueText,
       cuotaNumero: row.numero || "",
       cuotaTipo: "",
       cuotaDetalle: "",
@@ -3284,11 +3295,8 @@ function fieldContractDueRows(contract = {}) {
   });
 }
 
-function fieldLeaseMatchesDue(lease = {}, due = {}) {
+function fieldLeaseContractMatchesDue(lease = {}, due = {}) {
   const contract = due.contract || {};
-  const leaseDue = formatDateForInput(lease.vencimiento);
-  const dueDate = formatDateForInput(due.dueDate);
-  if (!leaseDue || !dueDate || leaseDue !== dueDate) return false;
   if (due.cuotaManualId && lease.cuotaManualId && String(lease.cuotaManualId) === String(due.cuotaManualId)) return true;
   if (contract.id && lease.contratoId && String(contract.id) === String(lease.contratoId)) return true;
   const sameContract = normalizeSearch(lease.contrato || "") && normalizeSearch(lease.contrato || "") === normalizeSearch(contract.nombre || "");
@@ -3298,8 +3306,39 @@ function fieldLeaseMatchesDue(lease = {}, due = {}) {
   return sameContract || (sameFarm && (sameOwner || sameTenant));
 }
 
+function sameFieldDueMonth(left, right) {
+  const leftDate = parseAnyLocalDate(left);
+  const rightDate = parseAnyLocalDate(right);
+  return !!leftDate && !!rightDate
+    && leftDate.getFullYear() === rightDate.getFullYear()
+    && leftDate.getMonth() === rightDate.getMonth();
+}
+
+function fieldLeaseRelevantDueDates(lease = {}) {
+  return [lease.vencimiento, lease.fecha, lease.periodoDesde, lease.periodoHasta].filter(Boolean);
+}
+
+function fieldLeaseDueMatchScore(lease = {}, due = {}) {
+  const contract = due.contract || {};
+  const leaseDue = formatDateForInput(lease.vencimiento);
+  const dueDate = formatDateForInput(due.dueDate);
+  if (!fieldLeaseContractMatchesDue(lease, due)) return 0;
+  if (due.cuotaManualId && lease.cuotaManualId && String(lease.cuotaManualId) === String(due.cuotaManualId)) return 100;
+  if (leaseDue && dueDate && leaseDue === dueDate) return contract.id && lease.contratoId ? 95 : 90;
+  const source = String(due.source || "").toUpperCase();
+  if (source === "FRECUENCIA" && dueDate && fieldLeaseRelevantDueDates(lease).some((date) => sameFieldDueMonth(date, dueDate))) return 70;
+  return 0;
+}
+
+function fieldLeaseMatchesDue(lease = {}, due = {}) {
+  return fieldLeaseDueMatchScore(lease, due) > 0;
+}
+
 function findFieldLeaseForDue(due = {}) {
-  return (state.fieldLeases || []).find((lease) => fieldLeaseMatchesDue(lease, due)) || null;
+  return (state.fieldLeases || [])
+    .map((lease) => ({ lease, score: fieldLeaseDueMatchScore(lease, due) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.lease || null;
 }
 
 function fieldDueStatus(due = {}, lease = null) {
