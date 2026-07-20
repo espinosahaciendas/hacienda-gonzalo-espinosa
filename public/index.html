@@ -887,6 +887,19 @@
                     </select>
                   </label>
                   <label>Importe de comision<input id="field-payment-commission-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                  <label>Tipo de comision
+                    <select id="field-payment-commission-bucket">
+                      <option value="GENERAL">General / total</option>
+                      <option value="FACTURADO">Sobre facturado</option>
+                      <option value="EFECTIVO">Sobre efectivo</option>
+                    </select>
+                  </label>
+                  <label>A quien corresponde
+                    <select id="field-payment-commission-party">
+                      <option value="ARRENDATARIO">Arrendatario / quien paga</option>
+                      <option value="ARRENDADOR">Arrendador / quien cobra</option>
+                    </select>
+                  </label>
                   <label>Estado de la comision
                     <select id="field-payment-commission-status">
                       <option value="PENDIENTE">Pendiente</option>
@@ -969,6 +982,9 @@
                 <label>Importe original<input id="field-adjustment-original-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
                 <label>Importe reajustado<input id="field-adjustment-new-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
                 <label>Diferencia calculada<input id="field-adjustment-difference" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Comision original<input id="field-adjustment-original-commission" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Comision reajustada<input id="field-adjustment-new-commission" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Diferencia comision<input id="field-adjustment-commission-difference" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
                 <label>Estado
                   <select id="field-adjustment-status">
                     <option value="PENDIENTE">Pendiente</option>
@@ -984,7 +1000,7 @@
               </div>
               <div class="table-wrap compact-table">
                 <table>
-                  <thead><tr><th>Fecha</th><th>Parte</th><th>Motivo</th><th>Prom. original</th><th>Prom. nuevo</th><th>Original</th><th>Reajustado</th><th>Diferencia</th><th>Estado</th><th></th></tr></thead>
+                  <thead><tr><th>Fecha</th><th>Parte</th><th>Motivo</th><th>Prom. original</th><th>Prom. nuevo</th><th>Original</th><th>Reajustado</th><th>Diferencia</th><th>Com. original</th><th>Com. reaj.</th><th>Dif. com.</th><th>Estado</th><th></th></tr></thead>
                   <tbody id="field-adjustment-body"></tbody>
                 </table>
               </div>
@@ -2646,7 +2662,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260720-campos-reliquidaciones-v68"></script>
+    <script src="/app.js?v=20260720-campos-ajuste-imputable-v71"></script>
   </body>
 </html>
 
