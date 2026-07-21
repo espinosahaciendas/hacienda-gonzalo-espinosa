@@ -21,7 +21,7 @@
         <h1>Gonzalo Espinosa</h1>
         <p>Hacienda y Liquidaciones</p>
         <label>Correo<input id="login-email" type="email" autocomplete="username" required></label>
-        <label>ContraseÃƒÂ±a<input id="login-password" type="password" autocomplete="current-password" required></label>
+        <label>Contraseña<input id="login-password" type="password" autocomplete="current-password" required></label>
         <button type="submit" class="primary-button">Ingresar</button>
         <p class="form-message" id="login-message"></p>
       </form>
@@ -233,7 +233,7 @@
         <div class="panel">
           <h2>Sistema operativo</h2>
           <p>
-            GestiÃƒÂ³n de operaciones, ventas, liquidaciones, cuenta corriente y vencimientos.
+            Gestión de operaciones, ventas, liquidaciones, cuenta corriente y vencimientos.
           </p>
           <div class="form-actions">
             <button type="button" class="ghost-button" id="download-backup">Descargar backup de datos</button>
@@ -1209,7 +1209,7 @@
                   Accion
                   <select id="client-maintenance-action">
                     <option value="MERGE">Fusionar con cliente correcto</option>
-                    <option value="DELETE">Eliminar sÃƒÂ³lo si no tiene movimientos</option>
+                    <option value="DELETE">Eliminar sólo si no tiene movimientos</option>
                   </select>
                 </label>
               </div>
@@ -1398,7 +1398,7 @@
           <div class="operation-list-block">
             <div class="panel workflow-empty" id="operation-workflow-empty">
               <h2>Alta guiada</h2>
-              <p>Complete los datos principales y continÃƒÂºe a la carga de venta.</p>
+              <p>Complete los datos principales y continúe a la carga de venta.</p>
             </div>
             <div class="workflow-steps" id="operation-workflow-steps" hidden>
               <button type="button" class="workflow-step" data-operation-step="operation"><strong>1</strong><span>Operacion</span></button>
@@ -1557,7 +1557,7 @@
                 </div>
                 <div class="advanced-subpanel sale-not-faena">
                   <h3>Correccion excepcional del calculo</h3>
-                  <p class="subtle">Usar sÃƒÂ³lo si la liquidaciÃƒÂ³n recibida toma otros kilos, promedio, precio final o importe. Si queda vacÃƒÂ­o, calcula automÃƒÂ¡tico.</p>
+                  <p class="subtle">Usar sólo si la liquidación recibida toma otros kilos, promedio, precio final o importe. Si queda vacío, calcula automático.</p>
                   <div class="form-grid">
                     <label class="check-line"><input id="sale-use-real-kg-vend" type="checkbox"> Usar kg reales con desbaste vendedor</label>
                     <label>Kg usado vendedor<input id="sale-kg-calc-vend" inputmode="decimal" placeholder="Automatico"></label>
@@ -2030,9 +2030,9 @@
                 <option>Venta a Feria</option>
                 <option>Flete</option>
                 <option>Gastos DTe</option>
-                <option>Gastos GuÃƒÂ­as</option>
+                <option>Gastos Guías</option>
                 <option>Pesadas</option>
-                <option>VacunaciÃƒÂ³n</option>
+                <option>Vacunación</option>
                 <option>Gastos veterinarios</option>
                 <option>Otros gastos</option>
               </select></label>
@@ -2387,7 +2387,7 @@
               <div class="form-grid">
                 <label>Fecha recibido<input id="cash-rec-date" type="date" required></label>
                 <label>Recibido de<input id="cash-rec-client" list="cc-client-list" placeholder="Cliente / persona" required></label>
-                <label>Referencia<input id="cash-rec-reference" placeholder="Ej.: efectivo venta, sobre, operaciÃƒÂ³n"></label>
+                <label>Referencia<input id="cash-rec-reference" placeholder="Ej.: efectivo venta, sobre, operación"></label>
                 <label>Importe recibido<input id="cash-rec-amount" inputmode="decimal" placeholder="$ 0,00" required></label>
               </div>
               <label>Observaciones<textarea id="cash-rec-notes" rows="2" placeholder="Detalle interno"></textarea></label>
@@ -2532,7 +2532,7 @@
               <h2 id="document-preview-title">Vista del comprobante</h2>
               <p class="subtle" id="document-preview-subtitle">Selecciona un PDF para verlo en pantalla.</p>
             </div>
-            <a class="ghost-button" id="document-preview-open" href="#" target="_blank" rel="noopener">Abrir en otra pestaÃƒÂ±a</a>
+            <a class="ghost-button" id="document-preview-open" href="#" target="_blank" rel="noopener">Abrir en otra pestaña</a>
           </div>
           <iframe id="document-preview-frame" class="document-preview-frame" title="Vista previa PDF"></iframe>
         </div>
@@ -2662,7 +2662,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260720-campos-ajuste-imputable-v71"></script>
+    <script src="/app.js?v=20260721-textos-ortografia-v72"></script>
   </body>
 </html>
 

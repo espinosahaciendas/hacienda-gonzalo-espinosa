@@ -45,7 +45,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260720-campos-ajuste-imputable-v71";
+const APP_BUILD = "20260721-textos-ortografia-v72";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -319,7 +319,7 @@ function documentDownloadUrl(documentId) {
 function documentReferenceText(documento) {
   const type = documento.entidadTipo || "GENERAL";
   const id = documento.entidadId || documento.operacion || documento.movimientoId || documento.pagoId || "-";
-  const party = documento.parte ? ` Â· ${documentPartyLabel(documento.parte)}` : "";
+  const party = documento.parte ? ` · ${documentPartyLabel(documento.parte)}` : "";
   return `${type}: ${id}${party}`;
 }
 
@@ -431,7 +431,7 @@ function showDocumentPreview(documentId) {
   const url = documentDownloadUrl(documento.id);
   $("#document-preview-panel").hidden = false;
   $("#document-preview-title").textContent = documento.titulo || documento.nombreOriginal || "Vista del comprobante";
-  $("#document-preview-subtitle").textContent = `${documento.cliente || "-"} Ã‚Â· ${documentReferenceText(documento)}`;
+  $("#document-preview-subtitle").textContent = `${documento.cliente || "-"} · ${documentReferenceText(documento)}`;
   $("#document-preview-open").href = url;
   $("#document-preview-frame").src = url;
   renderDocumentos();
@@ -512,7 +512,7 @@ async function saveDocument(event) {
 }
 
 async function deleteDocument(documentId) {
-  if (!window.confirm("Se eliminara la referencia y el PDF original. Ã‚Â¿Continuar?")) return;
+  if (!window.confirm("Se eliminará la referencia y el PDF original. ¿Continuar?")) return;
   await fetchJson(`/api/documentos/${encodeURIComponent(documentId)}`, { method: "DELETE" });
   await reloadAppData();
   setView("archivo");
@@ -732,8 +732,8 @@ function renderCashReconciliations() {
             <button type="button" class="small-button danger-button" data-cash-rec-delete="${escapeHtml(item.id)}">Eliminar</button>`}
           </td>
         </tr>
-        ${item.detalleRecibido?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Detalle recibido:</strong> ${item.detalleRecibido.map((det) => `${escapeHtml(det.concepto || "-")} Ã‚Â· ${escapeHtml(det.detalle || "-")} Ã‚Â· ${moneyValue(det.importe)}`).join(" | ")}</td></tr>` : ""}
-        ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} Ã‚Â· ${escapeHtml(app.concepto || "-")} Ã‚Â· ${moneyValue(app.importe)}`).join(" | ")}</td></tr>` : ""}
+        ${item.detalleRecibido?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Detalle recibido:</strong> ${item.detalleRecibido.map((det) => `${escapeHtml(det.concepto || "-")} · ${escapeHtml(det.detalle || "-")} · ${moneyValue(det.importe)}`).join(" | ")}</td></tr>` : ""}
+        ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} · ${escapeHtml(app.concepto || "-")} · ${moneyValue(app.importe)}`).join(" | ")}</td></tr>` : ""}
       `).join("")
     : `<tr><td colspan="8">Sin conciliaciones de efectivo cargadas.</td></tr>`;
   renderCashReconciliationOpenBalances(items);
@@ -880,14 +880,14 @@ async function applyCashReconciliationPayment() {
 }
 
 async function deleteCashMovement(id) {
-  if (!window.confirm("Se eliminara este movimiento de caja. Ã‚Â¿Continuar?")) return;
+  if (!window.confirm("Se eliminará este movimiento de caja. ¿Continuar?")) return;
   await fetchJson(`/api/caja-diaria/${encodeURIComponent(id)}`, { method: "DELETE" });
   await reloadAppData();
   setView("caja");
 }
 
 async function deleteCashReconciliation(id) {
-  if (!window.confirm("Se eliminara esta conciliacion de efectivo. Ã‚Â¿Continuar?")) return;
+  if (!window.confirm("Se eliminará esta conciliación de efectivo. ¿Continuar?")) return;
   await fetchJson(`/api/caja-conciliaciones/${encodeURIComponent(id)}`, { method: "DELETE" });
   await reloadAppData();
   setView("caja");
@@ -1298,7 +1298,7 @@ function parseFieldDecimalInput(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   const raw = String(value || "").trim();
   if (!raw) return 0;
-  const normalized = raw.toLowerCase().replace(/Ã—/g, "x");
+  const normalized = raw.toLowerCase().replace(/\u00d7|\u00c3\u2014/g, "x");
   if (/[x*]/.test(normalized)) {
     const factors = normalized
       .split(/[x*]/)
@@ -1589,7 +1589,7 @@ function renderFieldContractSuggestions() {
         <div class="suggestion-row">
           <div>
             <strong>${escapeHtml(item.nombre || item.campo || "Contrato sin referencia")}</strong>
-            <span>${escapeHtml([item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" / ") || "Sin partes cargadas")} Â· ${plainNumberValue(item.hectareas)} has. Â· ${fieldContractPartyRowsFromContract(item).length} parte/s</span>
+            <span>${escapeHtml([item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" / ") || "Sin partes cargadas")} · ${plainNumberValue(item.hectareas)} has. · ${fieldContractPartyRowsFromContract(item).length} parte/s</span>
           </div>
           <button type="button" class="small-button" data-field-contract-pick="${escapeHtml(item.id)}">Elegir</button>
         </div>
@@ -1833,7 +1833,7 @@ async function deleteFieldContract(id) {
   const item = (state.fieldContracts || []).find((row) => String(row.id) === String(id));
   if (!item) return;
   const label = item.nombre || item.campo || "este contrato";
-  if (!window.confirm(`Se eliminara ${label}. Los PDF asociados quedaran en Archivo documental. Â¿Continuar?`)) return;
+  if (!window.confirm(`Se eliminará ${label}. Los PDF asociados quedarán en Archivo documental. ¿Continuar?`)) return;
   const saved = await fetchJson(`/api/campos/contratos/${encodeURIComponent(id)}`, { method: "DELETE" });
   state.fieldContracts = saved.items || [];
   if (String($("#field-contract-id")?.value || "") === String(id)) resetFieldContractForm();
@@ -3774,7 +3774,7 @@ async function saveFieldLease(event) {
 }
 
 async function deleteFieldLease(id) {
-  if (!window.confirm("Se eliminara este calculo de arrendamiento. Â¿Continuar?")) return;
+  if (!window.confirm("Se eliminará este cálculo de arrendamiento. ¿Continuar?")) return;
   const saved = await fetchJson(`/api/campos/arrendamientos/${encodeURIComponent(id)}`, { method: "DELETE" });
   state.fieldLeases = saved.items || [];
   renderFieldLeases();
@@ -5574,7 +5574,7 @@ function addExternalDueRow() {
   const vencimiento = $("#cc-external-due-date").value || $("#cc-external-due").value;
   const importe = numberValue("#cc-external-due-amount");
   if (!vencimiento || importe <= 0) {
-    $("#cc-external-message").textContent = "Para agregar un vencimiento cargÃƒÂ¡ fecha e importe mayor a cero.";
+    $("#cc-external-message").textContent = "Para agregar un vencimiento cargá fecha e importe mayor a cero.";
     $("#cc-external-message").className = "form-message error";
     return;
   }
@@ -6062,7 +6062,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
       const shouldShow = deliveries.length > 1 || Number(item.saldoPendiente || 0) > 0;
       if (!shouldShow) return "";
       const totalDelivered = deliveries.reduce((sum, row) => sum + Number(row.importe || 0), 0);
-      return `<tr class="history-title"><td colspan="5">${escapeHtml(item.comprobante || "-")} Â· ${escapeHtml(item.concepto || item.movementId || "-")}</td></tr>
+      return `<tr class="history-title"><td colspan="5">${escapeHtml(item.comprobante || "-")} · ${escapeHtml(item.concepto || item.movementId || "-")}</td></tr>
         ${deliveries.map((row) => `<tr${row.actual ? ' class="current-delivery"' : ""}>
           <td>${escapeHtml(row.fecha || "-")}</td>
           <td>${escapeHtml(row.recibo || "-")}</td>
@@ -7387,7 +7387,7 @@ async function saveCategory(original, value) {
 
 async function deleteCategory(category) {
   try {
-    const confirmed = window.confirm(`Se quitara "${category}" del listado de categorias. Las ventas ya cargadas no se modifican. Ã‚Â¿Continuar?`);
+    const confirmed = window.confirm(`Se quitará "${category}" del listado de categorías. Las ventas ya cargadas no se modifican. ¿Continuar?`);
     if (!confirmed) return;
     await fetchJson(`/api/categorias/${encodeURIComponent(category)}`, { method: "DELETE" });
     await reloadCategories();
@@ -8772,7 +8772,7 @@ function fillSaleLineForm(line) {
 
 async function deleteSaleLine(lineId) {
   if (!state.selectedOperationId || !lineId) return;
-  const confirmed = window.confirm("Se quitara solo esta linea de venta. La operacion queda cargada. Ã‚Â¿Continuar?");
+  const confirmed = window.confirm("Se quitará sólo esta línea de venta. La operación queda cargada. ¿Continuar?");
   if (!confirmed) return;
   setSaleMessage("Quitando linea...");
   try {
@@ -8829,7 +8829,7 @@ async function savePartialBilling() {
 
 async function deletePartialBilling(lineId) {
   if (!state.selectedOperationId || !lineId) return;
-  const confirmed = window.confirm("Se quitara este parcial y su movimiento de cuenta corriente si tenia impacto. Ã‚Â¿Continuar?");
+  const confirmed = window.confirm("Se quitará este parcial y su movimiento de cuenta corriente si tenía impacto. ¿Continuar?");
   if (!confirmed) return;
   try {
     await fetchJson(`/api/operaciones/${encodeURIComponent(state.selectedOperationId)}/facturacion-parcial/${encodeURIComponent(lineId)}`, {
@@ -9512,7 +9512,7 @@ async function applyClientMaintenance() {
       if (!targetName || !target) {
         throw new Error("Indique el cliente correcto de destino.");
       }
-      const confirmed = window.confirm(`Se fusionara "${currentName}" dentro de "${target.nombre}". Las operaciones y cuenta corriente pasaran al cliente correcto. Ã‚Â¿Continuar?`);
+      const confirmed = window.confirm(`Se fusionará "${currentName}" dentro de "${target.nombre}". Las operaciones y cuenta corriente pasarán al cliente correcto. ¿Continuar?`);
       if (!confirmed) return;
       await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}/fusionar`, {
         method: "POST",
@@ -9520,7 +9520,7 @@ async function applyClientMaintenance() {
       });
       $("#client-search").value = target.nombre;
     } else {
-      const confirmed = window.confirm(`Se intentara eliminar "${currentName}". Solo se permite si no tiene operaciones ni movimientos. Ã‚Â¿Continuar?`);
+      const confirmed = window.confirm(`Se intentará eliminar "${currentName}". Sólo se permite si no tiene operaciones ni movimientos. ¿Continuar?`);
       if (!confirmed) return;
       await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}`, { method: "DELETE" });
       $("#client-search").value = "";
@@ -10090,7 +10090,7 @@ async function init() {
     }
     const cancelButton = event.target.closest("[data-cc-payment-cancel]");
     if (cancelButton) {
-      const confirmed = window.confirm("Se anulara el comprobante y su contrapartida, si existe. Los movimientos imputados volveran a quedar pendientes. Ã‚Â¿Continuar?");
+      const confirmed = window.confirm("Se anulará el comprobante y su contrapartida, si existe. Los movimientos imputados volverán a quedar pendientes. ¿Continuar?");
       if (!confirmed) return;
       await fetchJson(`/api/cuenta-corriente/pagos-cobros/${encodeURIComponent(cancelButton.dataset.ccPaymentCancel)}/anular`, { method: "POST" });
       await reloadCurrentAccount();
@@ -10109,7 +10109,7 @@ async function init() {
     }
     const deleteExternalButton = event.target.closest("[data-cc-delete-external]");
     if (deleteExternalButton) {
-      const confirmed = window.confirm("Se eliminara este movimiento externo. Si es Venta MAG, tambien se elimina su renglon asociado. Ã‚Â¿Continuar?");
+      const confirmed = window.confirm("Se eliminará este movimiento externo. Si es Venta MAG, también se elimina su renglón asociado. ¿Continuar?");
       if (!confirmed) return;
       await fetchJson(`/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(deleteExternalButton.dataset.ccDeleteExternal)}`, { method: "DELETE" });
       await reloadCurrentAccount();
@@ -10123,7 +10123,7 @@ async function init() {
     }
     const deleteExternalButton = event.target.closest("[data-cc-delete-external]");
     if (deleteExternalButton) {
-      const confirmed = window.confirm("Se eliminara este movimiento externo. Si es Venta MAG, tambien se elimina su renglon asociado. Ã‚Â¿Continuar?");
+      const confirmed = window.confirm("Se eliminará este movimiento externo. Si es Venta MAG, también se elimina su renglón asociado. ¿Continuar?");
       if (!confirmed) return;
       fetchJson(`/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(deleteExternalButton.dataset.ccDeleteExternal)}`, { method: "DELETE" })
         .then(reloadCurrentAccount)
