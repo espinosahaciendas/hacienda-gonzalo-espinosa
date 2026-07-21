@@ -45,7 +45,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260721-textos-ortografia-v72";
+const APP_BUILD = "20260721-campos-consulta-mobile-v73";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -189,6 +189,7 @@ function preferredInitialView() {
 function applyUserRole(user) {
   state.usuario = user;
   const readonly = user && user.rol === "CONSULTA";
+  document.body.classList.toggle("readonly-mode", Boolean(readonly));
   const restricted = [
     "#client-form",
     "#operation-start-new",
@@ -206,7 +207,19 @@ function applyUserRole(user) {
     "#cash-rec-clear",
     "#document-form",
     "#commissionist-load",
-    "#commissionist-generate"
+    "#commissionist-generate",
+    "#field-contract-clear",
+    "#field-contract-party-add",
+    "#field-contract-line-add",
+    "#field-contract-installment-add",
+    "#field-contract-pdf-upload",
+    "#field-lease-clear",
+    "#field-payment-preset-add",
+    "#field-payment-commission-register",
+    "#field-payment-add",
+    "#field-adjustment-add",
+    "#field-lease-form button[type='submit']",
+    "#field-contract-form button[type='submit']"
   ];
   restricted.forEach((selector) => {
     const node = $(selector);
