@@ -546,6 +546,17 @@ function buildOperationAccountMovements(operation) {
     return false;
   };
   const counterpartForRole = (role, fallback) => consigneeAppliesToRole(role) ? operationConsignee : fallback;
+  const firstPlanDue = (plan, fallbackDate = dueBaseDate) => {
+    const first = parsePlanItems(plan || "0", 1, dueBaseDate)[0];
+    return first?.vencimiento || formatDateLocal(parseDateLoose(fallbackDate)) || fallbackDate;
+  };
+  const commissionDueForRole = (role) => {
+    const key = String(role || "").toUpperCase();
+    if (key.startsWith("VENDEDOR-COM-EFEC")) return firstPlanDue(draft.planEfectivoProd || liq.planEfectivoProd || "0");
+    if (key.startsWith("COMPRADOR-COM-EFEC")) return firstPlanDue(draft.planEfectivoComp || liq.planEfectivoComp || "0");
+    if (key.startsWith("COMPRADOR")) return firstPlanDue(draft.planFacturadoComp || liq.planFacturadoComp || "0");
+    return firstPlanDue(draft.planFacturadoProd || liq.planFacturadoProd || "0");
+  };
 
   const addPlan = ({ cliente, role, amount, plan, comprobante, counterpart, conceptSuffix }) => {
     parsePlanItems(plan, amount, dueBaseDate).forEach((item, index) => {
@@ -629,7 +640,7 @@ function buildOperationAccountMovements(operation) {
       id: `${operation.id}-${role}`,
       cliente,
       fecha: operationDate,
-      vencimiento: dueBaseDate,
+      vencimiento: commissionDueForRole(role),
       origen: "COMISION",
       concepto: conceptWithCounterpart(conceptSuffix, counterpart),
       comprobante,
@@ -738,11 +749,14 @@ function buildOperationAccountMovements(operation) {
     const consigneeCounterpart = settledByConsignee === "COMPRADOR"
       ? operation.comprador || draft.comprador || operation.vendedor || draft.vendedor
       : operation.vendedor || draft.vendedor || operation.comprador || draft.comprador;
+    const consigneeDue = settledByConsignee === "COMPRADOR"
+      ? firstPlanDue(draft.planFacturadoComp || liq.planFacturadoComp || "0")
+      : firstPlanDue(draft.planFacturadoProd || liq.planFacturadoProd || "0");
     pushMovement(movements, {
       id: `${operation.id}-CONSIGNATARIA`,
       cliente: operationConsignee,
       fecha: operationDate,
-      vencimiento: dueBaseDate,
+      vencimiento: consigneeDue,
       origen: "CONSIGNATARIA",
       concepto: conceptWithCounterpart("comision/diferencia consignataria", consigneeCounterpart),
       comprobante: liq.comprobanteProd || draft.comprobanteProd || liq.comprobanteComp || draft.comprobanteComp,
