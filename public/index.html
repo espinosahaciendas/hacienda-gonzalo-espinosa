@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20260721-campos-consulta-mobile-v73">
+    <link rel="stylesheet" href="/styles.css?v=20260721-mobile-real-v74">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -2090,20 +2090,22 @@
               <label>Cliente<input id="cc-payment-client" list="cc-client-list"></label>
               <label>Fecha<input id="cc-payment-date" type="date"></label>
               <label>Importe<input id="cc-payment-amount" class="money-input" inputmode="decimal"></label>
-              <label>Medio<select id="cc-payment-method"><option>Transferencia</option><option>E-cheq</option><option>Cheque</option><option>Efectivo</option><option>Otro</option></select></label>
+              <label>Medio<select id="cc-payment-method"><option>Transferencia</option><option>E-cheq</option><option>Cheque</option><option>Efectivo</option><option>Dolares</option><option>Otro</option></select></label>
               <label>Referencia<input id="cc-payment-reference" placeholder="Comprobante, recibo o detalle"></label>
               <label>Observacion<input id="cc-payment-notes"></label>
             </div>
             <div class="cc-subpanel" id="cc-instrument-panel">
               <div class="panel-head"><h3>Detalle de instrumentos</h3><span class="subtle" id="cc-instrument-summary">Sin instrumentos cargados</span></div>
               <div class="form-grid">
-                <label>Medio<select id="cc-instrument-method"><option>E-cheq</option><option>Cheque</option><option>Transferencia</option><option>Efectivo</option><option>Otro</option></select></label>
+                <label>Medio<select id="cc-instrument-method"><option>E-cheq</option><option>Cheque</option><option>Transferencia</option><option>Efectivo</option><option>Dolares</option><option>Otro</option></select></label>
                 <label>Vencimiento / fecha<input id="cc-instrument-date" type="date"></label>
                 <label>Importe<input id="cc-instrument-amount" class="money-input" inputmode="decimal"></label>
                 <label>Referencia<input id="cc-instrument-reference" placeholder="Numero, banco o detalle"></label>
+                <label id="cc-instrument-dollars-label" hidden>Total dolares<input id="cc-instrument-dollars" inputmode="decimal" placeholder="USD"></label>
+                <label id="cc-instrument-dollar-rate-label" hidden>Cotizacion en pesos<input id="cc-instrument-dollar-rate" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
               </div>
               <div class="form-actions"><button type="button" class="ghost-button" id="cc-add-instrument">Agregar instrumento</button></div>
-              <div class="table-wrap compact-table"><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th><th></th></tr></thead><tbody id="cc-instrument-body"></tbody></table></div>
+              <div class="table-wrap compact-table"><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Dolares</th><th>Cotizacion</th><th>Importe</th><th></th></tr></thead><tbody id="cc-instrument-body"></tbody></table></div>
             </div>
             <div class="cc-subpanel cc-counterparty-option">
               <div class="cc-counterparty-heading">
@@ -2662,7 +2664,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260721-campos-consulta-mobile-v73"></script>
+    <script src="/app.js?v=20260721-mobile-real-v74"></script>
   </body>
 </html>
 

@@ -45,7 +45,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260721-campos-consulta-mobile-v73";
+const APP_BUILD = "20260721-mobile-real-v74";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -5846,18 +5846,41 @@ function refreshCounterpartyImputationSummary() {
   });
 }
 
+function isDollarInstrumentMethod(value) {
+  return normalizeSearch(value || "").includes("dolares");
+}
+
+function toggleCurrentAccountDollarInstrumentFields() {
+  const show = isDollarInstrumentMethod($("#cc-instrument-method")?.value);
+  ["#cc-instrument-dollars-label", "#cc-instrument-dollar-rate-label"].forEach((selector) => {
+    const node = $(selector);
+    if (node) node.hidden = !show;
+  });
+}
+
 function addCurrentAccountInstrument() {
-  const importe = numberValue("#cc-instrument-amount");
+  const medio = $("#cc-instrument-method").value;
+  const dolarCantidad = parseMoneyInput($("#cc-instrument-dollars")?.value || 0);
+  const dolarCotizacion = parseMoneyInput($("#cc-instrument-dollar-rate")?.value || 0);
+  let importe = numberValue("#cc-instrument-amount");
+  if (!importe && isDollarInstrumentMethod(medio) && dolarCantidad && dolarCotizacion) {
+    importe = dolarCantidad * dolarCotizacion;
+    setMoneyInput("#cc-instrument-amount", importe);
+  }
   if (!importe) return;
   currentPaymentInstruments.push({
     id: `INST-${Date.now()}`,
-    medio: $("#cc-instrument-method").value,
+    medio,
     fecha: $("#cc-instrument-date").value,
     referencia: $("#cc-instrument-reference").value,
-    importe
+    importe,
+    dolarCantidad: isDollarInstrumentMethod(medio) ? dolarCantidad : 0,
+    dolarCotizacion: isDollarInstrumentMethod(medio) ? dolarCotizacion : 0
   });
   setMoneyInput("#cc-instrument-amount", 0);
   $("#cc-instrument-reference").value = "";
+  if ($("#cc-instrument-dollars")) $("#cc-instrument-dollars").value = "";
+  if ($("#cc-instrument-dollar-rate")) setMoneyInput("#cc-instrument-dollar-rate", 0);
   renderCurrentAccountInstruments();
 }
 
@@ -5866,8 +5889,8 @@ function renderCurrentAccountInstruments() {
   $("#cc-instrument-summary").textContent = currentPaymentInstruments.length ? `${currentPaymentInstruments.length} instrumento/s - ${moneyValue(total)}` : "Sin instrumentos cargados";
   if (total) setMoneyInput("#cc-payment-amount", total);
   $("#cc-instrument-body").innerHTML = currentPaymentInstruments.length
-    ? currentPaymentInstruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button danger-button" data-cc-remove-instrument="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
-    : `<tr><td colspan="5">Sin instrumentos cargados.</td></tr>`;
+    ? currentPaymentInstruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td>${item.dolarCantidad ? `USD ${plainNumberValue(item.dolarCantidad)}` : "-"}</td><td>${item.dolarCotizacion ? moneyValue(item.dolarCotizacion) : "-"}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button danger-button" data-cc-remove-instrument="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
+    : `<tr><td colspan="7">Sin instrumentos cargados.</td></tr>`;
 }
 
 function compensationSummary(payment) {
@@ -6091,6 +6114,13 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
     ? rows.map((item) => `<tr><td>${escapeHtml(item.vencimiento || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td>${escapeHtml(item.concepto || item.movementId)}</td><td class="amount">${moneyValue(imputationOriginalAmount(item))}</td><td class="amount">${moneyValue(item.importe)}</td><td class="amount">${moneyValue(item.saldoPendiente)}</td></tr>`).join("")
     : `<tr><td colspan="6">${emptyText}</td></tr>`;
   const paidDeliveryHistory = deliveryHistoryRows(paidImputations);
+  const hasDollarInstrument = instruments.some((item) => Number(item.dolarCantidad || 0) || Number(item.dolarCotizacion || 0) || isDollarInstrumentMethod(item.medio));
+  const instrumentHeader = hasDollarInstrument
+    ? `<tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Dolares</th><th>Cotizacion</th><th>Importe</th></tr>`
+    : `<tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr>`;
+  const instrumentRows = instruments.map((item) => hasDollarInstrument
+    ? `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td>${item.dolarCantidad ? `USD ${plainNumberValue(item.dolarCantidad)}` : "-"}</td><td>${item.dolarCotizacion ? moneyValue(item.dolarCotizacion) : "-"}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`
+    : `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("");
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(receiptTitle)}</title><style>
     body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px} img{width:76px;height:76px;object-fit:contain;background:#173632;padding:6px} h1{font-size:18px;margin:0} h2{font-size:13px;margin-top:14px} p{margin:3px 0;font-size:11px} table{width:100%;border-collapse:collapse;font-size:10px} th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top} th{background:#edf3f1} .amount{text-align:right;font-weight:700;white-space:nowrap}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}.discount th{background:#f8ebe5}.discount-total{background:#fff3e8;font-weight:700}.net-total{background:#eaf2ff;font-weight:700}.history-title td{background:#edf3f1;font-weight:700}.history-total{background:#f8fbfa;font-weight:700}.current-delivery{background:#fff8ed} button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}button{display:none}body{margin:0}}
   </style></head><body>
@@ -6103,7 +6133,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
     <div><span>Descuentos / gastos / comisiones</span><strong>${moneyValue(discountTotal)}</strong></div>
     <div><span>${payment.tipo === "COMPENSACION" ? compensation?.label || "Saldo resultante informado" : "Control neto"}</span><strong>${moneyValue(payment.tipo === "COMPENSACION" ? Math.abs(compensation?.runningBalance ?? compensation?.saldo ?? controlNet) : controlNet)}</strong></div>
   </div>
-  ${payment.tipo === "COMPENSACION" ? `<p><strong>Nota:</strong> La venta/liquidacion fue cobrada directamente por el cliente o aplicada por fuera. Este comprobante deja constancia de que esos gastos se pagan con plata disponible de esa venta; no representa un pago realizado por Gonzalo Espinosa ni plata adicional puesta por el cliente.</p>` : `<h2>Detalle de instrumentos</h2><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${instruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("")}</tbody></table>`}
+  ${payment.tipo === "COMPENSACION" ? `<p><strong>Nota:</strong> La venta/liquidacion fue cobrada directamente por el cliente o aplicada por fuera. Este comprobante deja constancia de que esos gastos se pagan con plata disponible de esa venta; no representa un pago realizado por Gonzalo Espinosa ni plata adicional puesta por el cliente.</p>` : `<h2>Detalle de instrumentos</h2><table><thead>${instrumentHeader}</thead><tbody>${instrumentRows}</tbody></table>`}
   <h2>${payment.tipo === "COMPENSACION" ? "Liquidaciones / saldos aplicados" : payment.tipo === "PAGO" ? "Importes pagados / vencimientos cancelados" : "Importes cobrados / vencimientos cancelados"}</h2>
   <table><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe original</th><th>Importe aplicado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(paidImputations, "Sin vencimientos liquidados en este comprobante.")}</tbody></table>
   ${paidDeliveryHistory ? `<h2>Entregas realizadas a cuenta</h2><table><thead><tr><th>Fecha</th><th>Recibo</th><th>Medio / referencia</th><th>Importe</th><th>Estado</th></tr></thead><tbody>${paidDeliveryHistory}</tbody></table>` : ""}
@@ -10065,6 +10095,7 @@ async function init() {
   $("#cc-counterparty-client").addEventListener("input", renderCurrentAccountCounterpartyImputations);
   $("#cc-counterparty-type").addEventListener("change", renderCurrentAccountCounterpartyImputations);
   $("#cc-add-instrument").addEventListener("click", addCurrentAccountInstrument);
+  $("#cc-instrument-method").addEventListener("change", toggleCurrentAccountDollarInstrumentFields);
   $("#cc-instrument-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-cc-remove-instrument]");
     if (!button) return;
