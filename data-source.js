@@ -2955,7 +2955,9 @@ class BackupDataSource {
         medio: normalizeText(item.medio),
         fecha: formatDateForDisplay(item.fecha),
         referencia: normalizeText(item.referencia),
-        importe: Math.abs(parseMoney(item.importe))
+        importe: Math.abs(parseMoney(item.importe)),
+        dolarCantidad: Math.abs(parseMoney(item.dolarCantidad)),
+        dolarCotizacion: Math.abs(parseMoney(item.dolarCotizacion))
       })),
       imputaciones: imputacionesInput
     };
