@@ -2127,6 +2127,72 @@ class BackupDataSource {
       .filter((operation) => operation.id);
   }
 
+  async getComisionistaOperaciones(filters = {}) {
+    const data = this.readData();
+    const commissionist = normalizeText(filters.cliente || filters.comisionista);
+    const commissionistKey = normalizeKey(commissionist);
+    const from = parseDateLoose(filters.desde);
+    const to = parseDateLoose(filters.hasta);
+    if (!commissionistKey) return [];
+
+    return asArray(data.operations)
+      .filter((operation) => operation.estado !== "ANULADA")
+      .map((operation) => {
+        const draft = operation.draftData || {};
+        const fecha = operation.fecha || draft.fecha || draft.fechaOperacion || "";
+        const date = parseDateLoose(fecha);
+        return {
+          ...operation,
+          fecha,
+          vendedor: operation.vendedor || draft.vendedor || "",
+          comprador: operation.comprador || draft.comprador || "",
+          consignataria: operation.consignataria || draft.consignataria || "",
+          _date: date
+        };
+      })
+      .filter((operation) => {
+        if (from && (!operation._date || operation._date < from)) return false;
+        if (to && (!operation._date || operation._date > to)) return false;
+        const draft = operation.draftData || {};
+        const liquidacion = draft.liquidacion || {};
+        const keys = [
+          draft.comisionista,
+          draft.comisionistaAsociado,
+          draft.comisionistaNombre,
+          liquidacion.comisionista,
+          liquidacion.comisionistaAsociado,
+          operation.consignataria
+        ].map(normalizeKey).filter(Boolean);
+        return keys.includes(commissionistKey);
+      })
+      .map((operation) => {
+        const liquidacion = operation.draftData && operation.draftData.liquidacion
+          ? operation.draftData.liquidacion
+          : calculateLiquidacion(operation);
+        const netProd = Number(liquidacion.netoTotalProd || liquidacion.netoLiquidacionProd || 0);
+        const netComp = Number(liquidacion.netoTotalComp || liquidacion.netoLiquidacionComp || 0);
+        const base = netProd && netComp
+          ? Math.max(Math.abs(netProd), Math.abs(netComp))
+          : Math.abs(netProd || netComp || parseMoney(operation.total));
+        return {
+          id: operation.id,
+          operacion: operation.id,
+          fecha: operation.fecha,
+          origen: "Operacion",
+          cuenta: commissionist,
+          liquidoA: "Operacion a liquidar",
+          clienteLiquidado: operation.vendedor,
+          contraparteOperacion: operation.comprador,
+          vendedor: operation.vendedor,
+          comprador: operation.comprador,
+          comprobante: liquidacion.comprobanteProd || liquidacion.comprobanteComp || "",
+          base,
+          selected: true
+        };
+      })
+      .filter((row) => Number(row.base || 0) > 0);
+  }
+
   async getCuentaCorrienteResumen() {
     const data = this.readData();
     const movimientos = asArray(data.currentAccountManualMovements);
@@ -3136,6 +3202,7 @@ class PostgresJsonDataSource extends BackupDataSource {
   async deleteFacturacionParcial(operationId, lineId) { return this.withRemoteData(() => super.deleteFacturacionParcial(operationId, lineId), true); }
   async saveLiquidacion(operationId, input) { return this.withRemoteData(() => super.saveLiquidacion(operationId, input), true); }
   async getOperaciones() { return this.withRemoteData(() => super.getOperaciones()); }
+  async getComisionistaOperaciones(filters) { return this.withRemoteData(() => super.getComisionistaOperaciones(filters)); }
   async getCuentaCorrienteResumen() { return this.withRemoteData(() => super.getCuentaCorrienteResumen()); }
   async saveCommissionInvoice(input) { return this.withRemoteData(() => super.saveCommissionInvoice(input), true); }
   async getFieldContracts() { return this.withRemoteData(() => super.getFieldContracts()); }
