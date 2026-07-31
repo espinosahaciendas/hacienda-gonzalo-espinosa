@@ -49,7 +49,7 @@ let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260731-cc-tipo-operacion-v1";
+const APP_BUILD = "20260731-cc-acciones-rapidas-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -5166,6 +5166,16 @@ function externalMovementActions(movement) {
     : "";
 }
 
+function currentAccountQuickPaymentButton(movement) {
+  if (!movement || movement.paymentId) return "";
+  const status = String(movement.estado || "").toUpperCase();
+  if (status === "IMPUTADO" || status === "ANULADO") return "";
+  const amount = pendingSignedAmount(movement);
+  if (Math.abs(amount) <= 0.01) return "";
+  const label = amount < 0 ? "Registrar pago" : "Registrar cobro";
+  return `<button type="button" class="small-button" data-cc-quick-payment="${escapeHtml(movement.id)}">${label}</button>`;
+}
+
 function renderCuentaCorriente() {
   if (!state.cuenta) return;
   const query = normalizeSearch($("#cc-client-search").value);
@@ -5253,6 +5263,7 @@ function renderCuentaCorriente() {
           : movement.operacion
             ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>`
             : externalMovementActions(movement);
+        const quickAction = currentAccountQuickPaymentButton(movement);
         const amountDisplay = currentAccountMovementAmountForDisplay(movement, payment);
         return `
         <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
@@ -5264,7 +5275,7 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.operacion || "-")}</td>
           <td class="${amountDisplay.className}">${amountDisplay.text}</td>
           <td>${escapeHtml(movement.estado || "-")}</td>
-          <td>${baseActions}${documentActionButtons(movement)}</td>
+          <td>${quickAction}${quickAction && baseActions ? " " : ""}${baseActions}${documentActionButtons(movement)}</td>
         </tr>
         ${compensationSummaryTableRow(payment, 9)}
         ${detail ? `<tr class="cc-detail-row"><td colspan="9">${commissionistDetailHtml(detail)}</td></tr>` : ""}
@@ -5297,7 +5308,7 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(currentAccountConceptText(movement, viewMode))}</td>
           <td>${escapeHtml(movement.comprobante || "-")}</td>
           <td class="${amountClass(amount)}">${moneyValue(amount)}</td>
-          <td>${externalMovementActions(movement)}</td>
+          <td>${currentAccountQuickPaymentButton(movement)}${externalMovementActions(movement)}</td>
         </tr>
       `;
     }).join("")
@@ -5446,6 +5457,53 @@ function openCurrentAccountSuggestedPaymentType(clientName) {
   if (hasPayableToClient) return "PAGO";
   const hasReceivableFromClient = movements.some((movement) => pendingSignedAmount(movement) > 0.01);
   return hasReceivableFromClient ? "COBRO" : $("#cc-payment-type").value;
+}
+
+function selectCurrentAccountImputationForMovement(movementId) {
+  const id = String(movementId || "");
+  const boxes = $all("[data-cc-impute], [data-cc-impute-group]");
+  let found = false;
+  boxes.forEach((box) => {
+    let matches = String(box.dataset.ccImpute || "") === id;
+    if (!matches && box.dataset.ccGroupItems) {
+      try {
+        const items = JSON.parse(decodeURIComponent(box.dataset.ccGroupItems));
+        matches = Array.isArray(items) && items.some((item) => String(item.movementId || "") === id);
+      } catch (error) {
+        matches = false;
+      }
+    }
+    box.checked = matches;
+    if (matches) found = true;
+  });
+  refreshPrimaryImputationSummary();
+  return found;
+}
+
+function openCurrentAccountQuickPayment(movementId) {
+  const movement = (state.cuenta?.movimientos || []).find((item) => String(item.id || "") === String(movementId || ""));
+  if (!movement) return;
+  const signed = pendingSignedAmount(movement);
+  if (Math.abs(signed) <= 0.01) return;
+  openCurrentAccountPanel("#cc-payment-panel");
+  $("#cc-payment-client").value = movement.cliente || "";
+  $("#cc-payment-type").value = signed < 0 ? "PAGO" : "COBRO";
+  $("#cc-counterparty-type").value = $("#cc-payment-type").value === "PAGO" ? "COBRO" : "PAGO";
+  setMoneyInput("#cc-payment-amount", Math.abs(signed));
+  $("#cc-payment-reference").value = movement.comprobante || movement.operacion || "";
+  $("#cc-payment-notes").value = movement.operacion ? `Movimiento ${movement.operacion}` : "";
+  syncCurrentAccountPaymentMode();
+  renderCurrentAccountImputations();
+  renderCurrentAccountCounterpartyImputations();
+  const selected = selectCurrentAccountImputationForMovement(movement.id);
+  if (!selected) {
+    $("#cc-payment-message").textContent = "No se pudo marcar automaticamente el movimiento. Revisá si corresponde Pago o Cobro y seleccionalo manualmente.";
+    $("#cc-payment-message").className = "form-message error";
+  } else {
+    $("#cc-payment-message").textContent = "Movimiento seleccionado para imputar.";
+    $("#cc-payment-message").className = "form-message success";
+  }
+  $("#cc-payment-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function syncCurrentAccountPaymentMode() {
@@ -10211,6 +10269,11 @@ async function init() {
     if (event.target.matches("[data-cc-counterparty-impute]")) refreshCounterpartyImputationSummary();
   });
   $("#cc-movements-body").addEventListener("click", async (event) => {
+    const quickPaymentButton = event.target.closest("[data-cc-quick-payment]");
+    if (quickPaymentButton) {
+      openCurrentAccountQuickPayment(quickPaymentButton.dataset.ccQuickPayment);
+      return;
+    }
     const attachDocumentButton = event.target.closest("[data-document-attach]");
     if (attachDocumentButton) {
       fillDocumentFormFromMovement(JSON.parse(decodeURIComponent(attachDocumentButton.dataset.documentAttach)));
@@ -10261,6 +10324,11 @@ async function init() {
     }
   });
   $("#cc-due-body").addEventListener("click", (event) => {
+    const quickPaymentButton = event.target.closest("[data-cc-quick-payment]");
+    if (quickPaymentButton) {
+      openCurrentAccountQuickPayment(quickPaymentButton.dataset.ccQuickPayment);
+      return;
+    }
     const editExternalButton = event.target.closest("[data-cc-edit-external]");
     if (editExternalButton) {
       openExternalMovementEdit(editExternalButton.dataset.ccEditExternal);
