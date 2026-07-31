@@ -310,14 +310,21 @@
           <div class="panel-head">
             <div>
               <h2>Buscador de operaciones</h2>
-              <p class="subtle">Consulta compacta por cliente, tipo, categoria o periodo. Desde cada resultado puede abrir el detalle.</p>
+              <p class="subtle">Consulta compacta por fecha de operacion, cliente, tipo, categoria, estado o periodo. Desde cada resultado puede abrir el detalle.</p>
             </div>
             <div class="form-actions">
-              <label>Desde<input id="operation-search-from" type="date"></label>
-              <label>Hasta<input id="operation-search-to" type="date"></label>
+              <label>Fecha operacion desde<input id="operation-search-from" type="date"></label>
+              <label>Fecha operacion hasta<input id="operation-search-to" type="date"></label>
               <label>Cliente<input id="operation-search-client" list="cc-client-list" autocomplete="off" placeholder="Todos"></label>
               <label>Tipo / destino<input id="operation-search-type" autocomplete="off" placeholder="Ej.: directa, faena"></label>
               <label>Categoria<input id="operation-search-category" autocomplete="off" placeholder="Todas"></label>
+              <label>Estado
+                <select id="operation-search-status">
+                  <option value="TODAS">Todas</option>
+                  <option value="PENDIENTES">Pendientes</option>
+                  <option value="CONFIRMADAS">Confirmadas / cerradas</option>
+                </select>
+              </label>
               <label>Texto<input id="operation-search-text" autocomplete="off" placeholder="Operacion, comprador, consignataria"></label>
               <button type="button" class="ghost-button" id="operation-search-run">Buscar</button>
             </div>
@@ -333,8 +340,9 @@
               <thead>
                 <tr>
                   <th>Operacion</th>
-                  <th>Fecha carga</th>
+                  <th>Fecha operacion</th>
                   <th>Tipo / destino</th>
+                  <th>Estado</th>
                   <th>Vendedor</th>
                   <th>Comprador / consignataria</th>
                   <th>Categorias</th>

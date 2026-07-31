@@ -4431,7 +4431,21 @@ function operationLineKilos(line) {
 }
 
 function operationSearchDate(operation) {
-  return parseDisplayDate(operation.fechaCarga || operation.draftData?.fechaCarga || operation.fecha || operation.draftData?.fecha);
+  return parseDisplayDate(operation.fecha || operation.draftData?.fecha || operation.fechaCarga || operation.draftData?.fechaCarga);
+}
+
+function operationSearchStatusInfo(operation) {
+  const liquidationStatus = normalizeSearch(operation.liquidacionEstado || operation.draftData?.liquidacionEstado);
+  const operationStatus = normalizeSearch(operation.estado || operation.draftData?.estado);
+  const confirmed = Boolean(operation.liquidacionConfirmada || operation.draftData?.liquidacionConfirmada)
+    || liquidationStatus.includes("confirmada")
+    || liquidationStatus.includes("cerrada")
+    || operationStatus.includes("confirmada")
+    || operationStatus.includes("cerrada");
+  return {
+    pending: !confirmed,
+    label: confirmed ? "Confirmada" : "Pendiente"
+  };
 }
 
 function operationSearchBasicMatches(operation, filters) {
@@ -4440,6 +4454,9 @@ function operationSearchBasicMatches(operation, filters) {
   date.setHours(0, 0, 0, 0);
   if (filters.from && date < dateOnly(filters.from)) return false;
   if (filters.to && date > dateOnly(filters.to)) return false;
+  const statusInfo = operationSearchStatusInfo(operation);
+  if (filters.status === "PENDIENTES" && !statusInfo.pending) return false;
+  if (filters.status === "CONFIRMADAS" && statusInfo.pending) return false;
   const clientText = normalizeSearch([
     operation.vendedor,
     operation.comprador,
@@ -4485,6 +4502,7 @@ async function renderOperationSearch() {
     client: normalizeSearch($("#operation-search-client").value),
     type: normalizeSearch($("#operation-search-type").value),
     category: normalizeSearch($("#operation-search-category").value),
+    status: $("#operation-search-status").value,
     text: normalizeSearch($("#operation-search-text").value)
   };
   const message = $("#operation-search-message");
@@ -4519,10 +4537,12 @@ async function renderOperationSearch() {
         const categories = Array.from(summary.categories.entries())
           .map(([name, heads]) => `${name}${heads ? ` (${plainNumberValue(heads)})` : ""}`)
           .join(", ");
+        const statusInfo = operationSearchStatusInfo(operation);
         return `<tr>
           <td>${escapeHtml(operation.id || "-")}</td>
-          <td>${escapeHtml(operation.fechaCarga || operation.draftData?.fechaCarga || operation.fecha || "-")}</td>
+          <td>${escapeHtml(operation.fecha || operation.draftData?.fecha || operation.fechaCarga || "-")}</td>
           <td>${escapeHtml(`${operationTypeLabel(operation)} ${operation.destino || operation.draftData?.destino || ""}`.trim())}</td>
+          <td>${escapeHtml(statusInfo.label)}</td>
           <td>${escapeHtml(operation.vendedor || operation.draftData?.vendedor || "-")}</td>
           <td>${escapeHtml(operation.comprador || operation.consignataria || operation.draftData?.comprador || operation.draftData?.consignataria || "-")}</td>
           <td>${escapeHtml(categories || "-")}</td>
@@ -4532,7 +4552,7 @@ async function renderOperationSearch() {
           <td><button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button></td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="10">No hay operaciones para los filtros aplicados.</td></tr>`;
+    : `<tr><td colspan="11">No hay operaciones para los filtros aplicados.</td></tr>`;
   message.textContent = rows.length ? "Busqueda lista." : "No se encontraron operaciones.";
   message.className = `form-message ${rows.length ? "ok" : ""}`.trim();
 }
@@ -9689,7 +9709,8 @@ async function init() {
     $(selector).addEventListener("input", renderPeriodStats);
     $(selector).addEventListener("change", renderPeriodStats);
   });
-  ["#operation-search-from", "#operation-search-to", "#operation-search-client", "#operation-search-type", "#operation-search-category", "#operation-search-text"].forEach((selector) => {
+  ["#operation-search-from", "#operation-search-to", "#operation-search-client", "#operation-search-type", "#operation-search-category", "#operation-search-status", "#operation-search-text"].forEach((selector) => {
+    $(selector).addEventListener("input", renderOperationSearch);
     $(selector).addEventListener("change", renderOperationSearch);
   });
   $("#commissionist-load").addEventListener("click", loadCommissionistOperations);
