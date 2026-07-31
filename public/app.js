@@ -24,6 +24,9 @@
   frigoBrutoSinIvaTouched: false,
   externalDueRows: [],
   commissionistRows: [],
+  commissionistPage: 1,
+  operationSearchRows: [],
+  operationSearchPage: 1,
   fieldQuoteRows: [],
   fieldLeasePaymentRows: [],
   fieldLeaseAdjustmentRows: [],
@@ -45,6 +48,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
+const TABLE_PAGE_SIZE = 25;
 const APP_BUILD = "20260721-mobile-real-v74";
 
 const currency = new Intl.NumberFormat("es-AR", {
@@ -4522,6 +4526,8 @@ async function renderOperationSearch() {
       const dateB = operationSearchDate(b.operation)?.getTime() || 0;
       return dateB - dateA || String(b.operation.id || "").localeCompare(String(a.operation.id || ""), "es");
     });
+  state.operationSearchRows = rows;
+  state.operationSearchPage = 1;
   const totals = rows.reduce((acc, item) => {
     acc.heads += item.summary.heads;
     acc.kilos += item.summary.kilos;
@@ -4532,8 +4538,16 @@ async function renderOperationSearch() {
   $("#operation-search-heads").textContent = plainNumberValue(totals.heads);
   $("#operation-search-kilos").textContent = `${plainNumberValue(totals.kilos)} kgs`;
   $("#operation-search-amount").textContent = moneyValue(totals.amount);
-  $("#operation-search-body").innerHTML = rows.length
-    ? rows.map(({ operation, summary }) => {
+  renderOperationSearchPage();
+  message.textContent = rows.length ? "Busqueda lista." : "No se encontraron operaciones.";
+  message.className = `form-message ${rows.length ? "ok" : ""}`.trim();
+}
+
+function renderOperationSearchPage() {
+  const page = pageItems(state.operationSearchRows || [], state.operationSearchPage);
+  state.operationSearchPage = page.current;
+  $("#operation-search-body").innerHTML = page.total
+    ? page.items.map(({ operation, summary }) => {
         const categories = Array.from(summary.categories.entries())
           .map(([name, heads]) => `${name}${heads ? ` (${plainNumberValue(heads)})` : ""}`)
           .join(", ");
@@ -4553,8 +4567,7 @@ async function renderOperationSearch() {
         </tr>`;
       }).join("")
     : `<tr><td colspan="11">No hay operaciones para los filtros aplicados.</td></tr>`;
-  message.textContent = rows.length ? "Busqueda lista." : "No se encontraron operaciones.";
-  message.className = `form-message ${rows.length ? "ok" : ""}`.trim();
+  renderPagination("#operation-search-pagination", page, "operation-search");
 }
 
 function movementDateForRealCommission(movement) {
@@ -7021,13 +7034,15 @@ function renderCommissionistRows() {
   const selectedBase = selectedRows.reduce((sum, row) => sum + Number(row.base || 0), 0);
   const selectedCommission = selectedRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
   const invoiceTotal = invoiceRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
+  const page = pageItems(state.commissionistRows || [], state.commissionistPage);
+  state.commissionistPage = page.current;
   $("#commissionist-summary").textContent = selectedRows.length
     ? `${selectedRows.length} item/s - importe bruto ${moneyValue(selectedBase)} - comision ${moneyValue(selectedCommission)}`
     : invoiceRows.length
       ? `${invoiceRows.length} comision/es listas para facturar - total ${moneyValue(invoiceTotal)}`
       : state.commissionistRows.length ? "Seleccione operaciones para liquidar o facturar." : "Sin operaciones seleccionadas";
-  $("#commissionist-body").innerHTML = state.commissionistRows.length
-    ? state.commissionistRows.map((row) => {
+  $("#commissionist-body").innerHTML = page.total
+    ? page.items.map((row) => {
         const commission = commissionistRowCommission(row, percent);
         return `<tr>
           <td><input type="checkbox" data-commissionist-row="${escapeHtml(row.id)}" ${row.selected ? "checked" : ""} ${row.noGenerate ? "disabled" : ""}></td>
@@ -7043,6 +7058,7 @@ function renderCommissionistRows() {
         </tr>`;
       }).join("")
     : `<tr><td colspan="10">Busque operaciones y movimientos externos por periodo.</td></tr>`;
+  renderPagination("#commissionist-pagination", page, "commissionist");
 }
 
 function commissionistRowCommission(row, fallbackPercent) {
@@ -7121,6 +7137,7 @@ async function loadCommissionistOperations() {
   const accountRows = pendingCommissionistAccountRows(selectedCommissionist, from, to, alreadyLiquidatedIds);
   state.commissionistRows = [...state.commissionistRows, ...accountRows, ...externalRows]
     .sort((a, b) => (parseDisplayDate(a.fecha)?.getTime() || 0) - (parseDisplayDate(b.fecha)?.getTime() || 0));
+  state.commissionistPage = 1;
   renderCommissionistRows();
   $("#commissionist-message").textContent = state.commissionistRows.length
     ? "Operaciones listas para revisar. Se excluyen las ya liquidadas al comisionista."
@@ -7688,6 +7705,36 @@ function partialPartyLabel(value) {
 
 function moneyValue(value) {
   return currency.format(Number(value || 0));
+}
+
+function pageItems(items, page, pageSize = TABLE_PAGE_SIZE) {
+  const total = items.length;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const current = Math.min(Math.max(1, Number(page || 1)), pages);
+  const start = (current - 1) * pageSize;
+  return {
+    items: items.slice(start, start + pageSize),
+    current,
+    pages,
+    start,
+    total
+  };
+}
+
+function renderPagination(containerSelector, info, actionName) {
+  const node = $(containerSelector);
+  if (!node) return;
+  if (!info.total || info.pages <= 1) {
+    node.innerHTML = "";
+    return;
+  }
+  const from = info.start + 1;
+  const to = Math.min(info.start + TABLE_PAGE_SIZE, info.total);
+  node.innerHTML = `
+    <button type="button" class="small-button" data-page-action="${actionName}" data-page-direction="prev" ${info.current <= 1 ? "disabled" : ""}>Anterior</button>
+    <span>Mostrando ${from}-${to} de ${info.total} | Pagina ${info.current} de ${info.pages}</span>
+    <button type="button" class="small-button" data-page-action="${actionName}" data-page-direction="next" ${info.current >= info.pages ? "disabled" : ""}>Siguiente</button>
+  `;
 }
 
 function parseMoneyInput(value) {
@@ -9710,7 +9757,6 @@ async function init() {
     $(selector).addEventListener("change", renderPeriodStats);
   });
   ["#operation-search-from", "#operation-search-to", "#operation-search-client", "#operation-search-type", "#operation-search-category", "#operation-search-status", "#operation-search-text"].forEach((selector) => {
-    $(selector).addEventListener("input", renderOperationSearch);
     $(selector).addEventListener("change", renderOperationSearch);
   });
   $("#commissionist-load").addEventListener("click", loadCommissionistOperations);
@@ -10347,6 +10393,20 @@ async function init() {
     if (!button) return;
     setView("operaciones");
     openSale(button.dataset.openOperationSearch);
+  });
+  document.body.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-page-action]");
+    if (!button) return;
+    const direction = button.dataset.pageDirection === "next" ? 1 : -1;
+    if (button.dataset.pageAction === "operation-search") {
+      state.operationSearchPage += direction;
+      renderOperationSearchPage();
+      return;
+    }
+    if (button.dataset.pageAction === "commissionist") {
+      state.commissionistPage += direction;
+      renderCommissionistRows();
+    }
   });
   $("#client-name-suggestions").addEventListener("click", (event) => {
     const button = event.target.closest("[data-suggest-client]");

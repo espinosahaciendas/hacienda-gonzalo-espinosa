@@ -867,6 +867,21 @@ label textarea {
   font-size: 13px;
 }
 
+.table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.table-pagination .small-button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
 .danger-button {
   color: #9b1c1c;
 }
@@ -2318,5 +2333,246 @@ label textarea {
   #campos .compact-table td {
     font-size: 11px;
     padding: 6px;
+  }
+}
+
+@media (max-width: 760px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+    width: 100%;
+  }
+
+  body {
+    display: block;
+  }
+
+  main,
+  .view.active,
+  .panel,
+  .advanced-subpanel,
+  .soft-panel,
+  .table-wrap,
+  .cc-entry-panel,
+  .report-panel,
+  .sale-panel,
+  .liquidation-panel {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  main {
+    overflow-x: hidden;
+    padding: 10px 7px 18px;
+    width: 100%;
+  }
+
+  .sidebar {
+    border-radius: 0;
+    overflow: hidden;
+    padding: 8px 7px;
+    width: 100%;
+  }
+
+  .brand {
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .brand img {
+    height: 42px;
+    width: 42px;
+  }
+
+  .brand strong {
+    font-size: 13px;
+  }
+
+  .brand span {
+    font-size: 11px;
+  }
+
+  nav {
+    gap: 5px;
+    margin-left: -1px;
+    margin-right: -1px;
+    overflow-x: auto;
+    padding-bottom: 5px;
+    scrollbar-width: thin;
+    width: calc(100vw - 14px);
+  }
+
+  nav button {
+    border-radius: 5px;
+    flex: 0 0 auto;
+    font-size: 11px;
+    padding: 7px 8px;
+    width: auto;
+  }
+
+  .topbar {
+    gap: 7px;
+    margin: 8px 0 10px;
+  }
+
+  .topbar h1 {
+    font-size: 20px;
+    line-height: 1.1;
+  }
+
+  .status {
+    font-size: 12px;
+    padding: 7px 8px;
+    width: 100%;
+  }
+
+  .panel {
+    border-radius: 7px;
+    margin-bottom: 9px;
+    padding: 10px;
+  }
+
+  .panel-head {
+    gap: 7px;
+  }
+
+  .panel-head h2 {
+    font-size: 17px;
+    line-height: 1.15;
+  }
+
+  .panel-head h3 {
+    font-size: 15px;
+    line-height: 1.15;
+  }
+
+  .panel p,
+  .subtle,
+  label {
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px;
+    max-width: 100%;
+  }
+
+  .segmented {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  .segmented button {
+    flex: 0 0 auto;
+    font-size: 12px;
+    padding: 8px 9px;
+    white-space: nowrap;
+  }
+
+  .form-grid,
+  .cc-grid,
+  .metrics,
+  .summary-grid,
+  .liquidation-columns,
+  .field-contract-rules,
+  .dashboard-due-grid,
+  .dashboard-report-panel {
+    grid-template-columns: 1fr !important;
+  }
+
+  .form-grid .span-2,
+  .form-grid .wide-field {
+    grid-column: auto;
+  }
+
+  .cc-grid {
+    gap: 7px;
+  }
+
+  .cc-grid > div {
+    min-width: 0;
+    padding: 9px;
+  }
+
+  .cc-grid strong {
+    font-size: 18px;
+    overflow-wrap: anywhere;
+  }
+
+  .table-wrap {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+
+  .table-wrap table {
+    max-width: none;
+    min-width: 100% !important;
+    width: max-content;
+  }
+
+  th,
+  td {
+    font-size: 11.5px;
+    padding: 7px 8px;
+    vertical-align: top;
+  }
+
+  .form-actions {
+    align-items: stretch;
+    display: grid;
+    gap: 7px;
+    grid-template-columns: 1fr;
+  }
+
+  .form-actions button,
+  .topbar-actions button,
+  .cc-report-toolbar button {
+    width: 100%;
+  }
+
+  #campos .fields-hero {
+    display: block;
+    padding: 12px;
+  }
+
+  #campos .fields-hero img {
+    display: block;
+    height: 58px;
+    margin: 0 0 8px;
+    max-width: 180px;
+    width: auto;
+  }
+
+  #campos .fields-hero h2 {
+    font-size: 20px;
+  }
+
+  #campos .fields-tabs {
+    margin: 0 0 8px;
+    top: 66px;
+    width: 100%;
+  }
+
+  #campos .fields-tabs button {
+    font-size: 11.5px;
+    padding: 8px 9px;
+  }
+
+  #cuenta .cc-grid,
+  #cuenta .summary-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  #cuenta .cc-grid > div {
+    width: 100%;
   }
 }
