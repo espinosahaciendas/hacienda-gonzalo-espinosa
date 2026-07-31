@@ -49,7 +49,7 @@ let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260731-comisionistas-api-v1";
+const APP_BUILD = "20260731-cc-tipo-operacion-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -5024,6 +5024,18 @@ function matchesCurrentAccountCommissionistSearch(movement, words, exactCommissi
   return words.every((word) => haystack.includes(word));
 }
 
+function currentAccountOperationType(movement) {
+  const text = normalizeSearch(`${movement.tipoOperacion || ""} ${movement.tipo || ""} ${movement.concepto || ""}`);
+  if (text.includes("consignada")) return "CONSIGNADA";
+  if (text.includes("directa")) return "DIRECTA";
+  return "";
+}
+
+function matchesCurrentAccountOperationType(movement, filter) {
+  if (!filter || filter === "TODOS") return true;
+  return currentAccountOperationType(movement) === filter;
+}
+
 function commissionistDetailFromObservation(observation) {
   const text = String(observation || "").trim();
   if (!text.startsWith("COMISIONISTA_DETALLE:")) return null;
@@ -5160,6 +5172,7 @@ function renderCuentaCorriente() {
   const viewMode = $("#cc-view-mode").value;
   const statusFilter = $("#cc-status-filter").value;
   const conceptFilter = $("#cc-concept-filter").value;
+  const operationTypeFilter = $("#cc-operation-type-filter")?.value || "TODOS";
   const dueFilter = $("#cc-due-filter").value;
   const dateFrom = parseInputDate($("#cc-date-from").value);
   const dateTo = parseInputDate($("#cc-date-to").value);
@@ -5178,6 +5191,7 @@ function renderCuentaCorriente() {
     if (!matchesEntity) return false;
     if (statusFilter !== "TODOS" && String(movement.estado || "").toUpperCase() !== statusFilter) return false;
     if (conceptFilter === "COMISION" && (!isCommissionPendingMovement(movement, viewMode) || String(movement.estado || "").toUpperCase() === "IMPUTADO")) return false;
+    if (!matchesCurrentAccountOperationType(movement, operationTypeFilter)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
@@ -5268,6 +5282,7 @@ function renderCuentaCorriente() {
         : matchesCurrentAccountClientSearch(movement, words, exactClient);
     if (!matchesEntity) return false;
     if (conceptFilter === "COMISION" && !isCommissionPendingMovement(movement, viewMode)) return false;
+    if (!matchesCurrentAccountOperationType(movement, operationTypeFilter)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     if (!dueDateInRange(movement, duePanelRange.from, duePanelRange.to)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
@@ -6189,6 +6204,7 @@ function getCurrentAccountReportFilters() {
     statusFilter: $("#cc-status-filter").value,
     dueFilter: $("#cc-due-filter").value,
     conceptFilter: $("#cc-concept-filter").value,
+    operationTypeFilter: $("#cc-operation-type-filter")?.value || "TODOS",
     dateFrom: parseInputDate($("#cc-date-from").value),
     dateTo: parseInputDate($("#cc-date-to").value),
     dateFromText: $("#cc-date-from").value,
@@ -6204,6 +6220,7 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
       : matchesCurrentAccountClientSearch(movement, filters.words, filters.exactClient);
   return matchesEntity
     && (filters.conceptFilter !== "COMISION" || isCommissionPendingMovement(movement, filters.viewMode))
+    && matchesCurrentAccountOperationType(movement, filters.operationTypeFilter)
     && (!includeStatusFilter || filters.statusFilter === "TODOS" || String(movement.estado || "").toUpperCase() === filters.statusFilter)
     && matchesCurrentAccountDateRange(movement, filters.dateFrom, filters.dateTo)
     && (!includeDueFilter || matchesCurrentAccountDueFilter(movement, filters.dueFilter));
@@ -9816,6 +9833,7 @@ async function init() {
   });
   $("#cc-status-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-concept-filter").addEventListener("change", renderCuentaCorriente);
+  $("#cc-operation-type-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-due-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-date-from").addEventListener("change", renderCuentaCorriente);
   $("#cc-date-to").addEventListener("change", renderCuentaCorriente);
