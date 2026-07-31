@@ -49,7 +49,7 @@ let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260721-mobile-real-v74";
+const APP_BUILD = "20260731-pagination-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -7724,7 +7724,7 @@ function pageItems(items, page, pageSize = TABLE_PAGE_SIZE) {
 function renderPagination(containerSelector, info, actionName) {
   const node = $(containerSelector);
   if (!node) return;
-  if (!info.total || info.pages <= 1) {
+  if (!info.total) {
     node.innerHTML = "";
     return;
   }
