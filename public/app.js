@@ -49,7 +49,7 @@ let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260731-pagination-v1";
+const APP_BUILD = "20260731-comisionistas-api-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -7070,6 +7070,8 @@ function commissionistRowCommission(row, fallbackPercent) {
 async function loadCommissionistOperations() {
   const from = $("#commissionist-from").value ? parseInputDate($("#commissionist-from").value) : null;
   const to = $("#commissionist-to").value ? parseInputDate($("#commissionist-to").value) : null;
+  const fromText = $("#commissionist-from").value || "";
+  const toText = $("#commissionist-to").value || "";
   const selectedCommissionist = $("#commissionist-client").value.trim();
   if (!selectedCommissionist) {
     $("#commissionist-message").textContent = "Seleccione un comisionista.";
@@ -7080,34 +7082,48 @@ async function loadCommissionistOperations() {
   $("#commissionist-message").className = "form-message";
   const alreadyLiquidatedIds = liquidatedCommissionistItemIds(selectedCommissionist);
   const accountCommissionOperationIds = commissionistAccountOperationIds(selectedCommissionist);
-  const candidates = state.operaciones
-    .filter((operation) => operation.estado !== "ANULADA")
-    .filter((operation) => commissionistDateInRange(operation, from, to));
-  const details = await Promise.all(candidates.map((operation) => fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`).then((response) => response.item).catch(() => null)));
-  state.commissionistRows = details
-    .filter(Boolean)
-    .filter((detail) => detail.liquidacion)
+  let operationRows = [];
+  try {
+    const query = new URLSearchParams({
+      cliente: selectedCommissionist,
+      desde: fromText,
+      hasta: toText
+    });
+    const response = await fetchJson(`/api/comisionistas/operaciones?${query.toString()}`);
+    operationRows = Array.isArray(response.items) ? response.items : [];
+  } catch (error) {
+    const selectedKey = normalizeSearch(selectedCommissionist);
+    const candidates = state.operaciones
+      .filter((operation) => operation.estado !== "ANULADA")
+      .filter((operation) => commissionistDateInRange(operation, from, to))
+      .filter((operation) => operationCommissionistKeys(operation).includes(selectedKey));
+    const details = await Promise.all(candidates.map((operation) => fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`).then((response) => response.item).catch(() => null)));
+    operationRows = details
+      .filter(Boolean)
+      .filter((detail) => detail.liquidacion)
+      .filter((detail) => operationCommissionistKeys(detail).includes(selectedKey))
+      .map((detail) => {
+        const liq = detail.liquidacion || {};
+        return {
+          id: detail.id,
+          operacion: detail.id,
+          fecha: detail.fecha,
+          origen: "Operacion",
+          cuenta: selectedCommissionist,
+          liquidoA: "Operacion a liquidar",
+          clienteLiquidado: detail.vendedor,
+          contraparteOperacion: detail.comprador,
+          vendedor: detail.vendedor,
+          comprador: detail.comprador,
+          comprobante: liq.comprobanteProd || liq.comprobanteComp || "",
+          base: commissionistOperationBase(detail),
+          selected: true
+        };
+      });
+  }
+  state.commissionistRows = operationRows
     .filter((detail) => !alreadyLiquidatedIds.has(String(detail.id)))
     .filter((detail) => !accountCommissionOperationIds.has(String(detail.id)))
-    .filter((detail) => operationCommissionistKeys(detail).includes(normalizeSearch(selectedCommissionist)))
-    .map((detail) => {
-      const liq = detail.liquidacion || {};
-      return {
-        id: detail.id,
-        operacion: detail.id,
-        fecha: detail.fecha,
-        origen: "Operacion",
-        cuenta: selectedCommissionist,
-        liquidoA: "Operacion a liquidar",
-        clienteLiquidado: detail.vendedor,
-        contraparteOperacion: detail.comprador,
-        vendedor: detail.vendedor,
-        comprador: detail.comprador,
-        comprobante: liq.comprobanteProd || liq.comprobanteComp || "",
-        base: commissionistOperationBase(detail),
-        selected: true
-      };
-    })
     .filter((row) => Number(row.base || 0) > 0);
   const externalRows = (state.cuenta?.movimientos || [])
     .filter((movement) => String(movement.origen || "").toUpperCase() === "EXTERNO")
