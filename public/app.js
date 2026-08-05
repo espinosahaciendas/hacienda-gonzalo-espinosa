@@ -49,7 +49,7 @@ let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260731-cc-acciones-rapidas-v1";
+const APP_BUILD = "20260805-campos-recibo-total-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -4153,6 +4153,14 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
   }, { pagos: 0, facturado: 0, efectivo: 0, comision: 0, total: 0 });
   const paymentAppliedToBalance = fieldLeaseAppliedAmountForBalance(paymentTotals, receiptRole);
   const balance = totals.neto - paymentAppliedToBalance;
+  const hasRecordedPayments = payments.length > 0;
+  const receiptMainAmount = hasRecordedPayments ? paymentAppliedToBalance : totals.neto;
+  const receiptMainLabel = receiptRole === "ARRENDADOR"
+    ? "Importe efectivamente pagado en este recibo"
+    : "Importe efectivamente cobrado en este recibo";
+  const receiptMainNote = hasRecordedPayments
+    ? "Segun pagos, descuentos y comisiones registrados para este comprobante."
+    : "Importe informado antes de registrar pagos o descuentos.";
   const commissionGeneral = Math.max(totals.comision - totals.comisionFacturado - totals.comisionEfectivo, 0);
   const netFacturado = receiptRole === "ARRENDADOR"
     ? totals.facturado - totals.comisionFacturado
@@ -4229,17 +4237,22 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
     header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:10px}
     img{width:185px;height:68px;object-fit:contain}
     h1{font-size:18px;margin:0 0 3px} h2{font-size:12px;margin:12px 0 5px;color:#3d2d22} p{margin:2px 0;font-size:10px}.muted{color:#7b5a32}
-    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0 10px}.box{border:1px solid #dbcbb8;background:#fffaf4;padding:7px;min-height:42px}.box span{display:block;font-size:9px;color:#7b5a32;text-transform:uppercase}.box strong{display:block;font-size:15px;margin-top:4px;color:#1f160f}.box.main{background:#fff3e8;border-color:#d4ac7a}.box.main strong{font-size:16px}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0 10px}.box{border:1px solid #dbcbb8;background:#fffaf4;padding:7px;min-height:42px}.box span{display:block;font-size:9px;color:#7b5a32;text-transform:uppercase}.box strong{display:block;font-size:15px;margin-top:4px;color:#1f160f}.box.main{background:#fff3e8;border-color:#d4ac7a}.box.main strong{font-size:16px}.receipt-total{border:2px solid #7b5a32;background:#fff3e8;padding:9px 11px;margin:9px 0 8px}.receipt-total span{display:block;font-size:10px;color:#7b5a32;text-transform:uppercase;font-weight:700}.receipt-total strong{display:block;font-size:21px;margin-top:3px;color:#1f160f}.receipt-total small{display:block;margin-top:3px;font-size:9px;color:#7b5a32}
     .grid{display:grid;grid-template-columns:150px 1fr 150px 1fr;border:1px solid #dbcbb8;margin-bottom:8px}.grid span,.grid strong{border-bottom:1px solid #dbcbb8;padding:4px;font-size:9.5px}.grid span{background:#f8f2ea;color:#7b5a32}.grid strong{font-size:10px}
     table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:5px}th,td{border:1px solid #dbcbb8;padding:4px;text-align:left;vertical-align:top}th{background:#f8f2ea}.amount{text-align:right;font-weight:700;white-space:nowrap}.nowrap{white-space:nowrap}.total{background:#fff3e8;font-weight:700}.cash td{font-style:italic;font-weight:700}.settlement-table{font-size:10px}.settlement-table th,.settlement-table td{padding:5px}.note{border:1px solid #dbcbb8;padding:7px;margin-top:9px;font-size:9.5px;line-height:1.25}.print-actions{margin-top:14px}.print-actions button{padding:8px 12px}
     @media print{@page{size:A4 portrait;margin:9mm}body{margin:0}.print-actions{display:none}tr{break-inside:avoid}h2{break-after:avoid}}
   </style></head><body>
     <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Recibo de cuota - ${escapeHtml(roleLabel)}</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.contrato || "-")} | ${escapeHtml(item.campo || "-")} | Vencimiento: ${fieldReportDate(item.vencimiento)}</p></div></header>
+    <section class="receipt-total">
+      <span>${escapeHtml(receiptMainLabel)}</span>
+      <strong>${moneyValue(receiptMainAmount)}</strong>
+      <small>${escapeHtml(receiptMainNote)}</small>
+    </section>
     <section class="summary">
       <div class="box"><span>${receiptRole === "ARRENDADOR" ? "Neto facturado" : "Total facturado"}</span><strong>${moneyValue(netFacturado)}</strong></div>
       <div class="box"><span>${receiptRole === "ARRENDADOR" ? "Neto efectivo" : "Total efectivo"}</span><strong>${moneyValue(netEfectivo)}</strong></div>
       <div class="box"><span>${escapeHtml(commissionLabel)}</span><strong>${moneyValue(totals.comision)}</strong></div>
-      <div class="box main"><span>Neto de este recibo</span><strong>${moneyValue(totals.neto)}</strong></div>
+      <div class="box main"><span>Neto informado</span><strong>${moneyValue(totals.neto)}</strong></div>
       <div class="box"><span>Total cuota</span><strong>${moneyValue(totals.totalCuota)}</strong></div>
       <div class="box main"><span>Saldo</span><strong>${moneyValue(balance)}</strong></div>
     </section>
