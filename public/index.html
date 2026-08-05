@@ -869,7 +869,7 @@
                 <div class="panel-head">
                   <div>
                     <h4>Registrar por tilde</h4>
-                    <p class="subtle">Seleccione exactamente que parte se registra: facturado, efectivo, comision sobre facturado o comision sobre efectivo.</p>
+                    <p class="subtle">Camino recomendado: tilde cada concepto real de la cuota y registrelo una sola vez. Incluye facturado, efectivo y comisiones calculadas.</p>
                   </div>
                   <span class="subtle" id="field-payment-preset-summary">Sin items disponibles</span>
                 </div>
@@ -884,8 +884,8 @@
                 </div>
               </div>
               <div class="advanced-subpanel soft-panel">
-                <h4>1. Comision de esta cuota</h4>
-                <p class="subtle">Use este bloque solo si en esta cuota corresponde cobrar, descontar o dejar facturada una comision.</p>
+                <h4>Comision manual / adicional</h4>
+                <p class="subtle" id="field-payment-commission-helper">Use este bloque solo para cargar una comision adicional/manual que no este en el listado de tilde.</p>
                 <div class="form-grid">
                   <label>Que pasa con la comision
                     <select id="field-payment-commission-mode">
@@ -921,7 +921,7 @@
                   <label>Detalle / factura / observacion<input id="field-payment-commission-reference" placeholder="Ej.: factura de comision, descuento aplicado, observacion"></label>
                 </div>
                 <div class="form-actions">
-                  <button type="button" class="ghost-button" id="field-payment-commission-register">Registrar comision</button>
+                  <button type="button" class="ghost-button" id="field-payment-commission-register">Registrar comision manual</button>
                 </div>
               </div>
               <div class="advanced-subpanel soft-panel">
@@ -2675,7 +2675,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260805-campos-recibo-total-v1"></script>
+    <script src="/app.js?v=20260805-campos-comision-clara-v1"></script>
   </body>
 </html>
 

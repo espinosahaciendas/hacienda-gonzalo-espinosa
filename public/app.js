@@ -49,7 +49,7 @@ let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260805-campos-recibo-total-v1";
+const APP_BUILD = "20260805-campos-comision-clara-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2765,6 +2765,69 @@ function syncFieldPaymentCommissionMode() {
   if (party && mode === "ARRENDATARIO_PAGA") party.value = "ARRENDATARIO";
 }
 
+function setFieldLeaseManualCommissionDisabled(disabled) {
+  [
+    "#field-payment-commission-mode",
+    "#field-payment-commission-amount",
+    "#field-payment-commission-bucket",
+    "#field-payment-commission-party",
+    "#field-payment-commission-status",
+    "#field-payment-commission-reference"
+  ].forEach((selector) => {
+    const node = $(selector);
+    if (node) node.disabled = Boolean(disabled);
+  });
+  const button = $("#field-payment-commission-register");
+  if (button) {
+    button.disabled = Boolean(disabled);
+    button.textContent = disabled ? "Se registra desde el tilde" : "Registrar comision manual";
+  }
+}
+
+function syncFieldLeaseManualCommissionPreview(selected = selectedFieldLeasePresetPayments()) {
+  const note = $("#field-payment-commission-helper");
+  const commissionRows = (selected || []).filter((item) => isFieldLeaseCommissionPayment(item));
+  if (!commissionRows.length) {
+    if (note?.dataset.preview === "1") {
+      if ($("#field-payment-commission-mode")) $("#field-payment-commission-mode").value = "NO_APLICA";
+      if ($("#field-payment-commission-amount")) $("#field-payment-commission-amount").value = "";
+      if ($("#field-payment-commission-bucket")) $("#field-payment-commission-bucket").value = "GENERAL";
+      if ($("#field-payment-commission-party")) $("#field-payment-commission-party").value = "ARRENDATARIO";
+      if ($("#field-payment-commission-status")) $("#field-payment-commission-status").value = "PENDIENTE";
+      if ($("#field-payment-commission-reference")) $("#field-payment-commission-reference").value = "";
+    }
+    if (note) {
+      note.dataset.preview = "0";
+      note.textContent = "Use este bloque solo para cargar una comision adicional/manual que no este en el listado de tilde.";
+    }
+    setFieldLeaseManualCommissionDisabled(false);
+    return;
+  }
+  const total = commissionRows.reduce((sum, item) => sum + parseMoneyInput(item.importe || 0), 0);
+  const first = commissionRows[0];
+  const application = String(first.aplicacionComision || "").toUpperCase();
+  const mode = application === "DESCUENTA_COBRADOR"
+    ? "ARRENDADOR_DESCUENTA"
+    : application === "FACTURA_APARTE"
+      ? "FACTURA_APARTE"
+      : "ARRENDATARIO_PAGA";
+  if ($("#field-payment-commission-mode")) $("#field-payment-commission-mode").value = commissionRows.length === 1 ? mode : "NO_APLICA";
+  if ($("#field-payment-commission-amount")) setMoneyInput("#field-payment-commission-amount", total);
+  if ($("#field-payment-commission-bucket")) $("#field-payment-commission-bucket").value = commissionRows.length === 1 ? (first.comisionTipo || "GENERAL") : "GENERAL";
+  if ($("#field-payment-commission-party")) $("#field-payment-commission-party").value = commissionRows.length === 1 ? (first.parte || "ARRENDATARIO") : "ARRENDATARIO";
+  if ($("#field-payment-commission-status")) $("#field-payment-commission-status").value = commissionRows.length === 1 ? (first.estado || "PENDIENTE") : "PENDIENTE";
+  if ($("#field-payment-commission-reference")) {
+    $("#field-payment-commission-reference").value = commissionRows.length === 1
+      ? (first.referencia || first.etiqueta || "")
+      : `${commissionRows.length} comisiones seleccionadas`;
+  }
+  if (note) {
+    note.dataset.preview = "1";
+    note.textContent = "La comision marcada arriba se registra con Registrar seleccionados. Este bloque queda como vista previa para no duplicarla.";
+  }
+  setFieldLeaseManualCommissionDisabled(true);
+}
+
 function fieldLeasePaymentBalanceBase(totalDue = fieldLeaseCurrentInput().totalConComision) {
   return Number(totalDue || 0);
 }
@@ -3060,6 +3123,7 @@ function updateSelectedFieldLeasePresetPaymentAmount() {
         ? `${state.fieldLeasePaymentPresetRows.length} item/s disponibles para registrar`
         : "Sin items disponibles";
   }
+  syncFieldLeaseManualCommissionPreview(selected);
 }
 
 function addSelectedFieldLeasePresetPayments() {
