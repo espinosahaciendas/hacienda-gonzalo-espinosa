@@ -49,7 +49,7 @@ let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260805-campos-comision-clara-v1";
+const APP_BUILD = "20260811-hacienda-venta-linea-visible-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -199,6 +199,7 @@ function applyUserRole(user) {
     "#operation-start-new",
     "#operation-new",
     "#sale-form",
+    "#sale-line-save-top",
     "#liquidation-form",
     "#cc-open-payment",
     "#cc-open-external",
@@ -230,6 +231,13 @@ function applyUserRole(user) {
     if (node) node.hidden = Boolean(readonly);
   });
   $("#logout-button").hidden = !user || user.nombre === "Modo local";
+}
+
+function setSaleLineSaveText(text) {
+  ["#sale-line-save", "#sale-line-save-top"].forEach((selector) => {
+    const button = $(selector);
+    if (button) button.textContent = text;
+  });
 }
 
 async function login(event) {
@@ -8858,7 +8866,7 @@ function resetOperationForm() {
   $("#report-sheet").innerHTML = "";
   $("#sale-desbaste-vend").value = "0";
   $("#sale-desbaste-comp").value = "0";
-  $("#sale-line-save").textContent = "Agregar linea";
+  setSaleLineSaveText("Agregar linea");
   $("#sale-line-cancel-edit").hidden = true;
   syncSaleMode();
   setSelectOptions("#operation-renspa-origin-select", [], "Elegir RENSPA origen");
@@ -8999,7 +9007,7 @@ function syncBuyerDiff() {
 function resetSaleLineForm() {
   state.editingSaleLineId = "";
   $("#sale-form").reset();
-  $("#sale-line-save").textContent = "Agregar linea";
+  setSaleLineSaveText("Agregar linea");
   $("#sale-line-cancel-edit").hidden = true;
   $("#sale-category-suggestions").hidden = true;
   $("#sale-category-suggestions").innerHTML = "";
@@ -9039,7 +9047,7 @@ function fillSaleLineForm(line) {
   $("#sale-final-price-manual-comp").value = line.precioFinalManualComp || "";
   $("#sale-amount-manual-comp").value = line.importeManualComp || "";
 
-  $("#sale-line-save").textContent = "Guardar cambios";
+  setSaleLineSaveText("Guardar cambios");
   $("#sale-line-cancel-edit").hidden = false;
   syncSaleMode();
   syncBuyerDiff();
