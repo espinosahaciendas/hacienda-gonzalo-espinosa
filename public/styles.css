@@ -1128,6 +1128,14 @@ label textarea {
   background: var(--accent-soft);
 }
 
+.dashboard-open-row {
+  cursor: pointer;
+}
+
+.dashboard-open-row:hover {
+  background: var(--accent-soft);
+}
+
 .document-preview-frame {
   border: 1px solid var(--line);
   border-radius: 6px;

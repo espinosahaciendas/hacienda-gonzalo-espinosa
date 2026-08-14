@@ -49,7 +49,7 @@ let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260811-hacienda-venta-linea-visible-v1";
+const APP_BUILD = "20260814-hacienda-pendientes-origen-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -4819,15 +4819,34 @@ function renderDashboardPendingList() {
   $("#dashboard-pending-net").className = amountClass(net);
   $("#dashboard-pending-body").innerHTML = pending.length
     ? pending.map((movement) => `
-        <tr class="${isCashMovement(movement) ? "movement-cash" : ""}">
+        <tr class="${isCashMovement(movement) ? "movement-cash" : ""} dashboard-open-row" data-dashboard-open-movement="${escapeHtml(movement.id || "")}" title="Doble click para abrir el origen">
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
           <td>${escapeHtml(currentAccountDueDetailText(movement))}</td>
           <td>${escapeHtml(movement.comprobante || "-")}</td>
+          <td>${escapeHtml(movement.operacion || "-")}</td>
           <td class="${amountClass(movement.pendienteFirmado)}">${moneyValue(movement.pendienteFirmado)}</td>
+          <td><button type="button" class="small-button" data-dashboard-open-movement="${escapeHtml(movement.id || "")}">Abrir</button></td>
         </tr>
       `).join("")
-    : `<tr><td colspan="5">Sin pendientes vencidos.</td></tr>`;
+    : `<tr><td colspan="7">Sin pendientes vencidos.</td></tr>`;
+}
+
+async function openDashboardPendingMovement(movementId) {
+  const movement = (state.cuenta?.movimientos || []).find((item) => String(item.id) === String(movementId));
+  if (!movement) return;
+  if (movement.operacion) {
+    setView("operaciones");
+    await openSale(movement.operacion, "report");
+    return;
+  }
+  setView("cuenta");
+  $("#cc-client-search").value = movement.cliente || "";
+  $("#cc-status-filter").value = "TODOS";
+  $("#cc-concept-filter").value = "TODOS";
+  setCurrentAccountTab("estado");
+  renderCuentaCorriente();
+  $("#cuenta")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function signedPendingAmount(movement) {
@@ -10427,6 +10446,16 @@ async function init() {
         .then(reloadCurrentAccount)
         .catch((error) => window.alert(error.message));
     }
+  });
+  $("#dashboard-pending-body")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-dashboard-open-movement]");
+    if (!button || !event.target.closest("button")) return;
+    await openDashboardPendingMovement(button.dataset.dashboardOpenMovement);
+  });
+  $("#dashboard-pending-body")?.addEventListener("dblclick", async (event) => {
+    const row = event.target.closest("[data-dashboard-open-movement]");
+    if (!row) return;
+    await openDashboardPendingMovement(row.dataset.dashboardOpenMovement);
   });
   $("#operation-type").addEventListener("change", syncOperationType);
   $("#operation-destination").addEventListener("change", () => {
