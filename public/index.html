@@ -1762,7 +1762,12 @@
 
                 <div class="special-operation-box warning" id="anticipada-special-box" hidden>
                   <strong>Venta anticipada / operacion a termino</strong>
-                  <span>Esta operacion requiere circuito especial de anticipo, carga real y ajuste final. No debe liquidarse como operacion comun.</span>
+                  <span>El importe liquidado ahora se trata como anticipo/facturado. La diferencia no se toma como efectivo automatico: queda pendiente para ajustar cuando se cargue la hacienda real.</span>
+                  <div class="economic-box compact-economic-box">
+                    <div><span>Liquidado / anticipo</span><strong id="anticipada-liquidado">$ 0,00</strong></div>
+                    <div><span>Pendiente ajuste vendedor</span><strong id="anticipada-pendiente-vend">$ 0,00</strong></div>
+                    <div><span>Pendiente ajuste comprador</span><strong id="anticipada-pendiente-comp">$ 0,00</strong></div>
+                  </div>
                 </div>
 
                 <div class="advanced-subpanel consigned-only internal-cc-box">

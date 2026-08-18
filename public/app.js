@@ -49,7 +49,7 @@ let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260814-hacienda-pendientes-origen-v1";
+const APP_BUILD = "20260818-hacienda-venta-anticipada-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -8211,9 +8211,21 @@ function syncLiquidationPanels() {
   const direct = isDirectOperation();
   const consigned = isConsignedOperation();
   const frigo = isFrigorificoIvaOperation();
+  const anticipated = isAnticipatedOperation();
   $all(".direct-only").forEach((element) => { element.hidden = !direct; });
   $all(".consigned-only").forEach((element) => { element.hidden = !consigned; });
   $all(".frigo-only").forEach((element) => { element.hidden = !frigo; });
+  [
+    "#liq-cash-mode",
+    "#liq-cash-percent",
+    "#liq-plan-cash-prod",
+    "#liq-plan-cash-comp",
+    "#liq-efectivo-prod",
+    "#liq-efectivo-comp"
+  ].forEach((selector) => {
+    const element = $(selector);
+    if (element) element.disabled = anticipated;
+  });
   $("#liq-buyer-expenses").hidden = !buyerExpensesApply();
   syncLiquidationReceipts();
 }
@@ -8303,8 +8315,9 @@ function calculateLiquidationPreview() {
   const ivaComp = numberValue("#liq-iva-comp");
   const frigo = isFrigorificoIvaOperation();
   const frigoCalc = frigo ? getFrigorificoCalc() : null;
-  const efectivoProd = normalizeFrigorificoCashInput(numberValue("#liq-efectivo-prod"));
-  const efectivoComp = frigoCalc ? frigoCalc.efectivoComp : numberValue("#liq-efectivo-comp");
+  const anticipated = isAnticipatedOperation();
+  const efectivoProd = anticipated ? 0 : normalizeFrigorificoCashInput(numberValue("#liq-efectivo-prod"));
+  const efectivoComp = anticipated ? 0 : (frigoCalc ? frigoCalc.efectivoComp : numberValue("#liq-efectivo-comp"));
   const cashExpenseProd = numberValue("#liq-cash-exp-prod");
   const expenses = getSellerExpenses();
   const buyerExpenses = getBuyerExpenses();
@@ -8361,6 +8374,11 @@ function syncLiquidationCashFromFacturado() {
   const facturado = numberValue("#liq-facturado");
   const brutoVend = numberValue("#liq-bruto-vend");
   const brutoComp = numberValue("#liq-bruto-comp");
+  if (isAnticipatedOperation()) {
+    setMoneyInput("#liq-efectivo-prod", 0);
+    setMoneyInput("#liq-efectivo-comp", 0);
+    return;
+  }
   const frigoCalc = isFrigorificoIvaOperation() ? getFrigorificoCalc() : null;
   const brutoBaseProd = frigoCalc ? frigoCalc.brutoSinIva : brutoVend;
   setMoneyInput("#liq-efectivo-prod", Math.max(brutoBaseProd - facturado, 0));
@@ -8622,7 +8640,18 @@ function renderSpecialOperationPanels() {
   }
   if (!isFrigo && $("#frigo-buyer-calc-box")) $("#frigo-buyer-calc-box").hidden = true;
 
-  anticipatedBox.hidden = !isAnticipatedOperation(operation);
+  const anticipated = isAnticipatedOperation(operation);
+  anticipatedBox.hidden = !anticipated;
+  if (anticipated) {
+    const facturado = numberValue("#liq-facturado");
+    const brutoVend = numberValue("#liq-bruto-vend");
+    const brutoComp = numberValue("#liq-bruto-comp");
+    const pendingVend = Math.max(brutoVend - facturado, 0);
+    const pendingComp = Math.max(brutoComp - facturado, 0);
+    if ($("#anticipada-liquidado")) $("#anticipada-liquidado").textContent = moneyValue(facturado);
+    if ($("#anticipada-pendiente-vend")) $("#anticipada-pendiente-vend").textContent = moneyValue(pendingVend);
+    if ($("#anticipada-pendiente-comp")) $("#anticipada-pendiente-comp").textContent = moneyValue(pendingComp);
+  }
 }
 
 function buildDetailFromSaleLines() {
@@ -9228,8 +9257,8 @@ async function saveLiquidation(event) {
     ivaProdManual: Boolean(state.liquidationIvaProdTouched),
     ivaComp: parseMoneyInput($("#liq-iva-comp").value),
     ivaCompManual: Boolean(state.liquidationIvaCompTouched),
-    efectivoProd: normalizeFrigorificoCashInput(parseMoneyInput($("#liq-efectivo-prod").value)),
-    efectivoComp: isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : parseMoneyInput($("#liq-efectivo-comp").value),
+    efectivoProd: isAnticipatedOperation() ? 0 : normalizeFrigorificoCashInput(parseMoneyInput($("#liq-efectivo-prod").value)),
+    efectivoComp: isAnticipatedOperation() ? 0 : (isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : parseMoneyInput($("#liq-efectivo-comp").value)),
     comisionFacturadoProd: parseMoneyInput($("#liq-comision-fact-prod").value),
     comisionFacturadoComp: parseMoneyInput($("#liq-comision-fact-comp").value),
     comisionEfectivoProd: parseMoneyInput($("#liq-comision-efect-prod").value),
