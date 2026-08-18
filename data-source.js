@@ -1169,6 +1169,9 @@ function calculateLiquidacion(operation, input = {}) {
   const brutoComp = operationBuyerTotal(operation);
   const frigo = String(source.calculoFrigorificoComp || "").toUpperCase() === "SI";
   const operationType = String(operation.tipo || draft.tipo || "").toUpperCase();
+  const anticipated = Boolean(operation.ventaAnticipada || draft.ventaAnticipada)
+    || operationType.includes("ANTICIPADA")
+    || String(source.tipoLiquidacion || "").toUpperCase().includes("ANTICIPADA");
   const consignada = operationType === "CONSIGNADA"
     || (operationType.includes("ANTICIPADA") && Boolean(operation.consignataria || draft.consignataria));
   const netoFinalFrigorifico = parseMoney(source.netoFinalFrigorificoComp || brutoVend);
@@ -1208,14 +1211,14 @@ function calculateLiquidacion(operation, input = {}) {
   const ivaProd = source.ivaProd !== undefined && source.ivaProd !== "" ? parseMoney(source.ivaProd) : ivaProdAuto;
   const ivaComp = source.ivaComp !== undefined && source.ivaComp !== "" ? parseMoney(source.ivaComp) : ivaCompAuto;
   const efectivoProdBase = Math.max(brutoBaseProd - facturado, 0);
-  const efectivoProd = source.efectivoProd !== undefined && source.efectivoProd !== ""
+  const efectivoProd = anticipated ? 0 : source.efectivoProd !== undefined && source.efectivoProd !== ""
     ? normalizeFrigorificoEfectivoSinIva(source.efectivoProd, efectivoProdBase, frigo)
     : efectivoProdBase;
   const ivaCompFrigorificoControl = facturado * 0.105;
   const efectivoCompBase = frigo
     ? Math.max(brutoComp - (facturado + ivaCompFrigorificoControl), 0)
     : Math.max(brutoComp - facturado, 0);
-  const efectivoComp = !frigo && source.efectivoComp !== undefined && source.efectivoComp !== ""
+  const efectivoComp = anticipated ? 0 : !frigo && source.efectivoComp !== undefined && source.efectivoComp !== ""
     ? parseMoney(source.efectivoComp)
     : efectivoCompBase;
   const hasInput = (key) => Object.prototype.hasOwnProperty.call(input, key);
