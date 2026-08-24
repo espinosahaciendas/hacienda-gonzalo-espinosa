@@ -3585,7 +3585,6 @@ function fieldContractDueRows(contract = {}) {
 
 function fieldLeaseContractMatchesDue(lease = {}, due = {}) {
   const contract = due.contract || {};
-  if (due.cuotaManualId && lease.cuotaManualId && String(lease.cuotaManualId) === String(due.cuotaManualId)) return true;
   if (contract.id && lease.contratoId && String(contract.id) === String(lease.contratoId)) return true;
   const sameContract = normalizeSearch(lease.contrato || "") && normalizeSearch(lease.contrato || "") === normalizeSearch(contract.nombre || "");
   const sameFarm = normalizeSearch(lease.campo || "") && normalizeSearch(lease.campo || "") === normalizeSearch(contract.campo || "");
@@ -3594,27 +3593,22 @@ function fieldLeaseContractMatchesDue(lease = {}, due = {}) {
   return sameContract || (sameFarm && (sameOwner || sameTenant));
 }
 
-function sameFieldDueMonth(left, right) {
-  const leftDate = parseAnyLocalDate(left);
-  const rightDate = parseAnyLocalDate(right);
-  return !!leftDate && !!rightDate
-    && leftDate.getFullYear() === rightDate.getFullYear()
-    && leftDate.getMonth() === rightDate.getMonth();
-}
-
-function fieldLeaseRelevantDueDates(lease = {}) {
-  return [lease.vencimiento, lease.fecha, lease.periodoDesde, lease.periodoHasta].filter(Boolean);
-}
-
 function fieldLeaseDueMatchScore(lease = {}, due = {}) {
   const contract = due.contract || {};
   const leaseDue = formatDateForInput(lease.vencimiento);
   const dueDate = formatDateForInput(due.dueDate);
-  if (!fieldLeaseContractMatchesDue(lease, due)) return 0;
-  if (due.cuotaManualId && lease.cuotaManualId && String(lease.cuotaManualId) === String(due.cuotaManualId)) return 100;
-  if (leaseDue && dueDate && leaseDue === dueDate) return contract.id && lease.contratoId ? 95 : 90;
-  const source = String(due.source || "").toUpperCase();
-  if (source === "FRECUENCIA" && dueDate && fieldLeaseRelevantDueDates(lease).some((date) => sameFieldDueMonth(date, dueDate))) return 70;
+  const dueInstallmentId = String(due.cuotaManualId || "");
+  const leaseInstallmentId = String(lease.cuotaManualId || "");
+  if (!fieldLeaseContractMatchesDue(lease, due) || !leaseDue || !dueDate) return 0;
+  if (dueInstallmentId || leaseInstallmentId) {
+    return dueInstallmentId
+      && leaseInstallmentId
+      && dueInstallmentId === leaseInstallmentId
+      && leaseDue === dueDate
+      ? 100
+      : 0;
+  }
+  if (leaseDue === dueDate) return contract.id && lease.contratoId ? 95 : 90;
   return 0;
 }
 
@@ -3622,8 +3616,9 @@ function fieldLeaseMatchesDue(lease = {}, due = {}) {
   return fieldLeaseDueMatchScore(lease, due) > 0;
 }
 
-function findFieldLeaseForDue(due = {}) {
+function findFieldLeaseForDue(due = {}, usedLeaseIds = new Set()) {
   return (state.fieldLeases || [])
+    .filter((lease) => !usedLeaseIds.has(String(lease.id || "")))
     .map((lease) => ({ lease, score: fieldLeaseDueMatchScore(lease, due) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)[0]?.lease || null;
@@ -3660,9 +3655,11 @@ function fieldDueStatusClass(status) {
 }
 
 function fieldDueAgendaRows() {
+  const usedLeaseIds = new Set();
   return fieldContractsForDueAgenda().flatMap((contract) =>
     fieldContractDueRows(contract).map((due) => {
-      const lease = findFieldLeaseForDue(due);
+      const lease = findFieldLeaseForDue(due, usedLeaseIds);
+      if (lease?.id) usedLeaseIds.add(String(lease.id));
       const status = fieldDueStatus(due, lease);
       return {
         ...due,
@@ -3746,9 +3743,14 @@ function openFieldDueCalculation(contractId = "", dueDate = "", installmentId = 
     return;
   }
   useFieldContractInCalculation(contract);
+  if ($("#field-lease-id")) $("#field-lease-id").value = "";
+  state.fieldLeasePaymentRows = [];
+  state.fieldLeaseAdjustmentRows = [];
   if ($("#field-lease-due-date")) $("#field-lease-due-date").value = formatDateForInput(dueDate);
   if ($("#field-lease-date")) $("#field-lease-date").value = formatDateForInput(dueDate) || new Date().toISOString().slice(0, 10);
   if ($("#field-lease-installment") && installmentId) $("#field-lease-installment").value = installmentId;
+  renderFieldLeasePaymentRows(0);
+  renderFieldLeaseAdjustmentRows();
   updateFieldLeasePreview();
   showFieldsTab("calculo");
 }
