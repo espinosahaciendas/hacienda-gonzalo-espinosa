@@ -637,7 +637,7 @@ async function handleApi(req, res) {
     return;
   }
 
-  if (parsed.pathname === "/api/comisionistas/facturas" && req.method === "POST") {
+  if ((parsed.pathname === "/api/comisionistas/facturas" || parsed.pathname === "/api/comisiones/facturas") && req.method === "POST") {
     const body = await readBody(req);
     sendJson(res, 200, { item: await dataSource.saveCommissionInvoice(body) });
     return;

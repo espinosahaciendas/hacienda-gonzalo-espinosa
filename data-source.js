@@ -2224,7 +2224,7 @@ class BackupDataSource {
       .map((item) => normalizeText(item.movementId || item.id || item))
       .filter(Boolean);
     if (!cliente || !numero || !movementIds.length) {
-      const error = new Error("Falta comisionista/consignataria, numero de factura o movimientos seleccionados.");
+      const error = new Error("Falta cliente, consignataria o comisionista, numero de factura o movimientos seleccionados.");
       error.statusCode = 400;
       throw error;
     }
