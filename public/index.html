@@ -2191,6 +2191,37 @@
               </table>
             </div>
           </div>
+          <div class="cc-subpanel" id="cc-commission-invoice-panel">
+            <div class="panel-head">
+              <div>
+                <h3>Facturar comisiones del cliente</h3>
+                <p class="subtle">Asocia una factura a comisiones ya cargadas. No duplica la cuenta corriente.</p>
+              </div>
+              <span class="subtle" id="cc-commission-invoice-count">Busque un cliente</span>
+            </div>
+            <div class="form-grid">
+              <label>Numero de factura emitida<input id="cc-commission-invoice-number" placeholder="Ej. F A-0001-00000012"></label>
+              <label>Fecha factura<input id="cc-commission-invoice-date" type="date"></label>
+              <label class="span-2">Observacion<input id="cc-commission-invoice-note" placeholder="Periodo, detalle interno o referencia"></label>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Vto.</th>
+                    <th>Cliente</th>
+                    <th>Comision</th>
+                    <th>Comprobante</th>
+                    <th>Importe</th>
+                  </tr>
+                </thead>
+                <tbody id="cc-commission-invoice-body"></tbody>
+              </table>
+            </div>
+            <div class="form-actions"><button type="button" class="primary-button" id="cc-commission-invoice-save">Registrar factura de comisiones</button></div>
+            <p class="form-message" id="cc-commission-invoice-message"></p>
+          </div>
           <div class="table-wrap compact-table">
             <table>
               <thead>

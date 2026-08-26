@@ -5064,6 +5064,69 @@ function commissionSplitTotals(rows) {
   }), { facturado: 0, efectivo: 0, total: 0 });
 }
 
+function clientCommissionInvoiceRows(words = [], exactClient = "") {
+  if (!state.cuenta) return [];
+  const query = normalizeSearch($("#cc-client-search")?.value || "");
+  if (!query) return [];
+  return (state.cuenta.movimientos || [])
+    .filter((movement) => {
+      const status = String(movement?.estado || "").toUpperCase();
+      if (movement?.paymentId || status === "IMPUTADO" || status === "ANULADO") return false;
+      if (movement?.facturaComisionId || movement?.facturaComision) return false;
+      if (!isCommissionPendingMovement(movement, "CLIENTE")) return false;
+      if (!matchesCurrentAccountClientSearch(movement, words, exactClient)) return false;
+      return signedPendingAmount(movement) > 0.01;
+    })
+    .sort((a, b) => {
+      const dateA = parseDisplayDate(a.vencimiento || a.fecha)?.getTime() || 0;
+      const dateB = parseDisplayDate(b.vencimiento || b.fecha)?.getTime() || 0;
+      return dateA - dateB || String(a.cliente || "").localeCompare(String(b.cliente || ""), "es");
+    });
+}
+
+function refreshClientCommissionInvoiceSummary() {
+  const selected = $all("[data-cc-commission-invoice-row]:checked");
+  const total = selected.reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccPending || 0), 0);
+  const countNode = $("#cc-commission-invoice-count");
+  if (!countNode) return;
+  if (selected.length) {
+    countNode.textContent = `${selected.length} seleccionada/s - ${moneyValue(total)}`;
+  }
+}
+
+function renderClientCommissionInvoicePanel(rows) {
+  const panel = $("#cc-commission-invoice-panel");
+  if (!panel) return;
+  const viewMode = $("#cc-view-mode")?.value || "CLIENTE";
+  panel.hidden = viewMode !== "CLIENTE";
+  if (panel.hidden) return;
+  const query = ($("#cc-client-search")?.value || "").trim();
+  const countNode = $("#cc-commission-invoice-count");
+  const body = $("#cc-commission-invoice-body");
+  if (!body || !countNode) return;
+  countNode.textContent = rows.length
+    ? `${rows.length} comision/es disponibles`
+    : query
+      ? "Sin comisiones pendientes para facturar"
+      : "Busque un cliente";
+  body.innerHTML = rows.length
+    ? rows.map((movement) => {
+        const pending = Math.abs(Number(movement.importePendiente ?? movement.importe ?? 0));
+        const kind = commissionKind(movement) === "efectivo" ? "Sobre efectivo" : "Sobre facturado";
+        return `
+          <tr>
+            <td><input type="checkbox" data-cc-commission-invoice-row="${escapeHtml(movement.id)}" data-cc-pending="${pending}"></td>
+            <td>${escapeHtml(movement.vencimiento || movement.fecha || "-")}</td>
+            <td>${escapeHtml(movement.cliente || "-")}</td>
+            <td>${escapeHtml(kind)}${movement.concepto ? `<br><small>${escapeHtml(movement.concepto)}</small>` : ""}</td>
+            <td>${escapeHtml(movement.comprobante || "-")}</td>
+            <td>${moneyValue(pending)}</td>
+          </tr>
+        `;
+      }).join("")
+    : `<tr><td colspan="6">${query ? "No hay comisiones pendientes sin facturar para este cliente." : "Busque un cliente para seleccionar comisiones."}</td></tr>`;
+}
+
 function currentAccountConceptText(movement, viewMode) {
   const invoiceSuffix = movement.facturaComision ? ` | Factura comision: ${movement.facturaComision}` : "";
   if (viewMode !== "CONSIGNATARIA") return `${movement.concepto || "-"}${invoiceSuffix}`;
@@ -5353,6 +5416,7 @@ function renderCuentaCorriente() {
         `
       : `<tr><td colspan="4">Sin comisiones pendientes para esta busqueda.</td></tr>`;
   }
+  renderClientCommissionInvoicePanel(clientCommissionInvoiceRows(words, exactClient));
   $("#cc-due-title").textContent = viewMode === "CONSIGNATARIA" ? "Vencimientos de clientes y comisiones" : "Vencimientos pendientes";
   $("#cc-due-subtitle").textContent = viewMode === "CONSIGNATARIA"
     ? "Incluye vencimientos informativos entre la consignataria y tus clientes, y comisiones pendientes a cobrar."
@@ -7433,6 +7497,40 @@ async function generateCommissionistInvoice() {
   } catch (error) {
     $("#commissionist-invoice-message").textContent = error.message;
     $("#commissionist-invoice-message").className = "form-message error";
+  }
+}
+
+async function generateClientCommissionInvoice() {
+  const client = $("#cc-client-search").value.trim();
+  const number = $("#cc-commission-invoice-number").value.trim();
+  const selected = $all("[data-cc-commission-invoice-row]:checked");
+  const message = $("#cc-commission-invoice-message");
+  if (!client || !number || !selected.length) {
+    message.textContent = "Falta cliente, numero de factura o comisiones seleccionadas.";
+    message.className = "form-message error";
+    return;
+  }
+  try {
+    const response = await fetchJson("/api/comisiones/facturas", {
+      method: "POST",
+      body: JSON.stringify({
+        cliente: client,
+        numero: number,
+        fecha: $("#cc-commission-invoice-date").value || new Date().toISOString().slice(0, 10),
+        observacion: $("#cc-commission-invoice-note").value,
+        movimientos: selected.map((checkbox) => ({ movementId: checkbox.dataset.ccCommissionInvoiceRow }))
+      })
+    });
+    await reloadCurrentAccount();
+    renderCuentaCorriente();
+    const saved = response.item || {};
+    message.textContent = `Factura registrada: ${saved.numero || number} por ${moneyValue(saved.total || 0)}. No se duplico cuenta corriente.`;
+    message.className = "form-message ok";
+    $("#cc-commission-invoice-number").value = "";
+    $("#cc-commission-invoice-note").value = "";
+  } catch (error) {
+    message.textContent = error.message;
+    message.className = "form-message error";
   }
 }
 
@@ -10032,6 +10130,10 @@ async function init() {
   $("#cc-date-to").addEventListener("change", renderCuentaCorriente);
   $("#cc-due-date-from").addEventListener("change", renderCuentaCorriente);
   $("#cc-due-date-to").addEventListener("change", renderCuentaCorriente);
+  $("#cc-commission-invoice-save")?.addEventListener("click", generateClientCommissionInvoice);
+  $("#cc-commission-invoice-body")?.addEventListener("change", (event) => {
+    if (event.target.closest("[data-cc-commission-invoice-row]")) refreshClientCommissionInvoiceSummary();
+  });
   $all("[data-cc-tab]").forEach((button) => {
     button.addEventListener("click", () => setCurrentAccountTab(button.dataset.ccTab));
   });
