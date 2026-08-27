@@ -2360,6 +2360,24 @@
             </div>
             <button type="button" class="ghost-button" id="cash-print">Imprimir / PDF</button>
           </div>
+          <div class="form-grid cc-filters">
+            <label>Estado
+              <select id="cash-filter-status">
+                <option value="TODOS">Todos</option>
+                <option value="PENDIENTE">Pendientes</option>
+                <option value="RECUPERADO">Recuperados / rendidos</option>
+              </select>
+            </label>
+            <label>Origen<input id="cash-filter-source" list="cash-source-list" placeholder="Caja, cuenta o efectivo"></label>
+            <label>Adelantado por<input id="cash-filter-paid-by" list="cash-paid-by-list" placeholder="Persona"></label>
+            <label>Categoria<select id="cash-filter-category"><option value="">Todas</option></select></label>
+          </div>
+          <datalist id="cash-source-list"></datalist>
+          <datalist id="cash-paid-by-list"></datalist>
+          <div class="panel-head compact-head">
+            <span class="subtle" id="cash-filter-summary">Sin filtros aplicados.</span>
+            <button type="button" class="ghost-button" id="cash-clear-filters">Limpiar filtros</button>
+          </div>
           <div class="table-wrap compact-table">
             <table>
               <thead>
@@ -2714,7 +2732,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260814-hacienda-pendientes-origen-v1"></script>
+    <script src="/app.js?v=20260827-hacienda-caja-filtros-v1"></script>
   </body>
 </html>
 

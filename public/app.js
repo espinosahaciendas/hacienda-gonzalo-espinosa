@@ -49,7 +49,7 @@ let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260818-hacienda-venta-anticipada-v1";
+const APP_BUILD = "20260827-hacienda-caja-filtros-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -626,14 +626,94 @@ function resetCashReconciliationForm() {
   renderCashReconciliationApplications();
 }
 
+function uniqueSortedValues(values) {
+  return Array.from(new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, "es"));
+}
+
+function populateCashFilterOptions(items) {
+  const sourceList = $("#cash-source-list");
+  const paidByList = $("#cash-paid-by-list");
+  const categorySelect = $("#cash-filter-category");
+  if (sourceList) {
+    sourceList.innerHTML = uniqueSortedValues(items.map((item) => item.origenEfectivo))
+      .map((value) => `<option value="${escapeHtml(value)}"></option>`)
+      .join("");
+  }
+  if (paidByList) {
+    paidByList.innerHTML = uniqueSortedValues(items.map((item) => item.pagadoPor))
+      .map((value) => `<option value="${escapeHtml(value)}"></option>`)
+      .join("");
+  }
+  if (categorySelect) {
+    const current = categorySelect.value;
+    const categories = uniqueSortedValues([
+      ...items.map((item) => item.categoria),
+      "Gasto oficina",
+      "Libreria",
+      "Combustible",
+      "Comida / viaticos",
+      "Correo / cadeteria",
+      "Impuestos / sellados",
+      "Servicios",
+      "Otro"
+    ]);
+    categorySelect.innerHTML = `<option value="">Todas</option>${categories.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+    categorySelect.value = categories.includes(current) ? current : "";
+  }
+}
+
+function getFilteredCashItems() {
+  const items = state.caja?.items || [];
+  const status = $("#cash-filter-status")?.value || "TODOS";
+  const source = normalizeSearch($("#cash-filter-source")?.value || "");
+  const paidBy = normalizeSearch($("#cash-filter-paid-by")?.value || "");
+  const category = normalizeSearch($("#cash-filter-category")?.value || "");
+  return items.filter((item) => {
+    if (status === "PENDIENTE" && item.recuperado) return false;
+    if (status === "RECUPERADO" && !item.recuperado) return false;
+    if (source && !normalizeSearch(item.origenEfectivo).includes(source)) return false;
+    if (paidBy && !normalizeSearch(item.pagadoPor).includes(paidBy)) return false;
+    if (category && normalizeSearch(item.categoria) !== category) return false;
+    return true;
+  });
+}
+
+function updateCashFilterSummary(items, totalItems) {
+  const node = $("#cash-filter-summary");
+  if (!node) return;
+  const total = items.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const pending = items
+    .filter((item) => !item.recuperado)
+    .reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const hasFilters = ($("#cash-filter-status")?.value || "TODOS") !== "TODOS"
+    || Boolean($("#cash-filter-source")?.value)
+    || Boolean($("#cash-filter-paid-by")?.value)
+    || Boolean($("#cash-filter-category")?.value);
+  node.textContent = hasFilters
+    ? `${items.length} de ${totalItems} movimiento/s - Total ${moneyValue(total)} - Pendiente ${moneyValue(pending)}`
+    : `${totalItems} movimiento/s registrados - sin filtros aplicados`;
+}
+
+function clearCashFilters() {
+  if ($("#cash-filter-status")) $("#cash-filter-status").value = "TODOS";
+  if ($("#cash-filter-source")) $("#cash-filter-source").value = "";
+  if ($("#cash-filter-paid-by")) $("#cash-filter-paid-by").value = "";
+  if ($("#cash-filter-category")) $("#cash-filter-category").value = "";
+  renderCajaDiaria();
+}
+
 function renderCajaDiaria() {
   if (!$("#cash-body")) return;
   const caja = state.caja || {};
-  const items = caja.items || [];
+  const allItems = caja.items || [];
+  populateCashFilterOptions(allItems);
+  const items = getFilteredCashItems();
   $("#cash-total-today").textContent = moneyValue(caja.totalHoy);
   $("#cash-total-month").textContent = moneyValue(caja.totalMes);
   $("#cash-pending-recover").textContent = moneyValue(caja.pendienteRecuperar);
   $("#cash-total-all").textContent = moneyValue(caja.total);
+  updateCashFilterSummary(items, allItems.length);
   $("#cash-body").innerHTML = items.length
     ? items.map((item) => `
         <tr class="${item.recuperado ? "cash-recovered-row" : ""}">
@@ -650,7 +730,7 @@ function renderCajaDiaria() {
           </td>
         </tr>
       `).join("")
-    : `<tr><td colspan="8">Sin movimientos de caja cargados.</td></tr>`;
+    : `<tr><td colspan="8">Sin movimientos de caja para los filtros seleccionados.</td></tr>`;
 }
 
 function renderCashReconciliationApplications() {
@@ -921,7 +1001,11 @@ async function deleteCashReconciliation(id) {
 
 function printCashReport() {
   const caja = state.caja || {};
-  const rows = caja.items || [];
+  const rows = getFilteredCashItems();
+  const filteredTotal = rows.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const filteredPending = rows
+    .filter((item) => !item.recuperado)
+    .reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const popup = window.open("", "_blank", "width=1000,height=800");
   if (!popup) return;
   popup.document.write(`<!doctype html><html><head><title>Caja diaria</title><style>
@@ -938,6 +1022,8 @@ function printCashReport() {
       <div><span>Mes actual</span><strong>${moneyValue(caja.totalMes)}</strong></div>
       <div><span>Pendiente recuperar</span><strong>${moneyValue(caja.pendienteRecuperar)}</strong></div>
       <div><span>Total registrado</span><strong>${moneyValue(caja.total)}</strong></div>
+      <div><span>Total filtrado</span><strong>${moneyValue(filteredTotal)}</strong></div>
+      <div><span>Pendiente filtrado</span><strong>${moneyValue(filteredPending)}</strong></div>
     </div>
     <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoria</th><th>Importe</th><th>Salio de</th><th>Pagado por</th><th>Comprobante</th><th>Estado</th><th>Observacion</th></tr></thead><tbody>
       ${rows.map((item) => `<tr><td>${escapeHtml(item.fecha || "-")}</td><td>${escapeHtml(item.concepto || "-")}${item.proveedor ? `<br>${escapeHtml(item.proveedor)}` : ""}</td><td>${escapeHtml(item.categoria || "-")}</td><td class="amount">${moneyValue(item.importe)}</td><td>${escapeHtml(item.origenEfectivo || "-")}</td><td>${escapeHtml(item.pagadoPor || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td class="${item.recuperado ? "" : "pending"}">${item.recuperado ? "Recuperado" : "Pendiente"}</td><td>${escapeHtml(item.observacion || "-")}</td></tr>`).join("")}
@@ -10158,6 +10244,11 @@ async function init() {
   $("#cash-print").addEventListener("click", printCashReport);
   $("#cash-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
   $("#cash-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
+  ["#cash-filter-status", "#cash-filter-source", "#cash-filter-paid-by", "#cash-filter-category"].forEach((selector) => {
+    $(selector)?.addEventListener("input", renderCajaDiaria);
+    $(selector)?.addEventListener("change", renderCajaDiaria);
+  });
+  $("#cash-clear-filters")?.addEventListener("click", clearCashFilters);
   $all("[data-cash-tab]").forEach((button) => {
     button.addEventListener("click", () => setCashTab(button.dataset.cashTab));
   });
