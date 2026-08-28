@@ -48,8 +48,9 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
+let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260827-hacienda-caja-filtros-v1";
+const APP_BUILD = "20260828-campos-promedio-producto-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2358,15 +2359,18 @@ function fieldLeaseProductQuoteRowsFromContract(contract = {}) {
   const groups = new Map();
   lines.forEach((line) => {
     const product = fieldContractLineProductKey(line.base);
-    const savedQuote = parseMoneyInput(saved.get(product)?.cotizacion || 0);
+    const savedRow = saved.get(product) || {};
+    const savedQuote = parseMoneyInput(savedRow.cotizacion || 0);
+    const savedManual = Boolean(savedRow.manual);
     if (product === "FIJO" || product === "PESOS") return;
     const productAverage = parseMoneyInput(quoteAverages.get(product) || 0);
     const existing = groups.get(product) || {
       producto: product,
       etiqueta: fieldContractLineProductLabel(product),
       lineas: 0,
-      unidad: saved.get(product)?.unidad || fieldLeaseDefaultQuoteUnitForProduct(product),
-      cotizacion: productAverage || savedQuote || 0
+      unidad: savedRow.unidad || fieldLeaseDefaultQuoteUnitForProduct(product),
+      manual: savedManual,
+      cotizacion: savedManual ? savedQuote : (productAverage || savedQuote || 0)
     };
     existing.lineas += 1;
     groups.set(product, existing);
@@ -2379,10 +2383,12 @@ function fieldLeaseProductQuoteOverridesFromInputs(contract = {}) {
     const input = $all("[data-field-product-quote]").find((node) => String(node.dataset.fieldProductQuote) === String(row.producto));
     const unitInput = $all("[data-field-product-quote-unit]").find((node) => String(node.dataset.fieldProductQuoteUnit) === String(row.producto));
     const inputQuote = input ? parseMoneyInput(input.value || 0) : 0;
+    const manualQuote = fieldLeaseManualProductQuoteKeys.has(String(row.producto));
     return {
       ...row,
       unidad: unitInput ? unitInput.value : (row.unidad || fieldLeaseDefaultQuoteUnitForProduct(row.producto)),
-      cotizacion: inputQuote || parseMoneyInput(row.cotizacion || 0)
+      manual: manualQuote,
+      cotizacion: manualQuote && inputQuote ? inputQuote : parseMoneyInput(row.cotizacion || 0)
     };
   });
 }
@@ -2769,6 +2775,7 @@ function resetFieldLeaseForm() {
   state.fieldLeasePaymentPresetRows = [];
   state.fieldLeaseProductQuoteRows = [];
   state.fieldLeaseLineQuoteRows = [];
+  fieldLeaseManualProductQuoteKeys = new Set();
   renderFieldQuoteRows();
   renderFieldLeaseLineQuoteRows({}, true);
   renderFieldLeasePaymentPresetRows({});
@@ -3909,6 +3916,9 @@ function fillFieldLeaseForm(item) {
   $("#field-lease-notes").value = item.observaciones || "";
   state.fieldQuoteRows = Array.isArray(item.cotizaciones) ? item.cotizaciones : [];
   state.fieldLeaseProductQuoteRows = Array.isArray(item.productQuotes) ? item.productQuotes : [];
+  fieldLeaseManualProductQuoteKeys = new Set((state.fieldLeaseProductQuoteRows || [])
+    .filter((row) => row.manual && parseMoneyInput(row.cotizacion || 0) > 0)
+    .map((row) => String(row.producto)));
   state.fieldLeaseLineQuoteRows = Array.isArray(item.lineQuotes) ? item.lineQuotes : [];
   state.fieldLeasePaymentRows = Array.isArray(item.pagos) ? item.pagos : [];
   state.fieldLeaseAdjustmentRows = Array.isArray(item.ajustes) ? item.ajustes : [];
@@ -10472,7 +10482,11 @@ async function init() {
     updateFieldLeasePreview();
   });
   $("#field-product-quote-body")?.addEventListener("input", (event) => {
-    if (!event.target.closest("[data-field-product-quote]")) return;
+    const input = event.target.closest("[data-field-product-quote]");
+    if (!input) return;
+    const product = String(input.dataset.fieldProductQuote || "");
+    if (parseMoneyInput(input.value || 0)) fieldLeaseManualProductQuoteKeys.add(product);
+    else fieldLeaseManualProductQuoteKeys.delete(product);
     const body = $("#field-line-quote-body");
     if (body) body.dataset.signature = "";
     updateFieldLeasePreview();
