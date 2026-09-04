@@ -504,6 +504,58 @@ function repairPaymentPairImputations(payments, movements) {
   return cloned;
 }
 
+function movementForPaymentImputation(item, movements, resolveMovementId = (id) => id) {
+  const id = resolveMovementId(item.movementId || item.rowId || "");
+  return movements.find((movement) => String(movement.id) === String(id));
+}
+
+function allocatePaymentImputations(items, budget) {
+  let remaining = Math.abs(parseMoney(budget));
+  return items.map((item) => {
+    const importe = Math.min(Math.abs(parseMoney(item.importe)), remaining);
+    remaining -= importe;
+    return { ...item, importe };
+  }).filter((item) => parseMoney(item.importe) > 0.01);
+}
+
+function normalizeCompensationImputations(payment, movements, resolveMovementId = (id) => id) {
+  const items = asArray(payment?.imputaciones)
+    .map((item) => {
+      const movement = movementForPaymentImputation(item, movements, resolveMovementId);
+      const movementAmount = movement ? Math.abs(parseMoney(movement.importe)) : Math.abs(parseMoney(item.importe));
+      return {
+        ...item,
+        movementId: normalizeText(item.movementId || item.rowId),
+        importe: Math.min(Math.abs(parseMoney(item.importe)), movementAmount),
+        signoMovimiento: Math.sign(parseMoney(movement?.importe || 0))
+      };
+    })
+    .filter((item) => item.movementId && parseMoney(item.importe) > 0.01);
+  if (normalizeKey(payment?.tipo) !== "COMPENSACION") return items.map(({ signoMovimiento, ...item }) => item);
+  const positiveItems = items.filter((item) => item.signoMovimiento > 0);
+  const negativeItems = items.filter((item) => item.signoMovimiento < 0);
+  if (!positiveItems.length || !negativeItems.length) return items.map(({ signoMovimiento, ...item }) => item);
+  const positiveTotal = positiveItems.reduce((sum, item) => sum + parseMoney(item.importe), 0);
+  const negativeTotal = negativeItems.reduce((sum, item) => sum + parseMoney(item.importe), 0);
+  const offset = Math.min(positiveTotal, negativeTotal);
+  return [
+    ...allocatePaymentImputations(positiveItems, offset),
+    ...allocatePaymentImputations(negativeItems, offset)
+  ].map(({ signoMovimiento, ...item }) => item);
+}
+
+function compensationImputationOffset(items, movements, resolveMovementId = (id) => id) {
+  const totals = asArray(items).reduce((acc, item) => {
+    const movement = movementForPaymentImputation(item, movements, resolveMovementId);
+    const amount = Math.abs(parseMoney(item.importe));
+    if (Math.sign(parseMoney(movement?.importe || 0)) > 0) acc.positive += amount;
+    if (Math.sign(parseMoney(movement?.importe || 0)) < 0) acc.negative += amount;
+    return acc;
+  }, { positive: 0, negative: 0 });
+  if (totals.positive && totals.negative) return Math.min(totals.positive, totals.negative);
+  return Math.max(totals.positive, totals.negative);
+}
+
 function buildOperationAccountMovements(operation) {
   const draft = operation.draftData || {};
   const liq = draft.liquidacion || {};
@@ -848,7 +900,8 @@ function buildAccountData(data) {
     paymentAllocations.get(payment.id).push({ movementId: resolvedId, importe: applied });
   };
   activePayments.forEach((payment) => {
-    const items = asArray(payment.imputaciones);
+    const items = normalizeCompensationImputations(payment, movements, resolveMovementId);
+    payment.imputaciones = items;
     if (items.length) {
       items.forEach((item) => {
         const movement = movements.find((row) => String(row.id) === String(item.movementId || item.rowId || ""));
@@ -2992,13 +3045,25 @@ class BackupDataSource {
     const importe = Math.abs(parseMoney(input.importe));
     const tipoInput = normalizeKey(input.tipo);
     const tipo = tipoInput === "PAGO" ? "PAGO" : tipoInput === "COMPENSACION" ? "COMPENSACION" : "COBRO";
-    const imputacionesInput = asArray(input.imputaciones)
+    let imputacionesInput = asArray(input.imputaciones)
       .map((item) => ({ movementId: normalizeText(item.movementId || item.rowId), importe: Math.abs(parseMoney(item.importe)) }))
       .filter((item) => item.movementId);
     if (!cliente || (!importe && !(tipo === "COMPENSACION" && imputacionesInput.length))) {
       const error = new Error("Falta seleccionar cliente o cargar un importe mayor a cero.");
       error.statusCode = 400;
       throw error;
+    }
+    let importeFinal = importe;
+    let importeFirmadoFinal = input.importeFirmado !== undefined && input.importeFirmado !== "" ? parseMoney(input.importeFirmado) : undefined;
+    if (tipo === "COMPENSACION" && imputacionesInput.length) {
+      const cuentaActual = buildAccountData(data);
+      const movements = asArray(cuentaActual.movimientos);
+      imputacionesInput = normalizeCompensationImputations({ tipo, imputaciones: imputacionesInput }, movements);
+      const offset = compensationImputationOffset(imputacionesInput, movements);
+      if (offset > 0.01) importeFinal = offset;
+      if (importeFirmadoFinal !== undefined) {
+        importeFirmadoFinal = Math.sign(importeFirmadoFinal || 1) * Math.abs(importeFinal);
+      }
     }
     const payments = asArray(data.currentAccountPayments);
     const year = new Date().getFullYear();
@@ -3012,8 +3077,8 @@ class BackupDataSource {
       tipo,
       cliente,
       fecha: formatDateForDisplay(input.fecha),
-      importe,
-      importeFirmado: input.importeFirmado !== undefined && input.importeFirmado !== "" ? parseMoney(input.importeFirmado) : undefined,
+      importe: importeFinal,
+      importeFirmado: importeFirmadoFinal,
       medio: normalizeText(input.medio || "Transferencia"),
       referencia: normalizeText(input.referencia),
       observacion: normalizeText(input.observacion),
