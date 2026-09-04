@@ -50,7 +50,7 @@ let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260828-campos-promedio-producto-v1";
+const APP_BUILD = "20260904-hacienda-compensacion-parcial-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -5876,8 +5876,7 @@ function selectedCompensationOrigin() {
 }
 
 function selectedCompensationSignedTotal() {
-  return $all("[data-cc-impute]:checked")
-    .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
+  return compensationAppliedSignedTotal(selectedCurrentAccountImputationRows("[data-cc-impute]:checked, [data-cc-impute-group]:checked"));
 }
 
 function renderCompensationBalancePreview() {
@@ -6183,10 +6182,13 @@ function updateCurrentAccountImputationSummary({ selector, summarySelector, avai
 function refreshPrimaryImputationSummary() {
   const available = getPaymentPendingMovements().length;
   const selected = $all("[data-cc-impute]:checked, [data-cc-impute-group]:checked");
-  const signedTotal = selected.reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
+  const selectedRows = selectedCurrentAccountImputationRows("[data-cc-impute]:checked, [data-cc-impute-group]:checked");
+  const signedTotal = selectedRows.reduce((sum, row) => sum + Number(row.signedPending || 0), 0);
   const positiveTotal = selected
     .filter((item) => Number(item.dataset.ccSignedPending || 0) > 0)
     .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccPending || 0), 0);
+  const compensationOffset = compensationOffsetAmount(selectedRows);
+  const compensationSigned = compensationAppliedSignedTotal(selectedRows);
   const discountOnly = $("#cc-discount-only")?.checked;
   updateCurrentAccountImputationSummary({
     selector: "[data-cc-impute]:checked, [data-cc-impute-group]:checked",
@@ -6195,8 +6197,9 @@ function refreshPrimaryImputationSummary() {
     updatePaymentAmount: true
   });
     if ($("#cc-payment-type").value === "COMPENSACION" && selected.length) {
-    $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - saldo disponible/control ${moneyValue(Math.abs(signedTotal))}`;
-    if (!currentPaymentInstruments.length) setMoneyInput("#cc-payment-amount", Math.abs(signedTotal));
+    const remainder = signedTotal - compensationSigned;
+    $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - compensado ${moneyValue(compensationOffset)}${Math.abs(remainder) > 0.01 ? ` - queda pendiente ${moneyValue(Math.abs(remainder))}` : ""}`;
+    if (!currentPaymentInstruments.length) setMoneyInput("#cc-payment-amount", compensationOffset);
   } else if (selected.length && selected.some((item) => Number(item.dataset.ccSignedPending || 0) < 0) && selected.some((item) => Number(item.dataset.ccSignedPending || 0) > 0)) {
     if (discountOnly) {
       $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - descuentos a aplicar ${moneyValue(positiveTotal)}`;
@@ -7184,9 +7187,11 @@ function exportCurrentAccountCalendarCsv() {
 async function saveCurrentAccountPayment(printReceipt = false) {
   try {
     const amount = numberValue("#cc-payment-amount");
-    const selectedSignedTotal = $all("[data-cc-impute]:checked, [data-cc-impute-group]:checked")
-      .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
     const paymentType = $("#cc-payment-type").value;
+    const selectedRows = selectedCurrentAccountImputationRows("[data-cc-impute]:checked, [data-cc-impute-group]:checked");
+    const selectedSignedTotal = paymentType === "COMPENSACION"
+      ? compensationAppliedSignedTotal(selectedRows)
+      : selectedRows.reduce((sum, row) => sum + Number(row.signedPending || 0), 0);
     const compensationOrigin = paymentType === "COMPENSACION" ? selectedCompensationOrigin() : null;
     const response = await fetchJson("/api/cuenta-corriente/pagos-cobros", {
       method: "POST",
@@ -7630,9 +7635,8 @@ async function generateClientCommissionInvoice() {
   }
 }
 
-function collectSelectedCurrentAccountImputations(selector, availableAmount, paymentType = "") {
-  const selected = $all(selector);
-  const rows = selected.flatMap((checkbox) => {
+function selectedCurrentAccountImputationRows(selector) {
+  return $all(selector).flatMap((checkbox) => {
     if (checkbox.dataset.ccGroupItems) {
       try {
         return JSON.parse(decodeURIComponent(checkbox.dataset.ccGroupItems)).map((item) => ({
@@ -7650,9 +7654,52 @@ function collectSelectedCurrentAccountImputations(selector, availableAmount, pay
       signedPending: Number(checkbox.dataset.ccSignedPending || 0)
     }];
   }).filter((item) => item.movementId && item.pending > 0);
+}
+
+function allocateCurrentAccountRows(rows, budget) {
+  let remaining = Math.abs(Number(budget || 0));
+  return rows.map((item) => {
+    const importe = Math.min(item.pending, remaining);
+    remaining -= importe;
+    return { movementId: item.movementId, importe };
+  }).filter((item) => item.importe > 0);
+}
+
+function compensationOffsetAmount(rows = []) {
+  const positiveTotal = rows
+    .filter((item) => item.signedPending > 0)
+    .reduce((sum, item) => sum + item.pending, 0);
+  const negativeTotal = rows
+    .filter((item) => item.signedPending < 0)
+    .reduce((sum, item) => sum + item.pending, 0);
+  if (positiveTotal && negativeTotal) return Math.min(positiveTotal, negativeTotal);
+  return Math.abs(rows.reduce((sum, item) => sum + Number(item.signedPending || 0), 0));
+}
+
+function compensationImputationRows(rows = []) {
   const hasPositive = rows.some((item) => item.signedPending > 0);
   const hasNegative = rows.some((item) => item.signedPending < 0);
-  if (paymentType === "COMPENSACION") return rows.map((item) => ({ movementId: item.movementId, importe: item.pending }));
+  if (!hasPositive || !hasNegative) return rows.map((item) => ({ movementId: item.movementId, importe: item.pending }));
+  const offset = compensationOffsetAmount(rows);
+  return [
+    ...allocateCurrentAccountRows(rows.filter((item) => item.signedPending > 0), offset),
+    ...allocateCurrentAccountRows(rows.filter((item) => item.signedPending < 0), offset)
+  ];
+}
+
+function compensationAppliedSignedTotal(rows = []) {
+  const source = new Map(rows.map((item) => [String(item.movementId), item]));
+  return compensationImputationRows(rows).reduce((sum, item) => {
+    const row = source.get(String(item.movementId));
+    return sum + Math.sign(Number(row?.signedPending || 0)) * Number(item.importe || 0);
+  }, 0);
+}
+
+function collectSelectedCurrentAccountImputations(selector, availableAmount, paymentType = "") {
+  const rows = selectedCurrentAccountImputationRows(selector);
+  const hasPositive = rows.some((item) => item.signedPending > 0);
+  const hasNegative = rows.some((item) => item.signedPending < 0);
+  if (paymentType === "COMPENSACION") return compensationImputationRows(rows);
   const discountOnly = selector.includes("data-cc-impute") && paymentType === "PAGO" && $("#cc-discount-only")?.checked;
   if (hasPositive && hasNegative) {
     if (discountOnly) {
@@ -7675,11 +7722,7 @@ function collectSelectedCurrentAccountImputations(selector, availableAmount, pay
     return rows.map((item) => ({ movementId: item.movementId, importe: item.pending }));
   }
   let remaining = Math.abs(Number(availableAmount || 0));
-  return rows.map((item) => {
-    const importe = Math.min(item.pending, remaining);
-    remaining -= importe;
-    return { movementId: item.movementId, importe };
-  }).filter((item) => item.importe > 0);
+  return allocateCurrentAccountRows(rows, remaining);
 }
 
 function renderClientes() {
