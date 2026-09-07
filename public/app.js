@@ -50,7 +50,7 @@ let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260904-hacienda-compensacion-parcial-v1";
+const APP_BUILD = "20260907-campos-recibos-partes-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2667,6 +2667,7 @@ function updateFieldLeasePreview() {
   setPreview("#field-lease-grand-total", moneyValue(calc.totalConComision));
   setPreview("#field-lease-due-preview", calc.vencimiento ? formatDisplayDate(calc.vencimiento) : "-");
   renderFieldLeasePartyDistributionRows(calc.distribucionPartes || []);
+  renderFieldLeasePartyReceiptRows(calc.distribucionPartes || []);
   renderFieldLeaseMiniLedgerRows(calc.distribucionPartes || []);
   renderFieldLeasePaymentPresetRows(calc);
   renderFieldLeasePaymentRows(calc.totalConComision);
@@ -2692,6 +2693,36 @@ function renderFieldLeasePartyDistributionRows(rows = []) {
         <td class="amount">${moneyValue(row.netoInformado ?? row.totalConComision ?? row.totalCuota ?? 0)}<br><button type="button" class="small-button" data-field-party-receipt="${escapeHtml(fieldLeasePartyRowKey(row))}">Recibo</button></td>
       </tr>`).join("")
     : `<tr><td colspan="8">Sin distribucion especial. Se usaran las partes principales del contrato.</td></tr>`;
+}
+
+function renderFieldLeasePartyReceiptRows(rows = []) {
+  const body = $("#field-party-receipts-body");
+  if (!body) return;
+  const summary = $("#field-party-receipts-summary");
+  const receiptRows = (rows || []).filter((row) => row.nombre || Number(row.totalCuota || 0) || Number(row.netoInformado || 0));
+  if (summary) {
+    const landlords = receiptRows.filter((row) => String(row.tipo || "").toUpperCase() === "ARRENDADOR").length;
+    const tenants = receiptRows.filter((row) => String(row.tipo || "").toUpperCase() === "ARRENDATARIO").length;
+    summary.textContent = receiptRows.length
+      ? `${landlords} arrendador/es - ${tenants} arrendatario/s`
+      : "Sin partes para recibo individual";
+  }
+  body.innerHTML = receiptRows.length
+    ? receiptRows.map((row) => {
+        const result = fieldLeaseMiniLedgerNet(row);
+        const role = String(row.tipo || "").toUpperCase() === "ARRENDATARIO" ? "Arrendatario" : "Arrendador";
+        return `<tr>
+          <td>${escapeHtml(role)}</td>
+          <td>${escapeHtml(row.nombre || "-")}</td>
+          <td>${plainNumberValue(row.porcentaje || 0)}%</td>
+          <td class="amount">${moneyValue(row.facturado || 0)}</td>
+          <td class="amount">${moneyValue(row.efectivo || 0)}</td>
+          <td class="amount">${moneyValue(row.comision || 0)}</td>
+          <td class="amount">${moneyValue(result.neto)}</td>
+          <td><button type="button" class="small-button" data-field-party-receipt="${escapeHtml(fieldLeasePartyRowKey(row))}">Recibo individual</button></td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="8">Sin partes cargadas para generar recibos individuales.</td></tr>`;
 }
 
 function fieldLeasePartyRowKey(row = {}) {
@@ -3461,9 +3492,17 @@ function renderFieldLeases() {
         <td>${moneyValue(item.totalConComision || item.totalPesos)}</td>
         <td>${moneyValue(fieldLeaseHistoryAppliedAmount(item))}</td>
         <td><button type="button" class="small-button" data-field-lease-open="${escapeHtml(item.id)}">Abrir</button> <button type="button" class="small-button" data-field-lease-print="${escapeHtml(item.id)}" data-field-lease-audience="GENERAL">Reporte</button> <button type="button" class="small-button" data-field-lease-receipt="${escapeHtml(item.id)}" data-field-lease-receipt-role="ARRENDADOR">Recibo arr.</button> <button type="button" class="small-button" data-field-lease-receipt="${escapeHtml(item.id)}" data-field-lease-receipt-role="ARRENDATARIO">Recibo arrendat.</button> <button type="button" class="small-button danger-button" data-field-lease-delete="${escapeHtml(item.id)}">Eliminar</button></td>
-      </tr>`).join("")
+      </tr>${fieldLeaseHistoryPartyReceiptRow(item)}`).join("")
     : `<tr><td colspan="8">Sin calculos de arrendamiento cargados.</td></tr>`;
   updateFieldLeasePreview();
+}
+
+function fieldLeaseHistoryPartyReceiptRow(item = {}) {
+  const rows = Array.isArray(item.distribucionPartes) ? item.distribucionPartes : [];
+  const landlords = rows.filter((row) => String(row.tipo || "").toUpperCase() === "ARRENDADOR" && row.nombre);
+  if (landlords.length <= 1) return "";
+  const buttons = landlords.map((row) => `<button type="button" class="small-button" data-field-lease-party-receipt="${escapeHtml(item.id)}" data-field-party-key="${escapeHtml(fieldLeasePartyRowKey(row))}">Recibo ${escapeHtml(row.nombre)}</button>`).join(" ");
+  return `<tr class="cc-detail-row"><td colspan="8"><strong>Recibos individuales arrendador:</strong> ${buttons}</td></tr>`;
 }
 
 function fieldDateValue(value) {
@@ -10520,6 +10559,11 @@ async function init() {
     if (!button) return;
     printCurrentFieldLeasePartyReceipt(button.dataset.fieldPartyReceipt || "");
   });
+  $("#field-party-receipts-body")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-party-receipt]");
+    if (!button) return;
+    printCurrentFieldLeasePartyReceipt(button.dataset.fieldPartyReceipt || "");
+  });
   $("#field-line-quote-body")?.addEventListener("input", (event) => {
     if (!event.target.closest("[data-field-line-quote]")) return;
     updateFieldLeasePreview();
@@ -10567,6 +10611,11 @@ async function init() {
     if (receiptButton) {
       const item = (state.fieldLeases || []).find((row) => row.id === receiptButton.dataset.fieldLeaseReceipt);
       if (item) printFieldLeaseReceipt(item, receiptButton.dataset.fieldLeaseReceiptRole || "ARRENDADOR");
+    }
+    const partyReceiptButton = event.target.closest("[data-field-lease-party-receipt]");
+    if (partyReceiptButton) {
+      const item = (state.fieldLeases || []).find((row) => row.id === partyReceiptButton.dataset.fieldLeasePartyReceipt);
+      if (item) printFieldLeaseReceipt(item, "ARRENDADOR", partyReceiptButton.dataset.fieldPartyKey || "");
     }
     if (deleteButton) deleteFieldLease(deleteButton.dataset.fieldLeaseDelete);
   });

@@ -1016,6 +1016,21 @@
                 </table>
               </div>
             </div>
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Recibos individuales por parte</h3>
+                  <p class="subtle">Use estos botones cuando el contrato tenga varias partes y necesite emitir un recibo separado para cada arrendador o arrendatario.</p>
+                </div>
+                <span class="subtle" id="field-party-receipts-summary">Sin partes para recibo individual</span>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Rol</th><th>Parte</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Comision</th><th>Neto</th><th>Accion</th></tr></thead>
+                  <tbody id="field-party-receipts-body"></tbody>
+                </table>
+              </div>
+            </div>
             <div class="form-actions">
               <button type="button" class="ghost-button" id="field-lease-print-general">Reporte de cuota</button>
               <button type="button" class="ghost-button" id="field-lease-receipt-landlord">Recibo arrendador</button>
@@ -2732,7 +2747,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260904-hacienda-compensacion-parcial-v1"></script>
+    <script src="/app.js?v=20260907-campos-recibos-partes-v1"></script>
   </body>
 </html>
 
