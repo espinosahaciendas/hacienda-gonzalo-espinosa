@@ -1264,14 +1264,22 @@ function calculateLiquidacion(operation, input = {}) {
   const ivaProd = source.ivaProd !== undefined && source.ivaProd !== "" ? parseMoney(source.ivaProd) : ivaProdAuto;
   const ivaComp = source.ivaComp !== undefined && source.ivaComp !== "" ? parseMoney(source.ivaComp) : ivaCompAuto;
   const efectivoProdBase = Math.max(brutoBaseProd - facturado, 0);
-  const efectivoProd = anticipated ? 0 : source.efectivoProd !== undefined && source.efectivoProd !== ""
+  const efectivoModo = normalizeKey(source.efectivoModo || "MONTO");
+  const efectivoPorc = parseMoney(source.efectivoPorc);
+  const efectivoProdPorcentaje = brutoBaseProd * efectivoPorc / 100;
+  const efectivoProd = anticipated ? 0 : efectivoModo === "PORCENTAJE"
+    ? efectivoProdPorcentaje
+    : source.efectivoProd !== undefined && source.efectivoProd !== ""
     ? normalizeFrigorificoEfectivoSinIva(source.efectivoProd, efectivoProdBase, frigo)
     : efectivoProdBase;
   const ivaCompFrigorificoControl = facturado * 0.105;
   const efectivoCompBase = frigo
     ? Math.max(brutoComp - (facturado + ivaCompFrigorificoControl), 0)
     : Math.max(brutoComp - facturado, 0);
-  const efectivoComp = anticipated ? 0 : !frigo && source.efectivoComp !== undefined && source.efectivoComp !== ""
+  const efectivoCompPorcentaje = brutoComp * efectivoPorc / 100;
+  const efectivoComp = anticipated ? 0 : efectivoModo === "PORCENTAJE"
+    ? efectivoCompPorcentaje
+    : !frigo && source.efectivoComp !== undefined && source.efectivoComp !== ""
     ? parseMoney(source.efectivoComp)
     : efectivoCompBase;
   const hasInput = (key) => Object.prototype.hasOwnProperty.call(input, key);
