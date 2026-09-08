@@ -1233,7 +1233,12 @@ function calculateLiquidacion(operation, input = {}) {
   const brutoBaseProd = frigo && netoFinalFrigorifico
     ? (brutoSinIvaFrigorifico || netoFinalFrigorifico / 1.105)
     : brutoVend;
-  const facturado = source.importeFacturado !== undefined && source.importeFacturado !== ""
+  const efectivoModo = normalizeKey(source.efectivoModo || "MONTO");
+  const efectivoPorc = parseMoney(source.efectivoPorc);
+  const facturadoPorPorcentaje = brutoBaseProd * Math.max(100 - Math.min(Math.max(efectivoPorc, 0), 100), 0) / 100;
+  const facturado = efectivoModo === "PORCENTAJE"
+    ? facturadoPorPorcentaje
+    : source.importeFacturado !== undefined && source.importeFacturado !== ""
     ? parseMoney(source.importeFacturado)
     : brutoBaseProd;
   const ivaDirectaSinIva = Boolean(source.ivaDirectaSinIva);
@@ -1264,8 +1269,6 @@ function calculateLiquidacion(operation, input = {}) {
   const ivaProd = source.ivaProd !== undefined && source.ivaProd !== "" ? parseMoney(source.ivaProd) : ivaProdAuto;
   const ivaComp = source.ivaComp !== undefined && source.ivaComp !== "" ? parseMoney(source.ivaComp) : ivaCompAuto;
   const efectivoProdBase = Math.max(brutoBaseProd - facturado, 0);
-  const efectivoModo = normalizeKey(source.efectivoModo || "MONTO");
-  const efectivoPorc = parseMoney(source.efectivoPorc);
   const efectivoProdPorcentaje = brutoBaseProd * efectivoPorc / 100;
   const efectivoProd = anticipated ? 0 : efectivoModo === "PORCENTAJE"
     ? efectivoProdPorcentaje
