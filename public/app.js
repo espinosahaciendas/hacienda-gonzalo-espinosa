@@ -50,7 +50,7 @@ let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260908-hacienda-efectivo-porcentaje-v1";
+const APP_BUILD = "20260908-hacienda-facturado-porcentaje-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -8662,6 +8662,23 @@ function calculateLiquidationPreview() {
   };
 }
 
+function automaticLiquidationFacturadoFromCashPercent() {
+  const percent = Math.min(Math.max(percentValue("#liq-cash-percent"), 0), 100);
+  const brutoVend = numberValue("#liq-bruto-vend");
+  const frigo = isFrigorificoIvaOperation() ? getFrigorificoCalc() : null;
+  const baseProd = frigo ? Number(frigo.brutoSinIva || 0) : brutoVend;
+  return Math.max(baseProd * (100 - percent) / 100, 0);
+}
+
+function syncLiquidationFacturadoFromCashPercent() {
+  if (String($("#liq-cash-mode")?.value || "").toUpperCase() !== "PORCENTAJE") return false;
+  if (isAnticipatedOperation()) return false;
+  if (document.activeElement === $("#liq-facturado")) return false;
+  setMoneyInput("#liq-facturado", automaticLiquidationFacturadoFromCashPercent());
+  state.liquidationFacturadoTouched = false;
+  return true;
+}
+
 function liquidationCashValues(frigoCalc = null) {
   const mode = String($("#liq-cash-mode")?.value || "MONTO").toUpperCase();
   const percent = percentValue("#liq-cash-percent");
@@ -8745,8 +8762,9 @@ function normalizeFrigorificoCashInput(value, operation = state.currentOperation
 
 function renderLiquidationTotals() {
   syncCommissionToggles();
-  const calc = calculateLiquidationPreview();
   const percentageCashMode = String($("#liq-cash-mode")?.value || "").toUpperCase() === "PORCENTAJE";
+  if (percentageCashMode) syncLiquidationFacturadoFromCashPercent();
+  const calc = calculateLiquidationPreview();
   if ((percentageCashMode || isFrigorificoIvaOperation()) && document.activeElement !== $("#liq-efectivo-prod")) {
     setMoneyInput("#liq-efectivo-prod", calc.efectivoProd);
   }
@@ -9567,10 +9585,12 @@ async function saveLiquidation(event) {
     return;
   }
   setLiquidationMessage("Guardando liquidacion...");
+  syncLiquidationFacturadoFromCashPercent();
   const calc = calculateLiquidationPreview();
+  const percentageCashMode = String($("#liq-cash-mode")?.value || "").toUpperCase() === "PORCENTAJE";
   const payload = {
-    importeFacturado: parseMoneyInput($("#liq-facturado").value),
-    importeFacturadoManual: Boolean(state.liquidationFacturadoTouched),
+    importeFacturado: percentageCashMode ? calc.facturado : parseMoneyInput($("#liq-facturado").value),
+    importeFacturadoManual: percentageCashMode ? false : Boolean(state.liquidationFacturadoTouched),
     comprobanteProd: $("#liq-comprobante-prod").value,
     comprobanteComp: $("#liq-comprobante-comp").value,
     ivaProd: parseMoneyInput($("#liq-iva-prod").value),
@@ -10894,6 +10914,22 @@ async function init() {
   });
   $all("#liquidation-form input").forEach((input) => {
     input.addEventListener("input", renderLiquidationTotals);
+  });
+  ["#liq-cash-mode", "#liq-cash-percent"].forEach((selector) => {
+    $(selector)?.addEventListener("input", () => {
+      syncLiquidationFacturadoFromCashPercent();
+      syncAutomaticLiquidationIva();
+      syncLiquidationCashFromFacturado();
+      renderLiquidationDetail(buildDetailFromSaleLines());
+      renderLiquidationTotals();
+    });
+    $(selector)?.addEventListener("change", () => {
+      syncLiquidationFacturadoFromCashPercent();
+      syncAutomaticLiquidationIva();
+      syncLiquidationCashFromFacturado();
+      renderLiquidationDetail(buildDetailFromSaleLines());
+      renderLiquidationTotals();
+    });
   });
   $("#liq-facturado").addEventListener("input", () => {
     state.liquidationFacturadoTouched = true;
