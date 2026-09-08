@@ -50,7 +50,7 @@ let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260908-hacienda-facturado-porcentaje-v1";
+const APP_BUILD = "20260908-hacienda-iva-porcentaje-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -8744,10 +8744,10 @@ function automaticLiquidationIvaValues() {
   };
 }
 
-function syncAutomaticLiquidationIva() {
+function syncAutomaticLiquidationIva(force = false) {
   const iva = automaticLiquidationIvaValues();
-  if (!state.liquidationIvaProdTouched) setMoneyInput("#liq-iva-prod", iva.prod);
-  if (!state.liquidationIvaCompTouched) setMoneyInput("#liq-iva-comp", iva.comp);
+  if ((force || !state.liquidationIvaProdTouched) && document.activeElement !== $("#liq-iva-prod")) setMoneyInput("#liq-iva-prod", iva.prod);
+  if ((force || !state.liquidationIvaCompTouched) && document.activeElement !== $("#liq-iva-comp")) setMoneyInput("#liq-iva-comp", iva.comp);
 }
 
 function normalizeFrigorificoCashInput(value, operation = state.currentOperation) {
@@ -8764,6 +8764,7 @@ function renderLiquidationTotals() {
   syncCommissionToggles();
   const percentageCashMode = String($("#liq-cash-mode")?.value || "").toUpperCase() === "PORCENTAJE";
   if (percentageCashMode) syncLiquidationFacturadoFromCashPercent();
+  if (percentageCashMode) syncAutomaticLiquidationIva(true);
   const calc = calculateLiquidationPreview();
   if ((percentageCashMode || isFrigorificoIvaOperation()) && document.activeElement !== $("#liq-efectivo-prod")) {
     setMoneyInput("#liq-efectivo-prod", calc.efectivoProd);
@@ -10918,14 +10919,14 @@ async function init() {
   ["#liq-cash-mode", "#liq-cash-percent"].forEach((selector) => {
     $(selector)?.addEventListener("input", () => {
       syncLiquidationFacturadoFromCashPercent();
-      syncAutomaticLiquidationIva();
+      syncAutomaticLiquidationIva(true);
       syncLiquidationCashFromFacturado();
       renderLiquidationDetail(buildDetailFromSaleLines());
       renderLiquidationTotals();
     });
     $(selector)?.addEventListener("change", () => {
       syncLiquidationFacturadoFromCashPercent();
-      syncAutomaticLiquidationIva();
+      syncAutomaticLiquidationIva(true);
       syncLiquidationCashFromFacturado();
       renderLiquidationDetail(buildDetailFromSaleLines());
       renderLiquidationTotals();
