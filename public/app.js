@@ -50,7 +50,7 @@ let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260907-campos-recibos-partes-v1";
+const APP_BUILD = "20260908-hacienda-efectivo-porcentaje-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -4329,6 +4329,18 @@ function fieldLeaseReceiptPaymentRowsForRole(item = {}, role = "ARRENDADOR", row
   });
 }
 
+function fieldLeaseReceiptPdfTitle(item = {}, roleLabel = "Arrendador", rows = [], partyKey = "") {
+  const partyName = partyKey && rows.length === 1 ? rows[0].nombre : "";
+  const dueLabel = fieldReportDate(item.vencimiento || item.fecha || "");
+  return safePdfTitle(
+    "Recibo_arrendamiento",
+    roleLabel,
+    partyName,
+    item.contrato || item.campo || "cuota",
+    dueLabel ? `Vto_${dueLabel}` : ""
+  );
+}
+
 function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDADOR", partyKey = "") {
   const receiptRole = String(role || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR";
   const roleLabel = fieldContractPartyTypeLabel(receiptRole);
@@ -4338,6 +4350,7 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
     return;
   }
   const rows = fieldLeaseReceiptRowsForRole(item, receiptRole, partyKey);
+  const receiptTitle = fieldLeaseReceiptPdfTitle(item, roleLabel, rows, partyKey);
   const payments = fieldLeaseReceiptPaymentRowsForRole(item, receiptRole, rows, !!partyKey);
   const totals = rows.reduce((acc, row) => {
     const result = fieldLeaseMiniLedgerNet(row);
@@ -4441,7 +4454,7 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
       }).join("")
     : `<tr><td colspan="7">Sin pagos o descuentos registrados para esta parte.</td></tr>`;
   const commissionLabel = receiptRole === "ARRENDADOR" ? "Comision descontada" : "Comision a pagar / sumada";
-  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Recibo ${escapeHtml(roleLabel)} - ${escapeHtml(item.contrato || "cuota")}</title><style>
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(receiptTitle)}</title><style>
     body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22;font-size:10.5px}
     header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:10px}
     img{width:185px;height:68px;object-fit:contain}
@@ -8594,8 +8607,9 @@ function calculateLiquidationPreview() {
   const frigo = isFrigorificoIvaOperation();
   const frigoCalc = frigo ? getFrigorificoCalc() : null;
   const anticipated = isAnticipatedOperation();
-  const efectivoProd = anticipated ? 0 : normalizeFrigorificoCashInput(numberValue("#liq-efectivo-prod"));
-  const efectivoComp = anticipated ? 0 : (frigoCalc ? frigoCalc.efectivoComp : numberValue("#liq-efectivo-comp"));
+  const cashValues = liquidationCashValues(frigoCalc);
+  const efectivoProd = anticipated ? 0 : cashValues.prod;
+  const efectivoComp = anticipated ? 0 : cashValues.comp;
   const cashExpenseProd = numberValue("#liq-cash-exp-prod");
   const expenses = getSellerExpenses();
   const buyerExpenses = getBuyerExpenses();
@@ -8648,6 +8662,26 @@ function calculateLiquidationPreview() {
   };
 }
 
+function liquidationCashValues(frigoCalc = null) {
+  const mode = String($("#liq-cash-mode")?.value || "MONTO").toUpperCase();
+  const percent = percentValue("#liq-cash-percent");
+  const brutoVend = numberValue("#liq-bruto-vend");
+  const brutoComp = numberValue("#liq-bruto-comp");
+  const frigo = frigoCalc || (isFrigorificoIvaOperation() ? getFrigorificoCalc() : null);
+  if (mode === "PORCENTAJE") {
+    const baseProd = frigo ? Number(frigo.brutoSinIva || 0) : brutoVend;
+    const baseComp = frigo ? Number(frigo.brutoComp || 0) : brutoComp;
+    return {
+      prod: Math.max(baseProd * percent / 100, 0),
+      comp: Math.max(baseComp * percent / 100, 0)
+    };
+  }
+  return {
+    prod: normalizeFrigorificoCashInput(numberValue("#liq-efectivo-prod")),
+    comp: frigo ? Number(frigo.efectivoComp || 0) : numberValue("#liq-efectivo-comp")
+  };
+}
+
 function syncLiquidationCashFromFacturado() {
   const facturado = numberValue("#liq-facturado");
   const brutoVend = numberValue("#liq-bruto-vend");
@@ -8655,6 +8689,12 @@ function syncLiquidationCashFromFacturado() {
   if (isAnticipatedOperation()) {
     setMoneyInput("#liq-efectivo-prod", 0);
     setMoneyInput("#liq-efectivo-comp", 0);
+    return;
+  }
+  if (String($("#liq-cash-mode")?.value || "").toUpperCase() === "PORCENTAJE") {
+    const values = liquidationCashValues();
+    setMoneyInput("#liq-efectivo-prod", values.prod);
+    setMoneyInput("#liq-efectivo-comp", values.comp);
     return;
   }
   const frigoCalc = isFrigorificoIvaOperation() ? getFrigorificoCalc() : null;
@@ -8706,10 +8746,11 @@ function normalizeFrigorificoCashInput(value, operation = state.currentOperation
 function renderLiquidationTotals() {
   syncCommissionToggles();
   const calc = calculateLiquidationPreview();
-  if (isFrigorificoIvaOperation() && document.activeElement !== $("#liq-efectivo-prod")) {
+  const percentageCashMode = String($("#liq-cash-mode")?.value || "").toUpperCase() === "PORCENTAJE";
+  if ((percentageCashMode || isFrigorificoIvaOperation()) && document.activeElement !== $("#liq-efectivo-prod")) {
     setMoneyInput("#liq-efectivo-prod", calc.efectivoProd);
   }
-  if (isFrigorificoIvaOperation()) {
+  if (percentageCashMode || isFrigorificoIvaOperation()) {
     setMoneyInput("#liq-efectivo-comp", calc.efectivoComp);
   }
   setMoneyInput("#liq-comision-fact-prod", calc.comFactProd);
@@ -9526,6 +9567,7 @@ async function saveLiquidation(event) {
     return;
   }
   setLiquidationMessage("Guardando liquidacion...");
+  const calc = calculateLiquidationPreview();
   const payload = {
     importeFacturado: parseMoneyInput($("#liq-facturado").value),
     importeFacturadoManual: Boolean(state.liquidationFacturadoTouched),
@@ -9535,8 +9577,8 @@ async function saveLiquidation(event) {
     ivaProdManual: Boolean(state.liquidationIvaProdTouched),
     ivaComp: parseMoneyInput($("#liq-iva-comp").value),
     ivaCompManual: Boolean(state.liquidationIvaCompTouched),
-    efectivoProd: isAnticipatedOperation() ? 0 : normalizeFrigorificoCashInput(parseMoneyInput($("#liq-efectivo-prod").value)),
-    efectivoComp: isAnticipatedOperation() ? 0 : (isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : parseMoneyInput($("#liq-efectivo-comp").value)),
+    efectivoProd: isAnticipatedOperation() ? 0 : calc.efectivoProd,
+    efectivoComp: isAnticipatedOperation() ? 0 : calc.efectivoComp,
     comisionFacturadoProd: parseMoneyInput($("#liq-comision-fact-prod").value),
     comisionFacturadoComp: parseMoneyInput($("#liq-comision-fact-comp").value),
     comisionEfectivoProd: parseMoneyInput($("#liq-comision-efect-prod").value),
