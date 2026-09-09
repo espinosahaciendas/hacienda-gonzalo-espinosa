@@ -6606,7 +6606,7 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
 }
 
 function currentAccountReportStyles() {
-  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.due-date-row td{background:#dfecea;font-weight:700}.due-compact td{font-size:8.2px}.subtle-line{display:block;color:#52706b;font-size:7.6px;margin-top:2px}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-subtotals{display:grid;grid-template-columns:repeat(2,minmax(170px,1fr));gap:6px;margin:6px 0}.commissionist-subtotals div{border:1px solid #cbd7d4;background:#fff;padding:6px}.commissionist-subtotals span{font-size:8px;text-transform:uppercase}.commissionist-subtotals strong{display:block;font-size:11px}.commissionist-subtotals small{display:block;color:#52706b}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.cc-compensation-detail td{background:#f7fbf9}.cc-compensation-box{padding:5px 7px;border-left:3px solid #173632}.cc-compensation-box strong{display:block;margin-bottom:3px}.cc-compensation-box span{display:inline-block;margin-right:12px;color:#52706b}.cc-compensation-box .positive{color:#0f6b43;font-weight:700}.cc-compensation-box .negative{color:#9b1c1c;font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
+  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary .net-card{background:#edf7f1;border-color:#0f6b43}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}.summary .net-card strong{font-size:17px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.due-date-row td{background:#dfecea;font-weight:700}.due-compact td{font-size:8.2px}.subtle-line{display:block;color:#52706b;font-size:7.6px;margin-top:2px}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-subtotals{display:grid;grid-template-columns:repeat(2,minmax(170px,1fr));gap:6px;margin:6px 0}.commissionist-subtotals div{border:1px solid #cbd7d4;background:#fff;padding:6px}.commissionist-subtotals span{font-size:8px;text-transform:uppercase}.commissionist-subtotals strong{display:block;font-size:11px}.commissionist-subtotals small{display:block;color:#52706b}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.cc-compensation-detail td{background:#f7fbf9}.cc-compensation-box{padding:5px 7px;border-left:3px solid #173632}.cc-compensation-box strong{display:block;margin-bottom:3px}.cc-compensation-box span{display:inline-block;margin-right:12px;color:#52706b}.cc-compensation-box .positive{color:#0f6b43;font-weight:700}.cc-compensation-box .negative{color:#9b1c1c;font-weight:700}.compact{max-width:820px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
 }
 
 function currentAccountImputationsByMovement() {
@@ -6691,6 +6691,33 @@ function pendingSignedAmount(movement) {
   return Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
 }
 
+function currentAccountClientNetSummary(rows) {
+  return (rows || []).filter((movement) => !movement.paymentId).reduce((summary, movement) => {
+    const signed = pendingSignedAmount(movement);
+    if (signed < -0.01) summary.toCollect += Math.abs(signed);
+    if (signed > 0.01) summary.discounts += signed;
+    summary.net = summary.toCollect - summary.discounts;
+    return summary;
+  }, { toCollect: 0, discounts: 0, net: 0 });
+}
+
+function currentAccountExpenseSummaryRows(rows) {
+  const byConcept = new Map();
+  (rows || []).forEach((movement) => {
+    if (movement.paymentId) return;
+    const signed = pendingSignedAmount(movement);
+    if (signed <= 0.01) return;
+    const concept = currentAccountConceptText(movement, "CLIENTE") || "Gastos / descuentos";
+    const row = byConcept.get(concept) || { concept, count: 0, total: 0 };
+    row.count += 1;
+    row.total += signed;
+    byConcept.set(concept, row);
+  });
+  return [...byConcept.values()]
+    .filter((row) => Math.abs(row.total) > 0.01)
+    .sort((a, b) => Math.abs(b.total) - Math.abs(a.total) || a.concept.localeCompare(b.concept, "es"));
+}
+
 function printCurrentAccountReport(forcedType = "") {
   const type = forcedType || $("#cc-report-type").value;
   const filters = getCurrentAccountReportFilters();
@@ -6727,6 +6754,8 @@ function printCurrentAccountReport(forcedType = "") {
   const commissionTotals = commissionSplitTotals(commissionRows);
   const commissionByClient = new Map(commissionRows.map((row) => [row.cliente, row]));
   const commissionTotal = commissionTotals.total;
+  const clientNetSummary = currentAccountClientNetSummary(rows);
+  const expenseRows = filters.viewMode === "CLIENTE" ? currentAccountExpenseSummaryRows(rows) : [];
   const balanceRows = [...balances.entries()]
     .map(([cliente, saldo]) => {
       const commission = commissionByClient.get(cliente) || { facturado: 0, efectivo: 0, total: 0 };
@@ -6734,15 +6763,20 @@ function printCurrentAccountReport(forcedType = "") {
     })
     .filter((item) => Math.abs(item.saldo) > 0.01 || Math.abs(item.total) > 0.01)
     .sort((a, b) => Math.abs(b.total || 0) - Math.abs(a.total || 0) || Math.abs(b.saldo) - Math.abs(a.saldo));
-  const balancesTable = type === "SALDOS" ? `<h2>Saldo por cliente</h2><table class="compact"><thead><tr><th>Cliente</th><th>Saldo</th><th>Comision s/facturado</th><th>Comision s/efectivo</th><th>Total comision</th></tr></thead><tbody>${balanceRows.length ? balanceRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td><td class="amount ${item.facturado < 0 ? "negative" : "positive"}">${Math.abs(item.facturado) > 0.01 ? moneyValue(item.facturado) : "-"}</td><td class="amount ${item.efectivo < 0 ? "negative" : "positive"}">${Math.abs(item.efectivo) > 0.01 ? moneyValue(item.efectivo) : "-"}</td><td class="amount ${item.total < 0 ? "negative" : "positive"}">${Math.abs(item.total) > 0.01 ? moneyValue(item.total) : "-"}</td></tr>`).join("") : `<tr><td colspan="5">Sin saldos para los filtros aplicados.</td></tr>`}</tbody></table>` : "";
+  const balancesTable = type === "SALDOS" ? `<h2>Saldo por cliente</h2><table class="compact"><thead><tr><th>Cliente</th><th>Saldo interno</th><th>Disponible a cobrar</th><th>Comision s/facturado</th><th>Comision s/efectivo</th><th>Total comision</th></tr></thead><tbody>${balanceRows.length ? balanceRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td><td class="amount positive">${item.saldo < -0.01 ? moneyValue(Math.abs(item.saldo)) : "-"}</td><td class="amount ${item.facturado < 0 ? "negative" : "positive"}">${Math.abs(item.facturado) > 0.01 ? moneyValue(item.facturado) : "-"}</td><td class="amount ${item.efectivo < 0 ? "negative" : "positive"}">${Math.abs(item.efectivo) > 0.01 ? moneyValue(item.efectivo) : "-"}</td><td class="amount ${item.total < 0 ? "negative" : "positive"}">${Math.abs(item.total) > 0.01 ? moneyValue(item.total) : "-"}</td></tr>`).join("") : `<tr><td colspan="6">Sin saldos para los filtros aplicados.</td></tr>`}</tbody></table>` : "";
   const commissionsTable = commissionRows.length ? `<h2>Comisiones pendientes</h2><table class="compact"><thead><tr><th>Cliente / productor</th><th>Sobre facturado</th><th>Sobre efectivo</th><th>Total pendiente</th></tr></thead><tbody>${commissionRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.facturado < 0 ? "negative" : "positive"}">${Math.abs(item.facturado) > 0.01 ? moneyValue(item.facturado) : "-"}</td><td class="amount ${item.efectivo < 0 ? "negative" : "positive"}">${Math.abs(item.efectivo) > 0.01 ? moneyValue(item.efectivo) : "-"}</td><td class="amount ${item.total < 0 ? "negative" : "positive"}">${moneyValue(item.total)}</td></tr>`).join("")}<tr><th>Total comisiones</th><th class="amount ${commissionTotals.facturado < 0 ? "negative" : "positive"}">${moneyValue(commissionTotals.facturado)}</th><th class="amount ${commissionTotals.efectivo < 0 ? "negative" : "positive"}">${moneyValue(commissionTotals.efectivo)}</th><th class="amount ${commissionTotal < 0 ? "negative" : "positive"}">${moneyValue(commissionTotal)}</th></tr></tbody></table>` : "";
+  const expensesTable = type === "SALDOS" && filters.viewMode === "CLIENTE" && expenseRows.length ? `<h2>Gastos / descuentos incluidos</h2><table class="compact"><thead><tr><th>Concepto</th><th>Cantidad</th><th>Total descontado</th></tr></thead><tbody>${expenseRows.map((item) => `<tr><td>${escapeHtml(item.concept)}</td><td>${item.count}</td><td class="amount negative">-${moneyValue(item.total)}</td></tr>`).join("")}<tr><th colspan="2">Total gastos / descuentos</th><th class="amount negative">-${moneyValue(clientNetSummary.discounts)}</th></tr></tbody></table>` : "";
 
   const filterLabel = $("#cc-client-search").value.trim() || (filters.viewMode === "COMISIONISTA" ? "Todos los comisionistas" : filters.viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos los clientes");
   const periodLabel = `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`;
+  const clientSummaryCards = type === "SALDOS" && filters.viewMode === "CLIENTE"
+    ? `<div><span>A cobrar por ventas</span><strong class="positive">${moneyValue(clientNetSummary.toCollect)}</strong></div><div><span>Gastos / descuentos</span><strong class="negative">-${moneyValue(clientNetSummary.discounts)}</strong></div><div class="net-card"><span>Disponible neto</span><strong class="${clientNetSummary.net >= 0 ? "positive" : "negative"}">${moneyValue(clientNetSummary.net)}</strong></div>`
+    : `<div><span>${filters.viewMode === "CONSIGNATARIA" ? "Comisiones pendientes" : "Saldo pendiente real"}</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Vencimientos informativos" : "Saldo pendiente"}</span><strong>${moneyValue(pendingBalance)}</strong></div>`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${currentAccountReportStyles()}</style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${escapeHtml(title)}</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
-  <div class="summary"><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Periodo</span><strong>${escapeHtml(periodLabel)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Comisiones pendientes" : "Saldo pendiente real"}</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Vencimientos informativos" : "Saldo pendiente"}</span><strong>${moneyValue(pendingBalance)}</strong></div><div><span>Comisiones pendientes</span><strong>${moneyValue(commissionTotal)}</strong></div></div>
+  <div class="summary"><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Periodo</span><strong>${escapeHtml(periodLabel)}</strong></div>${clientSummaryCards}<div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>Comisiones pendientes</span><strong>${moneyValue(commissionTotal)}</strong></div></div>
   ${balancesTable}
+  ${expensesTable}
   ${commissionsTable}
   <h2>Detalle de movimientos e imputaciones</h2>
   <table><thead><tr><th>Fecha</th><th>Vencimiento</th><th>Cliente</th><th>Concepto</th><th>Comprobante</th><th>Operacion</th><th>Importe original</th><th>Imputado</th><th>Saldo pendiente</th><th>Estado</th></tr></thead><tbody>${currentAccountReportMovementRows(rows, imputationsByMovement, filters.viewMode)}</tbody></table><button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
