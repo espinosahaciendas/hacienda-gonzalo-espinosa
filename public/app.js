@@ -6769,11 +6769,14 @@ function printCurrentAccountReport(forcedType = "") {
 
   const filterLabel = $("#cc-client-search").value.trim() || (filters.viewMode === "COMISIONISTA" ? "Todos los comisionistas" : filters.viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos los clientes");
   const periodLabel = `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`;
+  const issuedAt = new Date();
+  const issuedFileDate = `${issuedAt.getFullYear()}-${String(issuedAt.getMonth() + 1).padStart(2, "0")}-${String(issuedAt.getDate()).padStart(2, "0")}`;
+  const pdfTitle = safePdfTitle(title, filterLabel, issuedFileDate);
   const clientSummaryCards = type === "SALDOS" && filters.viewMode === "CLIENTE"
     ? `<div><span>A cobrar por ventas</span><strong class="positive">${moneyValue(clientNetSummary.toCollect)}</strong></div><div><span>Gastos / descuentos</span><strong class="negative">-${moneyValue(clientNetSummary.discounts)}</strong></div><div class="net-card"><span>Disponible neto</span><strong class="${clientNetSummary.net >= 0 ? "positive" : "negative"}">${moneyValue(clientNetSummary.net)}</strong></div>`
     : `<div><span>${filters.viewMode === "CONSIGNATARIA" ? "Comisiones pendientes" : "Saldo pendiente real"}</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Vencimientos informativos" : "Saldo pendiente"}</span><strong>${moneyValue(pendingBalance)}</strong></div>`;
-  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${currentAccountReportStyles()}</style></head><body>
-  <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${escapeHtml(title)}</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(pdfTitle)}</title><style>${currentAccountReportStyles()}</style></head><body>
+  <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${escapeHtml(title)}</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(issuedAt.toLocaleDateString("es-AR"))}</p></div></header>
   <div class="summary"><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Periodo</span><strong>${escapeHtml(periodLabel)}</strong></div>${clientSummaryCards}<div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>Comisiones pendientes</span><strong>${moneyValue(commissionTotal)}</strong></div></div>
   ${balancesTable}
   ${expensesTable}
