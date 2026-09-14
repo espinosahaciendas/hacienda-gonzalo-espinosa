@@ -477,6 +477,13 @@ async function handleApi(req, res) {
     return;
   }
 
+  const establecimientoMatch = parsed.pathname.match(/^\/api\/clientes\/([^/]+)\/establecimientos\/([^/]+)$/);
+  if (establecimientoMatch && req.method === "PUT") {
+    const body = await readBody(req);
+    sendJson(res, 200, { item: await dataSource.updateEstablecimiento(decodeURIComponent(establecimientoMatch[1]), decodeURIComponent(establecimientoMatch[2]), body) });
+    return;
+  }
+
   if (parsed.pathname === "/api/campos/contratos") {
     if (req.method === "GET") {
       sendJson(res, 200, { items: await dataSource.getFieldContracts() });

@@ -1754,6 +1754,34 @@ class BackupDataSource {
     return saved;
   }
 
+  async updateEstablecimiento(clienteId, renspaActual, input) {
+    const data = this.readData();
+    const clientes = await this.getClientes();
+    const cliente = clientes.find((item) => String(item.id) === String(clienteId));
+    if (!cliente) {
+      const error = new Error("Primero hay que guardar o seleccionar el cliente.");
+      error.statusCode = 404;
+      throw error;
+    }
+    const cleanRenspa = normalizeText(renspaActual);
+    const establishments = asArray(data.establishments);
+    const index = establishments.findIndex((item) => normalizeKey(item.cliente) === normalizeKey(cliente.nombre) && normalizeKey(item.renspa) === normalizeKey(cleanRenspa));
+    if (index < 0) {
+      const error = new Error("No se encontro el RENSPA para modificar.");
+      error.statusCode = 404;
+      throw error;
+    }
+    establishments[index] = {
+      ...establishments[index],
+      nombre: normalizeText(input.nombre) || "Establecimiento",
+      observaciones: normalizeText(input.observaciones),
+      actualizadoEn: new Date().toISOString()
+    };
+    data.establishments = establishments;
+    this.saveData(data);
+    return establishments[index];
+  }
+
   async ensureEstablecimiento(clienteId, renspa, nombre) {
     const cleanRenspa = normalizeText(renspa);
     if (!cleanRenspa) return null;
@@ -3266,6 +3294,7 @@ class PostgresJsonDataSource extends BackupDataSource {
   async deleteCliente(clientId) { return this.withRemoteData(() => super.deleteCliente(clientId), true); }
   async getEstablecimientos(clienteId) { return this.withRemoteData(() => super.getEstablecimientos(clienteId)); }
   async saveEstablecimiento(clienteId, input) { return this.withRemoteData(() => super.saveEstablecimiento(clienteId, input), true); }
+  async updateEstablecimiento(clienteId, renspaActual, input) { return this.withRemoteData(() => super.updateEstablecimiento(clienteId, renspaActual, input), true); }
   async ensureEstablecimiento(clienteId, renspa, nombre) { return this.withRemoteData(() => super.ensureEstablecimiento(clienteId, renspa, nombre), true); }
   async saveOperacion(input) { return this.withRemoteData(() => super.saveOperacion(input), true); }
   async getCategorias() { return this.withRemoteData(() => super.getCategorias()); }
@@ -3468,6 +3497,28 @@ class PostgresDataSource {
        RETURNING nombre, renspa, observaciones`,
       [clienteId, nombre, renspa, observaciones || null]
     );
+    return {
+      nombre: result.rows[0].nombre,
+      renspa: result.rows[0].renspa || "",
+      observaciones: result.rows[0].observaciones || ""
+    };
+  }
+
+  async updateEstablecimiento(clienteId, renspaActual, input) {
+    const nombre = normalizeText(input.nombre) || "Establecimiento";
+    const observaciones = normalizeText(input.observaciones);
+    const result = await this.query(
+      `UPDATE establecimientos
+       SET nombre = $3, observaciones = $4
+       WHERE cliente_id = $1 AND renspa = $2 AND activo = TRUE
+       RETURNING nombre, renspa, observaciones`,
+      [clienteId, normalizeText(renspaActual), nombre, observaciones || null]
+    );
+    if (!result.rows.length) {
+      const error = new Error("No se encontro el RENSPA para modificar.");
+      error.statusCode = 404;
+      throw error;
+    }
     return {
       nombre: result.rows[0].nombre,
       renspa: result.rows[0].renspa || "",
