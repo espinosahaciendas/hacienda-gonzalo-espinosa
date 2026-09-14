@@ -9,6 +9,7 @@
   fieldLeases: [],
   vista: "tablero",
   selectedClientId: "",
+  editingRenspa: "",
   showAllClients: false,
   selectedOperationId: "",
   categorias: [],
@@ -10157,6 +10158,7 @@ function resetClientForm() {
   $("#client-form").reset();
   $("#client-id").value = "";
   state.selectedClientId = "";
+  resetRenspaForm();
   $("#client-form-title").textContent = "Nuevo cliente";
   $("#client-cancel").hidden = true;
   $("#renspa-panel").hidden = true;
@@ -10170,6 +10172,16 @@ function resetClientForm() {
   setRenspaMessage("");
 }
 
+function resetRenspaForm() {
+  state.editingRenspa = "";
+  $("#renspa-name").value = "";
+  $("#renspa-value").value = "";
+  $("#renspa-value").disabled = false;
+  $("#renspa-notes").value = "";
+  $("#renspa-add").textContent = "Agregar RENSPA";
+  $("#renspa-cancel").hidden = true;
+}
+
 async function loadRenspas(clientId) {
   if (!clientId) return;
   const response = await fetchJson(`/api/clientes/${encodeURIComponent(clientId)}/establecimientos`);
@@ -10180,9 +10192,21 @@ async function loadRenspas(clientId) {
           <strong>${escapeHtml(item.renspa)}</strong>
           <span>${escapeHtml(item.nombre || "Establecimiento")}</span>
           ${item.observaciones ? `<span>${escapeHtml(item.observaciones)}</span>` : ""}
+          ${state.usuario?.rol === "CONSULTA" ? "" : `<button type="button" class="small-button" data-renspa-edit="${escapeHtml(item.renspa)}" data-renspa-name="${escapeHtml(item.nombre || "")}" data-renspa-notes="${escapeHtml(item.observaciones || "")}">Modificar</button>`}
         </div>
       `).join("")
     : `<div class="renspa-item"><span>Sin RENSPA asociados todavia.</span></div>`;
+}
+
+function editRenspaFromButton(button) {
+  state.editingRenspa = button.dataset.renspaEdit || "";
+  $("#renspa-name").value = button.dataset.renspaName || "";
+  $("#renspa-value").value = state.editingRenspa;
+  $("#renspa-value").disabled = true;
+  $("#renspa-notes").value = button.dataset.renspaNotes || "";
+  $("#renspa-add").textContent = "Guardar cambios";
+  $("#renspa-cancel").hidden = false;
+  setRenspaMessage("Editando RENSPA existente.");
 }
 
 async function editClient(clientId) {
@@ -10293,19 +10317,20 @@ async function addRenspa() {
   }
   setRenspaMessage("Guardando...");
   try {
-    await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}/establecimientos`, {
-      method: "POST",
+    const editing = state.editingRenspa;
+    await fetchJson(editing
+      ? `/api/clientes/${encodeURIComponent(state.selectedClientId)}/establecimientos/${encodeURIComponent(editing)}`
+      : `/api/clientes/${encodeURIComponent(state.selectedClientId)}/establecimientos`, {
+      method: editing ? "PUT" : "POST",
       body: JSON.stringify({
         nombre: $("#renspa-name").value,
         renspa: $("#renspa-value").value,
         observaciones: $("#renspa-notes").value
       })
     });
-    $("#renspa-name").value = "";
-    $("#renspa-value").value = "";
-    $("#renspa-notes").value = "";
+    resetRenspaForm();
     await loadRenspas(state.selectedClientId);
-    setRenspaMessage("RENSPA agregado correctamente.", "ok");
+    setRenspaMessage(editing ? "RENSPA actualizado correctamente." : "RENSPA agregado correctamente.", "ok");
   } catch (error) {
     setRenspaMessage(error.message, "error");
   }
@@ -11040,6 +11065,15 @@ async function init() {
   $("#client-cancel").addEventListener("click", resetClientForm);
   $("#client-merge").addEventListener("click", applyClientMaintenance);
   $("#renspa-add").addEventListener("click", addRenspa);
+  $("#renspa-cancel").addEventListener("click", () => {
+    resetRenspaForm();
+    setRenspaMessage("");
+  });
+  $("#renspa-list").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-renspa-edit]");
+    if (!button) return;
+    editRenspaFromButton(button);
+  });
   $("#clientes-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-edit-client]");
     if (!button) return;
