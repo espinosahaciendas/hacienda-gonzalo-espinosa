@@ -316,8 +316,60 @@ async function loadFieldModuleData(force = false) {
   renderFieldDueAgenda();
 }
 
-function downloadBackup() {
-  window.location.href = "/api/backup/download";
+function filenameFromDisposition(disposition, fallback) {
+  const text = String(disposition || "");
+  const utfMatch = text.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utfMatch) return decodeURIComponent(utfMatch[1].replace(/"/g, ""));
+  const match = text.match(/filename="?([^";]+)"?/i);
+  return match ? match[1] : fallback;
+}
+
+async function downloadBackup() {
+  const button = $("#download-backup");
+  const message = $("#backup-message");
+  const originalText = button?.textContent || "Descargar backup de datos";
+  if (button) {
+    button.disabled = true;
+    button.classList.add("is-loading");
+    button.textContent = "Preparando backup...";
+  }
+  if (message) {
+    message.textContent = "Generando y descargando backup. Espere unos segundos...";
+    message.className = "form-message";
+  }
+  try {
+    const response = await fetch("/api/backup/download");
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || "No se pudo descargar el backup.");
+    }
+    if (button) button.textContent = "Descargando archivo...";
+    const blob = await response.blob();
+    const filename = filenameFromDisposition(response.headers.get("Content-Disposition"), `backup-hacienda-campos-${new Date().toISOString().slice(0, 10)}.json`);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    if (message) {
+      message.textContent = `Backup descargado: ${filename}`;
+      message.className = "form-message ok";
+    }
+  } catch (error) {
+    if (message) {
+      message.textContent = error.message;
+      message.className = "form-message error";
+    }
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("is-loading");
+      button.textContent = originalText;
+    }
+  }
 }
 
 function setDocumentMessage(message, type = "") {
@@ -10192,7 +10244,7 @@ async function loadRenspas(clientId) {
           <strong>${escapeHtml(item.renspa)}</strong>
           <span>${escapeHtml(item.nombre || "Establecimiento")}</span>
           ${item.observaciones ? `<span>${escapeHtml(item.observaciones)}</span>` : ""}
-          ${state.usuario?.rol === "CONSULTA" ? "" : `<button type="button" class="small-button" data-renspa-edit="${escapeHtml(item.renspa)}" data-renspa-name="${escapeHtml(item.nombre || "")}" data-renspa-notes="${escapeHtml(item.observaciones || "")}">Modificar</button>`}
+          ${state.usuario?.rol === "CONSULTA" ? "" : `<div class="renspa-actions"><button type="button" class="small-button" data-renspa-edit="${escapeHtml(item.renspa)}" data-renspa-name="${escapeHtml(item.nombre || "")}" data-renspa-notes="${escapeHtml(item.observaciones || "")}">Modificar</button><button type="button" class="small-button danger-button" data-renspa-delete="${escapeHtml(item.renspa)}">Dar de baja</button></div>`}
         </div>
       `).join("")
     : `<div class="renspa-item"><span>Sin RENSPA asociados todavia.</span></div>`;
@@ -10202,11 +10254,26 @@ function editRenspaFromButton(button) {
   state.editingRenspa = button.dataset.renspaEdit || "";
   $("#renspa-name").value = button.dataset.renspaName || "";
   $("#renspa-value").value = state.editingRenspa;
-  $("#renspa-value").disabled = true;
+  $("#renspa-value").disabled = false;
   $("#renspa-notes").value = button.dataset.renspaNotes || "";
   $("#renspa-add").textContent = "Guardar cambios";
   $("#renspa-cancel").hidden = false;
   setRenspaMessage("Editando RENSPA existente.");
+}
+
+async function deleteRenspa(renspa) {
+  if (!state.selectedClientId || !renspa) return;
+  const confirmed = window.confirm(`¿Dar de baja el RENSPA ${renspa}? No se elimina de operaciones ya cargadas, sólo deja de figurar como vigente en la ficha del cliente.`);
+  if (!confirmed) return;
+  setRenspaMessage("Dando de baja...");
+  try {
+    await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}/establecimientos/${encodeURIComponent(renspa)}`, { method: "DELETE" });
+    if (state.editingRenspa === renspa) resetRenspaForm();
+    await loadRenspas(state.selectedClientId);
+    setRenspaMessage("RENSPA dado de baja correctamente.", "ok");
+  } catch (error) {
+    setRenspaMessage(error.message, "error");
+  }
 }
 
 async function editClient(clientId) {
@@ -11070,9 +11137,13 @@ async function init() {
     setRenspaMessage("");
   });
   $("#renspa-list").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-renspa-edit]");
-    if (!button) return;
-    editRenspaFromButton(button);
+    const editButton = event.target.closest("[data-renspa-edit]");
+    if (editButton) {
+      editRenspaFromButton(editButton);
+      return;
+    }
+    const deleteButton = event.target.closest("[data-renspa-delete]");
+    if (deleteButton) deleteRenspa(deleteButton.dataset.renspaDelete);
   });
   $("#clientes-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-edit-client]");

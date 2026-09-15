@@ -862,6 +862,16 @@ label textarea {
   font-weight: 700;
 }
 
+.ghost-button.is-loading,
+.primary-button.is-loading,
+.small-button.is-loading {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: white;
+  cursor: wait;
+  opacity: .9;
+}
+
 .small-button {
   padding: 6px 9px;
   font-size: 13px;
@@ -990,6 +1000,13 @@ label textarea {
   margin-top: 3px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.renspa-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
 }
 
 .party-block {
