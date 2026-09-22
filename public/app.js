@@ -5394,6 +5394,46 @@ function matchesCurrentAccountCommissionistSearch(movement, words, exactCommissi
   return words.every((word) => haystack.includes(word));
 }
 
+function currentAccountKeywordText(movement) {
+  const detail = commissionistDetailFromObservation(movement.observacion);
+  const detailText = detail
+    ? [
+        detail.comisionista,
+        detail.periodoDesde,
+        detail.periodoHasta,
+        ...(Array.isArray(detail.items) ? detail.items.flatMap((item) => [
+          item.id,
+          item.origen,
+          item.vendedor,
+          item.comprador,
+          item.comprobante
+        ]) : [])
+      ].filter(Boolean).join(" ")
+    : "";
+  return normalizeSearch([
+    movement.id,
+    movement.operacion,
+    movement.cliente,
+    movement.contraparte,
+    movement.vendedor,
+    movement.comprador,
+    movement.consignataria,
+    movement.comisionista,
+    movement.consignatariaCuenta,
+    movement.concepto,
+    movement.comprobante,
+    movement.facturaComision,
+    movement.observacion,
+    detailText
+  ].filter(Boolean).join(" "));
+}
+
+function matchesCurrentAccountKeyword(movement, words) {
+  if (!words?.length) return true;
+  const haystack = currentAccountKeywordText(movement);
+  return words.every((word) => haystack.includes(word));
+}
+
 function currentAccountOperationType(movement) {
   const text = normalizeSearch(`${movement.tipoOperacion || ""} ${movement.tipo || ""} ${movement.concepto || ""}`);
   if (text.includes("consignada")) return "CONSIGNADA";
@@ -5554,6 +5594,7 @@ function currentAccountQuickPaymentButton(movement) {
 function renderCuentaCorriente() {
   if (!state.cuenta) return;
   const query = normalizeSearch($("#cc-client-search").value);
+  const keywordWords = normalizeSearch($("#cc-keyword-filter")?.value || "").split(" ").filter(Boolean);
   const viewMode = $("#cc-view-mode").value;
   const statusFilter = $("#cc-status-filter").value;
   const conceptFilter = $("#cc-concept-filter").value;
@@ -5577,6 +5618,7 @@ function renderCuentaCorriente() {
     if (statusFilter !== "TODOS" && String(movement.estado || "").toUpperCase() !== statusFilter) return false;
     if (conceptFilter === "COMISION" && (!isCommissionPendingMovement(movement, viewMode) || String(movement.estado || "").toUpperCase() === "IMPUTADO")) return false;
     if (!matchesCurrentAccountOperationType(movement, operationTypeFilter)) return false;
+    if (!matchesCurrentAccountKeyword(movement, keywordWords)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
@@ -5670,6 +5712,7 @@ function renderCuentaCorriente() {
     if (!matchesEntity) return false;
     if (conceptFilter === "COMISION" && !isCommissionPendingMovement(movement, viewMode)) return false;
     if (!matchesCurrentAccountOperationType(movement, operationTypeFilter)) return false;
+    if (!matchesCurrentAccountKeyword(movement, keywordWords)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     if (!dueDateInRange(movement, duePanelRange.from, duePanelRange.to)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
@@ -6644,11 +6687,14 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
 
 function getCurrentAccountReportFilters() {
   const query = normalizeSearch($("#cc-client-search").value);
+  const keyword = normalizeSearch($("#cc-keyword-filter")?.value || "");
   const viewMode = $("#cc-view-mode").value;
   return {
     viewMode,
     query,
     words: query.split(" ").filter(Boolean),
+    keyword,
+    keywordWords: keyword.split(" ").filter(Boolean),
     exactClient: viewMode === "CLIENTE" ? getExactCurrentAccountClient(query) : "",
     exactConsignee: viewMode === "CONSIGNATARIA" ? getExactCurrentAccountConsignee(query) : "",
     exactCommissionist: viewMode === "COMISIONISTA" ? getExactCurrentAccountCommissionist(query) : "",
@@ -6672,6 +6718,7 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
   return matchesEntity
     && (filters.conceptFilter !== "COMISION" || isCommissionPendingMovement(movement, filters.viewMode))
     && matchesCurrentAccountOperationType(movement, filters.operationTypeFilter)
+    && matchesCurrentAccountKeyword(movement, filters.keywordWords || [])
     && (!includeStatusFilter || filters.statusFilter === "TODOS" || String(movement.estado || "").toUpperCase() === filters.statusFilter)
     && matchesCurrentAccountDateRange(movement, filters.dateFrom, filters.dateTo)
     && (!includeDueFilter || matchesCurrentAccountDueFilter(movement, filters.dueFilter));
@@ -6839,7 +6886,9 @@ function printCurrentAccountReport(forcedType = "") {
   const commissionsTable = commissionRows.length ? `<h2>Comisiones pendientes</h2><table class="compact"><thead><tr><th>Cliente / productor</th><th>Sobre facturado</th><th>Sobre efectivo</th><th>Total pendiente</th></tr></thead><tbody>${commissionRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.facturado < 0 ? "negative" : "positive"}">${Math.abs(item.facturado) > 0.01 ? moneyValue(item.facturado) : "-"}</td><td class="amount ${item.efectivo < 0 ? "negative" : "positive"}">${Math.abs(item.efectivo) > 0.01 ? moneyValue(item.efectivo) : "-"}</td><td class="amount ${item.total < 0 ? "negative" : "positive"}">${moneyValue(item.total)}</td></tr>`).join("")}<tr><th>Total comisiones</th><th class="amount ${commissionTotals.facturado < 0 ? "negative" : "positive"}">${moneyValue(commissionTotals.facturado)}</th><th class="amount ${commissionTotals.efectivo < 0 ? "negative" : "positive"}">${moneyValue(commissionTotals.efectivo)}</th><th class="amount ${commissionTotal < 0 ? "negative" : "positive"}">${moneyValue(commissionTotal)}</th></tr></tbody></table>` : "";
   const expensesTable = type === "SALDOS" && filters.viewMode === "CLIENTE" && expenseRows.length ? `<h2>Gastos / descuentos incluidos</h2><table class="compact"><thead><tr><th>Concepto</th><th>Cantidad</th><th>Total descontado</th></tr></thead><tbody>${expenseRows.map((item) => `<tr><td>${escapeHtml(item.concept)}</td><td>${item.count}</td><td class="amount negative">-${moneyValue(item.total)}</td></tr>`).join("")}<tr><th colspan="2">Total gastos / descuentos</th><th class="amount negative">-${moneyValue(clientNetSummary.discounts)}</th></tr></tbody></table>` : "";
 
-  const filterLabel = $("#cc-client-search").value.trim() || (filters.viewMode === "COMISIONISTA" ? "Todos los comisionistas" : filters.viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos los clientes");
+  const baseFilterLabel = $("#cc-client-search").value.trim() || (filters.viewMode === "COMISIONISTA" ? "Todos los comisionistas" : filters.viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos los clientes");
+  const keywordLabel = $("#cc-keyword-filter")?.value.trim();
+  const filterLabel = keywordLabel ? `${baseFilterLabel} / ${keywordLabel}` : baseFilterLabel;
   const periodLabel = `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`;
   const issuedAt = new Date();
   const issuedFileDate = `${issuedAt.getFullYear()}-${String(issuedAt.getMonth() + 1).padStart(2, "0")}-${String(issuedAt.getDate()).padStart(2, "0")}`;
@@ -6947,6 +6996,8 @@ function printCurrentAccountDueReport(options = {}) {
         viewMode: "CLIENTE",
         query: "",
         words: [],
+        keyword: "",
+        keywordWords: [],
         exactClient: "",
         exactConsignee: "",
         exactCommissionist: "",
@@ -7028,7 +7079,9 @@ function printCurrentAccountDueReport(options = {}) {
     if (total < 0) acc.pagar += Math.abs(total);
     return acc;
   }, { factura: 0, efectivo: 0, total: 0, cobrar: 0, pagar: 0 });
-  const filterLabel = options.all ? "Todos" : $("#cc-client-search").value.trim() || "Todos";
+  const baseFilterLabel = options.all ? "Todos" : $("#cc-client-search").value.trim() || "Todos";
+  const keywordLabel = options.all ? "" : $("#cc-keyword-filter")?.value.trim();
+  const filterLabel = keywordLabel ? `${baseFilterLabel} / ${keywordLabel}` : baseFilterLabel;
   const panelPeriodLabel = currentAccountDuePanelRangeLabel(panelRange);
   const customPeriodLabel = dueReportRangeLabel(customRange);
   const periodLabel = effectiveFilters.dateFrom || effectiveFilters.dateTo
@@ -10575,6 +10628,7 @@ async function init() {
   $("#operation-buyer-name").addEventListener("input", () => renderPartySuggestions("#operation-buyer-name", "#operation-buyer-suggestions", "#operation-buyer-id"));
   $("#operation-consignee-name").addEventListener("input", () => renderPartySuggestions("#operation-consignee-name", "#operation-consignee-suggestions", "#operation-consignee-id"));
   $("#cc-client-search").addEventListener("input", renderCuentaCorriente);
+  $("#cc-keyword-filter")?.addEventListener("input", renderCuentaCorriente);
   $("#cc-view-mode").addEventListener("change", () => {
     const label = document.querySelector("label:has(#cc-client-search)");
     if (label) {
