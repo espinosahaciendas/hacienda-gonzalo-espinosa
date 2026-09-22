@@ -7749,6 +7749,8 @@ function renderCommissionistRows() {
   const selectedBase = selectedRows.reduce((sum, row) => sum + Number(row.base || 0), 0);
   const selectedCommission = selectedRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
   const invoiceTotal = invoiceRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
+  const operationTotals = commissionistRowsSplitTotals(operationListRows, percent);
+  const selectedTotals = commissionistRowsSplitTotals(selectedRows, percent);
   const page = pageItems(operationListRows || [], state.commissionistPage);
   state.commissionistPage = page.current;
   if ($("#commissionist-invoice-summary")) {
@@ -7764,15 +7766,15 @@ function renderCommissionistRows() {
             <td><input type="checkbox" data-commissionist-invoice-row="${escapeHtml(row.id)}" ${row.invoiceSelected ? "checked" : ""}></td>
             <td>${escapeHtml(row.fecha || "-")}</td>
             <td>${escapeHtml(row.comprobante || "-")}</td>
-            <td>${escapeHtml([row.clienteLiquidado || row.vendedor, row.contraparteOperacion || row.comprador].filter(Boolean).join(" / ") || "-")}</td>
+            <td>${escapeHtml([row.clienteLiquidado || row.vendedor, commissionistRowKindLabel(row), row.contraparteOperacion || row.comprador].filter(Boolean).join(" / ") || "-")}</td>
             <td>${moneyValue(commission)}</td>
           </tr>`;
         }).join("")
       : `<tr><td colspan="5">Sin comisiones de cuenta corriente listas para facturar.</td></tr>`;
   }
   $("#commissionist-summary").textContent = selectedRows.length
-    ? `${selectedRows.length} item/s - importe bruto ${moneyValue(selectedBase)} - comision ${moneyValue(selectedCommission)}`
-    : operationListRows.length ? "Seleccione operaciones para liquidar." : "Sin operaciones pendientes para generar.";
+    ? `${selectedRows.length} item/s - base ${moneyValue(selectedBase)} - facturado ${moneyValue(selectedTotals.facturado)} - efectivo ${moneyValue(selectedTotals.efectivo)} - total ${moneyValue(selectedCommission)}`
+    : operationListRows.length ? `Pendiente: facturado ${moneyValue(operationTotals.facturado)} - efectivo ${moneyValue(operationTotals.efectivo)} - total ${moneyValue(operationTotals.total)}` : "Sin operaciones pendientes para generar.";
   $("#commissionist-body").innerHTML = page.total
     ? page.items.map((row) => {
         const commission = commissionistRowCommission(row, percent);
@@ -7785,12 +7787,33 @@ function renderCommissionistRows() {
           <td>${escapeHtml(row.liquidoA || "-")}</td>
           <td>${escapeHtml(row.clienteLiquidado || row.vendedor || "-")}</td>
           <td>${escapeHtml(row.contraparteOperacion || row.comprador || "-")}</td>
+          <td>${escapeHtml(commissionistRowKindLabel(row))}</td>
           <td>${escapeHtml(row.comprobante || "-")}</td>
           <td>${moneyValue(commission)}${row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="10">Sin operaciones o movimientos externos pendientes para generar en este periodo.</td></tr>`;
+    : `<tr><td colspan="11">Sin operaciones o movimientos externos pendientes para generar en este periodo.</td></tr>`;
   renderPagination("#commissionist-pagination", page, "commissionist");
+}
+
+function commissionistRowKind(row) {
+  if (row?.commissionKind) return row.commissionKind;
+  const text = normalizeSearch(`${row?.contraparteOperacion || ""} ${row?.comprador || ""} ${row?.comprobante || ""} ${row?.detalle || ""}`);
+  return text.includes("efectivo") ? "efectivo" : "facturado";
+}
+
+function commissionistRowKindLabel(row) {
+  return commissionistRowKind(row) === "efectivo" ? "Sobre efectivo" : "Sobre facturado";
+}
+
+function commissionistRowsSplitTotals(rows, fallbackPercent) {
+  return (rows || []).reduce((totals, row) => {
+    const amount = commissionistRowCommission(row, fallbackPercent);
+    if (commissionistRowKind(row) === "efectivo") totals.efectivo += amount;
+    else totals.facturado += amount;
+    totals.total += amount;
+    return totals;
+  }, { facturado: 0, efectivo: 0, total: 0 });
 }
 
 function commissionistRowCommission(row, fallbackPercent) {
@@ -7900,6 +7923,7 @@ async function loadCommissionistOperations() {
       base: Number(movement.baseComision || 0) || Math.abs(Number(movement.importe || 0)),
       porcentaje: Number(movement.porcComision || 0),
       comisionManual: Number(movement.importeComision || 0),
+      commissionKind: commissionKind(movement),
       selected: true
     }))
     .filter((row) => Number(row.base || 0) > 0);
