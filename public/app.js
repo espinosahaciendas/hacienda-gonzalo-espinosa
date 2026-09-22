@@ -5330,6 +5330,9 @@ function renderClientCommissionInvoicePanel(rows) {
 
 function currentAccountConceptText(movement, viewMode) {
   const invoiceSuffix = movement.facturaComision ? ` | Factura comision: ${movement.facturaComision}` : "";
+  if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) {
+    return `Operacion origen de comision - ${movement.concepto || "-"}${movement.baseComision ? ` - Base ${moneyValue(movement.baseComision)}` : ""}${movement.porcComision ? ` - ${plainNumberValue(movement.porcComision)}%` : ""}`;
+  }
   if (viewMode !== "CONSIGNATARIA") return `${movement.concepto || "-"}${invoiceSuffix}`;
   if (isConsigneeOwnCharge(movement)) {
     return `Comision / diferencia pendiente de Gonzalo Espinosa${movement.contraparte ? ` - por ${movement.contraparte}` : ""}${invoiceSuffix}`;
@@ -5361,12 +5364,71 @@ function isCommissionistClientName(name) {
 }
 
 function movementCommissionistAccountKey(movement) {
+  const directCommissionist = normalizeSearch(movement.comisionista || "");
+  if (directCommissionist) return directCommissionist;
   const detail = commissionistDetailFromObservation(movement.observacion);
   const detailCommissionist = normalizeSearch(detail?.comisionista || "");
   if (detailCommissionist) return detailCommissionist;
   if (normalizeSearch(movement.concepto).includes("comisionista")) return normalizeSearch(movement.cliente);
   if (movement.paymentId && isCommissionistClientName(movement.cliente)) return normalizeSearch(movement.cliente);
   return "";
+}
+
+function isCommissionistSourceOperation(movement) {
+  return Boolean(normalizeSearch(movement?.comisionista || ""))
+    && String(movement?.origen || "").toUpperCase() === "EXTERNO"
+    && !commissionistDetailFromObservation(movement?.observacion)
+    && !normalizeSearch(movement?.concepto || "").includes("comisionista");
+}
+
+function isCommissionistSourceLiquidated(movement) {
+  if (!isCommissionistSourceOperation(movement)) return false;
+  const key = normalizeSearch(movement.comisionista || "");
+  const id = String(movement.id || "");
+  const receiptKey = [
+    normalizeSearch(movement.comprobante || ""),
+    normalizeSearch(movement.cliente || ""),
+    normalizeSearch(movement.fecha || movement.vencimiento || "")
+  ].join("|");
+  return (state.cuenta?.movimientos || []).some((candidate) => {
+    const detail = commissionistDetailFromObservation(candidate.observacion);
+    if (!detail || normalizeSearch(detail.comisionista || "") !== key) return false;
+    return (Array.isArray(detail.items) ? detail.items : []).some((item) => {
+      if (String(item.id || "") === id) return true;
+      const itemReceiptKey = [
+        normalizeSearch(item.comprobante || ""),
+        normalizeSearch(item.vendedor || ""),
+        normalizeSearch(item.fecha || "")
+      ].join("|");
+      return itemReceiptKey === receiptKey;
+    });
+  });
+}
+
+function currentAccountMovementStatusForDisplay(movement, viewMode) {
+  if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) {
+    return isCommissionistSourceLiquidated(movement) ? "Comision liquidada" : "Pendiente de liquidar";
+  }
+  return movement.estado || "-";
+}
+
+function currentAccountMovementStatusFilterValue(movement, viewMode) {
+  if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) {
+    return isCommissionistSourceLiquidated(movement) ? "IMPUTADO" : "PENDIENTE";
+  }
+  return String(movement.estado || "").toUpperCase();
+}
+
+function currentAccountBalanceMovements(movements, viewMode) {
+  if (viewMode === "CONSIGNATARIA") {
+    return (movements || [])
+      .filter((movement) => !movement.facturaComisionId && !movement.facturaComision)
+      .filter((movement) => isConsigneeOwnCharge(movement) || movementCommissionistAccountKey(movement));
+  }
+  if (viewMode === "COMISIONISTA") {
+    return (movements || []).filter((movement) => !isCommissionistSourceOperation(movement));
+  }
+  return movements || [];
 }
 
 function matchesCurrentAccountClientSearch(movement, words, exactClient = "") {
@@ -5390,7 +5452,7 @@ function matchesCurrentAccountCommissionistSearch(movement, words, exactCommissi
   if (exactCommissionist) return commissionist === exactCommissionist;
   if (!words.length) return Boolean(commissionist);
   const detail = commissionistDetailFromObservation(movement.observacion);
-  const haystack = normalizeSearch(`${detail?.comisionista || ""} ${movement.cliente || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
+  const haystack = normalizeSearch(`${detail?.comisionista || ""} ${movement.comisionista || ""} ${movement.cliente || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
   return words.every((word) => haystack.includes(word));
 }
 
@@ -5615,24 +5677,26 @@ function renderCuentaCorriente() {
         ? matchesCurrentAccountCommissionistSearch(movement, words, exactCommissionist)
         : matchesCurrentAccountClientSearch(movement, words, exactClient);
     if (!matchesEntity) return false;
-    if (statusFilter !== "TODOS" && String(movement.estado || "").toUpperCase() !== statusFilter) return false;
+    if (statusFilter !== "TODOS" && currentAccountMovementStatusFilterValue(movement, viewMode) !== statusFilter) return false;
     if (conceptFilter === "COMISION" && (!isCommissionPendingMovement(movement, viewMode) || String(movement.estado || "").toUpperCase() === "IMPUTADO")) return false;
     if (!matchesCurrentAccountOperationType(movement, operationTypeFilter)) return false;
     if (!matchesCurrentAccountKeyword(movement, keywordWords)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
-  const balance = viewMode === "CONSIGNATARIA"
-    ? movements
-      .filter((movement) => !movement.facturaComisionId && !movement.facturaComision)
-      .filter((movement) => isConsigneeOwnCharge(movement) || movementCommissionistAccountKey(movement))
-      .reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
-    : movements.reduce((sum, movement) => sum + Number(movement.importe || 0), 0);
+  const balanceMovements = currentAccountBalanceMovements(movements, viewMode);
+  const balance = viewMode === "CONSIGNATARIA" || viewMode === "COMISIONISTA"
+    ? balanceMovements.reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
+    : balanceMovements.reduce((sum, movement) => sum + Number(movement.importe || 0), 0);
   const selectedClient = words.length ? $("#cc-client-search").value.trim() : (viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : viewMode === "COMISIONISTA" ? "Todos los comisionistas" : "Todos");
 
   $("#cc-selected-client").textContent = selectedClient || "Todos";
   const balanceLabel = document.querySelector("#cc-selected-balance")?.previousElementSibling;
-  if (balanceLabel) balanceLabel.textContent = viewMode === "CONSIGNATARIA" ? "Comisiones pendientes" : "Saldo";
+  if (balanceLabel) balanceLabel.textContent = viewMode === "CONSIGNATARIA"
+    ? "Comisiones pendientes"
+    : viewMode === "COMISIONISTA"
+      ? "Saldo comisionista"
+      : "Saldo";
   $("#cc-selected-balance").textContent = moneyValue(balance);
   $("#cc-selected-balance").className = amountClass(balance);
   $("#cc-selected-count").textContent = movements.length;
@@ -5692,7 +5756,7 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.comprobante || "-")}</td>
           <td>${escapeHtml(movement.operacion || "-")}</td>
           <td class="${amountDisplay.className}">${amountDisplay.text}</td>
-          <td>${escapeHtml(movement.estado || "-")}</td>
+          <td>${escapeHtml(currentAccountMovementStatusForDisplay(movement, viewMode))}</td>
           <td>${quickAction}${quickAction && baseActions ? " " : ""}${baseActions}${documentActionButtons(movement)}</td>
         </tr>
         ${compensationSummaryTableRow(payment, 9)}
@@ -5704,6 +5768,7 @@ function renderCuentaCorriente() {
   const due = (state.cuenta.vencimientos || []).filter((movement) => {
     if (Math.abs(signedPendingAmount(movement)) <= 0.01) return false;
     if (movement.paymentId) return false;
+    if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) return false;
     const matchesEntity = viewMode === "CONSIGNATARIA"
       ? matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee)
       : viewMode === "COMISIONISTA"
@@ -6506,6 +6571,15 @@ function compensationSummaryTableRow(payment, colspan) {
 }
 
 function currentAccountMovementAmountForDisplay(movement, payment) {
+  const viewMode = $("#cc-view-mode")?.value || "CLIENTE";
+  if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) {
+    const commission = Math.abs(Number(movement.importeComision || 0));
+    return {
+      value: commission,
+      text: commission ? `${moneyValue(commission)} comision` : "-",
+      className: commission ? "amount-positive" : ""
+    };
+  }
   const raw = Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
   if (payment?.tipo !== "COMPENSACION") {
     return { value: raw, text: moneyValue(raw), className: amountClass(raw) };
@@ -6520,6 +6594,10 @@ function currentAccountMovementAmountForDisplay(movement, payment) {
 }
 
 function currentAccountMovementConceptForDisplay(movement, payment) {
+  const viewMode = $("#cc-view-mode")?.value || "CLIENTE";
+  if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) {
+    return `Operacion origen de comision - ${movement.concepto || "-"}${movement.baseComision ? ` - Base ${moneyValue(movement.baseComision)}` : ""}${movement.porcComision ? ` - ${plainNumberValue(movement.porcComision)}%` : ""}`;
+  }
   if (payment?.tipo !== "COMPENSACION") return currentAccountDueDetailText(movement);
   const summary = compensationSummary(payment);
   const method = payment.medio ? ` - ${payment.medio}` : "";
@@ -6721,7 +6799,7 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
     && (filters.conceptFilter !== "COMISION" || isCommissionPendingMovement(movement, filters.viewMode))
     && matchesCurrentAccountOperationType(movement, filters.operationTypeFilter)
     && matchesCurrentAccountKeyword(movement, filters.keywordWords || [])
-    && (!includeStatusFilter || filters.statusFilter === "TODOS" || String(movement.estado || "").toUpperCase() === filters.statusFilter)
+    && (!includeStatusFilter || filters.statusFilter === "TODOS" || currentAccountMovementStatusFilterValue(movement, filters.viewMode) === filters.statusFilter)
     && matchesCurrentAccountDateRange(movement, filters.dateFrom, filters.dateTo)
     && (!includeDueFilter || matchesCurrentAccountDueFilter(movement, filters.dueFilter));
 }
@@ -6774,9 +6852,10 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
   return rows.map((movement) => {
     const isPayment = Boolean(movement.paymentId);
     const payment = isPayment ? (state.cuenta.pagos || []).find((item) => item.id === movement.paymentId) : null;
+    const commissionistReference = viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
     const original = Number(movement.importe || 0);
-    const imputed = isPayment ? null : Math.sign(original) * Number(movement.importeImputado || 0);
-    const pending = isPayment ? null : Math.sign(original) * Number(movement.importePendiente ?? Math.abs(original));
+    const imputed = isPayment || commissionistReference ? null : Math.sign(original) * Number(movement.importeImputado || 0);
+    const pending = isPayment || commissionistReference ? null : Math.sign(original) * Number(movement.importePendiente ?? Math.abs(original));
     const amountDisplay = currentAccountMovementAmountForDisplay(movement, payment);
     const conceptDisplay = payment?.tipo === "COMPENSACION"
       ? currentAccountMovementConceptForDisplay(movement, payment)
@@ -6803,7 +6882,7 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
       <td class="amount ${amountDisplay.value < 0 ? "negative" : "positive"}">${amountDisplay.text}</td>
       <td class="amount">${imputed === null ? "-" : moneyValue(imputed)}</td>
       <td class="amount ${pending !== null && pending < 0 ? "negative" : "positive"}">${pending === null ? "-" : moneyValue(pending)}</td>
-      <td class="status">${escapeHtml(movement.estado || "-")}</td>
+      <td class="status">${escapeHtml(currentAccountMovementStatusForDisplay(movement, viewMode))}</td>
     </tr>${compensationSummaryTableRow(payment, 10)}${commissionistDetailReportRow(commissionistDetailFromObservation(movement.observacion))}${allocationRows}`;
   }).join("");
 }
@@ -6855,14 +6934,15 @@ function printCurrentAccountReport(forcedType = "") {
       const dateB = parseDisplayDate(type === "SALDOS" ? b.fecha : b.vencimiento)?.getTime() || 0;
       return dateA - dateB;
     });
-  const pendingBalance = rows.filter((movement) => !movement.paymentId)
+  const reportBalanceRows = currentAccountBalanceMovements(rows, filters.viewMode);
+  const pendingBalance = reportBalanceRows.filter((movement) => !movement.paymentId)
     .reduce((sum, movement) => sum + Math.sign(movement.importe) * Number(movement.importePendiente ?? Math.abs(movement.importe)), 0);
   const accountBalance = filters.viewMode === "CONSIGNATARIA"
-    ? rows
-      .filter((movement) => isConsigneeOwnCharge(movement) || movementCommissionistAccountKey(movement))
-      .reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
+    ? reportBalanceRows.reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
+    : filters.viewMode === "COMISIONISTA"
+      ? reportBalanceRows.reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
     : pendingBalance;
-  const applied = rows.filter((movement) => !movement.paymentId)
+  const applied = reportBalanceRows.filter((movement) => !movement.paymentId)
     .reduce((sum, movement) => sum + Number(movement.importeImputado || 0), 0);
   const imputationsByMovement = currentAccountImputationsByMovement();
   const balances = new Map();
@@ -7025,6 +7105,7 @@ function printCurrentAccountDueReport(options = {}) {
     .filter((movement) => !movement.paymentId && movement.estado !== "IMPUTADO")
     .filter((movement) => Math.abs(signedPendingAmount(movement)) > 0.01)
     .filter((movement) => String(movement.origen || "").toUpperCase() !== "COMISION")
+    .filter((movement) => filters.viewMode !== "COMISIONISTA" || !isCommissionistSourceOperation(movement))
     .filter((movement) => matchesCurrentAccountReportFilters(movement, baseFilters, true, filters.statusFilter !== "TODOS"))
     .filter((movement) => dueDateInRange(movement, effectiveFilters.dateFrom, effectiveFilters.dateTo))
     .sort((a, b) => {
@@ -7531,7 +7612,11 @@ function liquidatedCommissionistExternalReceipts(commissionist) {
     if (!detail || normalizeSearch(detail.comisionista) !== key) return;
     (Array.isArray(detail.items) ? detail.items : []).forEach((item) => {
       if (normalizeSearch(item.origen || "") === "movimiento externo" && item.comprobante) {
-        receipts.add(normalizeSearch(item.comprobante));
+        receipts.add([
+          normalizeSearch(item.comprobante),
+          normalizeSearch(item.vendedor || ""),
+          normalizeSearch(item.fecha || "")
+        ].join("|"));
       }
     });
   });
@@ -7769,7 +7854,11 @@ async function loadCommissionistOperations() {
     .filter((movement) => String(movement.tipoDesglose || "").toUpperCase() !== "IVA_FISCAL")
     .filter((movement) => normalizeSearch(movement.comisionista) === normalizeSearch(selectedCommissionist))
     .filter((movement) => !alreadyLiquidatedIds.has(String(movement.id)))
-    .filter((movement) => !alreadyLiquidatedExternalReceipts.has(normalizeSearch(movement.comprobante || "")))
+    .filter((movement) => !alreadyLiquidatedExternalReceipts.has([
+      normalizeSearch(movement.comprobante || ""),
+      normalizeSearch(movement.cliente || ""),
+      normalizeSearch(movement.fecha || movement.vencimiento || "")
+    ].join("|")))
     .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
     .map((movement) => ({
       id: movement.id,
