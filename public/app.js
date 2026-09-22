@@ -7549,22 +7549,41 @@ function renderCommissionistRows() {
   const percent = percentValue("#commissionist-percent");
   const selectedRows = state.commissionistRows.filter((row) => row.selected && !row.noGenerate);
   const invoiceRows = state.commissionistRows.filter((row) => row.invoiceSelected && row.invoiceCandidate);
+  const invoiceCandidateRows = state.commissionistRows.filter((row) => row.invoiceCandidate);
+  const operationListRows = state.commissionistRows.filter((row) => !row.noGenerate);
   const selectedBase = selectedRows.reduce((sum, row) => sum + Number(row.base || 0), 0);
   const selectedCommission = selectedRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
   const invoiceTotal = invoiceRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
-  const page = pageItems(state.commissionistRows || [], state.commissionistPage);
+  const page = pageItems(operationListRows || [], state.commissionistPage);
   state.commissionistPage = page.current;
+  if ($("#commissionist-invoice-summary")) {
+    $("#commissionist-invoice-summary").textContent = invoiceCandidateRows.length
+      ? `${invoiceRows.length}/${invoiceCandidateRows.length} seleccionada/s - ${moneyValue(invoiceTotal)}`
+      : "Sin comisiones listas para facturar";
+  }
+  if ($("#commissionist-invoice-body")) {
+    $("#commissionist-invoice-body").innerHTML = invoiceCandidateRows.length
+      ? invoiceCandidateRows.map((row) => {
+          const commission = commissionistRowCommission(row, percent);
+          return `<tr>
+            <td><input type="checkbox" data-commissionist-invoice-row="${escapeHtml(row.id)}" ${row.invoiceSelected ? "checked" : ""}></td>
+            <td>${escapeHtml(row.fecha || "-")}</td>
+            <td>${escapeHtml(row.comprobante || "-")}</td>
+            <td>${escapeHtml([row.clienteLiquidado || row.vendedor, row.contraparteOperacion || row.comprador].filter(Boolean).join(" / ") || "-")}</td>
+            <td>${moneyValue(commission)}</td>
+          </tr>`;
+        }).join("")
+      : `<tr><td colspan="5">Sin comisiones de cuenta corriente listas para facturar.</td></tr>`;
+  }
   $("#commissionist-summary").textContent = selectedRows.length
     ? `${selectedRows.length} item/s - importe bruto ${moneyValue(selectedBase)} - comision ${moneyValue(selectedCommission)}`
-    : invoiceRows.length
-      ? `${invoiceRows.length} comision/es listas para facturar - total ${moneyValue(invoiceTotal)}`
-      : state.commissionistRows.length ? "Seleccione operaciones para liquidar o facturar." : "Sin operaciones seleccionadas";
+    : operationListRows.length ? "Seleccione operaciones para liquidar." : "Sin operaciones pendientes para generar.";
   $("#commissionist-body").innerHTML = page.total
     ? page.items.map((row) => {
         const commission = commissionistRowCommission(row, percent);
         return `<tr>
           <td><input type="checkbox" data-commissionist-row="${escapeHtml(row.id)}" ${row.selected ? "checked" : ""} ${row.noGenerate ? "disabled" : ""}></td>
-          <td><input type="checkbox" data-commissionist-invoice-row="${escapeHtml(row.id)}" ${row.invoiceSelected ? "checked" : ""} ${row.invoiceCandidate ? "" : "disabled"}></td>
+          <td>-</td>
           <td>${escapeHtml(row.fecha || "-")}</td>
           <td>${escapeHtml(row.operacion || row.id)}</td>
           <td>${escapeHtml(row.cuenta || row.vendedor || "-")}</td>
@@ -7575,7 +7594,7 @@ function renderCommissionistRows() {
           <td>${moneyValue(commission)}${row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="10">Busque operaciones y movimientos externos por periodo.</td></tr>`;
+    : `<tr><td colspan="10">Sin operaciones o movimientos externos pendientes para generar en este periodo.</td></tr>`;
   renderPagination("#commissionist-pagination", page, "commissionist");
 }
 
@@ -7583,6 +7602,21 @@ function commissionistRowCommission(row, fallbackPercent) {
   if (Number(row.comisionManual || 0)) return Number(row.comisionManual || 0);
   const percent = Number(row.porcentaje || fallbackPercent || 0);
   return Number(row.base || 0) * percent / 100;
+}
+
+function handleCommissionistSelectionChange(event) {
+  const checkbox = event.target.closest("[data-commissionist-row]");
+  const invoiceCheckbox = event.target.closest("[data-commissionist-invoice-row]");
+  if (!checkbox && !invoiceCheckbox) return;
+  if (checkbox) {
+    const row = state.commissionistRows.find((item) => String(item.id) === String(checkbox.dataset.commissionistRow));
+    if (row && !row.noGenerate) row.selected = checkbox.checked;
+  }
+  if (invoiceCheckbox) {
+    const row = state.commissionistRows.find((item) => String(item.id) === String(invoiceCheckbox.dataset.commissionistInvoiceRow));
+    if (row && row.invoiceCandidate) row.invoiceSelected = invoiceCheckbox.checked;
+  }
+  renderCommissionistRows();
 }
 
 async function loadCommissionistOperations() {
@@ -10489,20 +10523,8 @@ async function init() {
   $("#commissionist-percent").addEventListener("input", renderCommissionistRows);
   $("#commissionist-client").addEventListener("input", renderCommissionistStatus);
   $("#commissionist-client").addEventListener("change", renderCommissionistStatus);
-  $("#commissionist-body").addEventListener("change", (event) => {
-    const checkbox = event.target.closest("[data-commissionist-row]");
-    const invoiceCheckbox = event.target.closest("[data-commissionist-invoice-row]");
-    if (!checkbox && !invoiceCheckbox) return;
-    if (checkbox) {
-      const row = state.commissionistRows.find((item) => String(item.id) === String(checkbox.dataset.commissionistRow));
-      if (row && !row.noGenerate) row.selected = checkbox.checked;
-    }
-    if (invoiceCheckbox) {
-      const row = state.commissionistRows.find((item) => String(item.id) === String(invoiceCheckbox.dataset.commissionistInvoiceRow));
-      if (row && row.invoiceCandidate) row.invoiceSelected = invoiceCheckbox.checked;
-    }
-    renderCommissionistRows();
-  });
+  $("#commissionist-body").addEventListener("change", handleCommissionistSelectionChange);
+  $("#commissionist-invoice-body").addEventListener("change", handleCommissionistSelectionChange);
 
   $("#client-search").addEventListener("input", renderClientes);
   $("#client-show-all").addEventListener("click", () => {

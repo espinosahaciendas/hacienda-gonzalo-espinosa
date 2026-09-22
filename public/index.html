@@ -2678,11 +2678,26 @@
               <h2>Facturar comisiones del periodo</h2>
               <p class="subtle">Asocia una factura emitida a comisiones pendientes ya creadas. No genera deuda nueva.</p>
             </div>
+            <span class="subtle" id="commissionist-invoice-summary">Sin comisiones listas para facturar</span>
           </div>
           <div class="form-grid">
             <label>Numero de factura emitida<input id="commissionist-invoice-number" placeholder="Ej. F A-0001-00000012"></label>
             <label>Fecha factura<input id="commissionist-invoice-date" type="date"></label>
             <label class="span-2">Observacion<input id="commissionist-invoice-note" placeholder="Periodo, detalle interno o referencia"></label>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Facturar</th>
+                  <th>Fecha</th>
+                  <th>Comprobante</th>
+                  <th>Cliente / detalle</th>
+                  <th>Total pendiente</th>
+                </tr>
+              </thead>
+              <tbody id="commissionist-invoice-body"></tbody>
+            </table>
           </div>
           <div class="form-actions">
             <button type="button" class="primary-button" id="commissionist-invoice-generate">Registrar factura de comisiones</button>
