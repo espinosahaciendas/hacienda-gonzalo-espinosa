@@ -448,6 +448,19 @@ function sameExternalMovementAccounting(currentItems, nextItems) {
   });
 }
 
+function externalMovementItemsForImputedUpdate(input, baseId, currentItems) {
+  const primary = currentItems.find((item) => normalizeKey(item.tipoDesglose) !== "IVA_FISCAL") || currentItems[0] || {};
+  return buildExternalMovementItems({
+    ...input,
+    cliente: input.cliente || primary.cliente,
+    direccion: input.direccion || primary.direccion,
+    concepto: input.concepto || primary.concepto,
+    comprobante: input.comprobante || primary.comprobante,
+    fechaVenta: input.fechaVenta || primary.fechaVenta,
+    vencimiento: input.vencimiento || primary.vencimiento
+  }, baseId);
+}
+
 function mergeExternalMovementCommissionFields(currentItems, nextItems) {
   const nextById = new Map(nextItems.map((item) => [normalizeText(item.id), item]));
   return currentItems.map((item) => {
@@ -3108,9 +3121,11 @@ class BackupDataSource {
       .filter((payment) => !payment.anulado)
       .some((payment) => asArray(payment.imputaciones)
         .some((item) => groupIds.includes(String(item.movementId || item.rowId || ""))));
-    const savedItems = buildExternalMovementItems(input, baseId);
+    const currentItems = movements.filter((item) => externalMovementBaseId(item.id) === baseId);
+    const savedItems = hasActiveImputation
+      ? externalMovementItemsForImputedUpdate(input, baseId, currentItems)
+      : buildExternalMovementItems(input, baseId);
     if (hasActiveImputation) {
-      const currentItems = movements.filter((item) => externalMovementBaseId(item.id) === baseId);
       if (!sameExternalMovementAccounting(currentItems, savedItems)) {
         const error = new Error("Este movimiento ya tiene imputaciones activas. Solo se puede corregir comisionista, base, porcentaje o importe de comision. Para cambiar importes, cliente o vencimientos, anula primero el pago/cobro asociado.");
         error.statusCode = 409;
