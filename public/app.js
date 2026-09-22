@@ -7417,11 +7417,27 @@ function operationCommissionistKey(detail) {
   );
 }
 
+function operationHasConsigneeCommission(detail = {}) {
+  const draft = detail.draftData || {};
+  const liq = detail.liquidacion || draft.liquidacion || {};
+  return [
+    draft.porcComisionConsignataria,
+    draft.comisionConsignataria,
+    draft.ajusteConsignataria,
+    draft.totalCobrarConsignataria,
+    liq.porcComisionConsignataria,
+    liq.comisionConsignataria,
+    liq.ajusteConsignataria,
+    liq.totalCobrarConsignataria
+  ].some((value) => Math.abs(parseMoneyInput(value)) > 0.01);
+}
+
 function operationCommissionistKeys(detail) {
-  return Array.from(new Set([
-    operationCommissionistKey(detail),
-    normalizeSearch(detail.consignataria || detail.draftData?.consignataria || "")
-  ].filter(Boolean)));
+  const keys = [operationCommissionistKey(detail)];
+  if (operationHasConsigneeCommission(detail)) {
+    keys.push(normalizeSearch(detail.consignataria || detail.draftData?.consignataria || ""));
+  }
+  return Array.from(new Set(keys.filter(Boolean)));
 }
 
 function liquidatedCommissionistItemIds(commissionist) {
