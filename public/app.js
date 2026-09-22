@@ -6602,6 +6602,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   const discountTotal = discountImputations.reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const instrumentTotal = instruments.reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const controlNet = paidTotal - discountTotal;
+  const balanceCredit = Math.abs(Number(payment.saldoFavor || 0));
   const compensation = compensationSummary(payment);
   const receiptKind = payment.tipo === "COMPENSACION" ? "Compensacion" : payment.tipo === "PAGO" ? "Pago" : "Cobro";
   const receiptTitle = safePdfTitle(payment.id, receiptKind, payment.cliente, payment.fecha);
@@ -6673,6 +6674,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
     <div><span>${payment.tipo === "COMPENSACION" ? "Saldo disponible cobrado por fuera" : payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
     <div><span>${payment.tipo === "COMPENSACION" ? "Liquidacion aplicada" : "Vencimientos aplicados"}</span><strong>${moneyValue(paidTotal)}</strong></div>
     <div><span>Descuentos / gastos / comisiones</span><strong>${moneyValue(discountTotal)}</strong></div>
+    ${balanceCredit ? `<div><span>Saldo a favor / anticipo</span><strong>${moneyValue(balanceCredit)}</strong></div>` : ""}
     <div><span>${payment.tipo === "COMPENSACION" ? compensation?.label || "Saldo resultante informado" : "Control neto"}</span><strong>${moneyValue(payment.tipo === "COMPENSACION" ? Math.abs(compensation?.runningBalance ?? compensation?.saldo ?? controlNet) : controlNet)}</strong></div>
   </div>
   ${payment.tipo === "COMPENSACION" ? `<p><strong>Nota:</strong> La venta/liquidacion fue cobrada directamente por el cliente o aplicada por fuera. Este comprobante deja constancia de que esos gastos se pagan con plata disponible de esa venta; no representa un pago realizado por Gonzalo Espinosa ni plata adicional puesta por el cliente.</p>` : `<h2>Detalle de instrumentos</h2><table><thead>${instrumentHeader}</thead><tbody>${instrumentRows}</tbody></table>`}
@@ -7407,6 +7409,14 @@ async function saveCurrentAccountPayment(printReceipt = false) {
       ? compensationAppliedSignedTotal(selectedRows)
       : selectedRows.reduce((sum, row) => sum + Number(row.signedPending || 0), 0);
     const compensationOrigin = paymentType === "COMPENSACION" ? selectedCompensationOrigin() : null;
+    const balanceCredit = confirmCurrentAccountPaymentDifference(amount, selectedRows, paymentType);
+    if (balanceCredit === null) return;
+    let counterpartyBalanceCredit = 0;
+    if ($("#cc-counterparty-enabled").checked) {
+      const counterpartyRows = selectedCurrentAccountImputationRows("[data-cc-counterparty-impute]:checked");
+      counterpartyBalanceCredit = confirmCurrentAccountPaymentDifference(amount, counterpartyRows, $("#cc-counterparty-type").value);
+      if (counterpartyBalanceCredit === null) return;
+    }
     const response = await fetchJson("/api/cuenta-corriente/pagos-cobros", {
       method: "POST",
       body: JSON.stringify({
@@ -7418,6 +7428,7 @@ async function saveCurrentAccountPayment(printReceipt = false) {
         medio: $("#cc-payment-method").value,
         referencia: $("#cc-payment-reference").value,
         observacion: $("#cc-payment-notes").value,
+        saldoFavor: balanceCredit,
         compensationOriginId: compensationOrigin?.id,
         compensationOriginLabel: compensationOrigin?.label,
         instrumentos: currentPaymentInstruments,
@@ -7425,6 +7436,7 @@ async function saveCurrentAccountPayment(printReceipt = false) {
         contrapartida: $("#cc-counterparty-enabled").checked ? {
           tipo: $("#cc-counterparty-type").value,
           cliente: $("#cc-counterparty-client").value,
+          saldoFavor: counterpartyBalanceCredit,
           imputaciones: collectSelectedCurrentAccountImputations("[data-cc-counterparty-impute]:checked", amount, $("#cc-counterparty-type").value)
         } : null
       })
@@ -8004,6 +8016,39 @@ function collectSelectedCurrentAccountImputations(selector, availableAmount, pay
   }
   let remaining = Math.abs(Number(availableAmount || 0));
   return allocateCurrentAccountRows(rows, remaining);
+}
+
+function currentAccountSelectedImputationLimit(rows, paymentType = "") {
+  if (paymentType === "COMPENSACION") return Math.abs(compensationAppliedSignedTotal(rows));
+  const hasPositive = rows.some((item) => item.signedPending > 0);
+  const hasNegative = rows.some((item) => item.signedPending < 0);
+  const discountOnly = paymentType === "PAGO" && $("#cc-discount-only")?.checked;
+  if (hasPositive && hasNegative) {
+    if (discountOnly) {
+      return rows
+        .filter((item) => item.signedPending > 0)
+        .reduce((sum, item) => sum + Number(item.pending || 0), 0);
+    }
+    return Math.abs(rows.reduce((sum, item) => sum + Number(item.signedPending || 0), 0));
+  }
+  return rows.reduce((sum, item) => sum + Number(item.pending || 0), 0);
+}
+
+function currentAccountPaymentDifference(amount, rows, paymentType = "") {
+  if (!rows.length || paymentType === "COMPENSACION") return 0;
+  const limit = currentAccountSelectedImputationLimit(rows, paymentType);
+  if (Number(amount || 0) > limit + 0.01) {
+    return Math.round((Number(amount || 0) - limit) * 100) / 100;
+  }
+  return 0;
+}
+
+function confirmCurrentAccountPaymentDifference(amount, rows, paymentType = "") {
+  const difference = currentAccountPaymentDifference(amount, rows, paymentType);
+  if (difference <= 0.01) return 0;
+  const confirmed = window.confirm(`El importe cargado (${moneyValue(amount)}) supera lo seleccionado para imputar por ${moneyValue(difference)}.\n\nSi continua, esa diferencia quedara marcada como saldo a favor / anticipo en la cuenta. ¿Guardar de todos modos?`);
+  if (!confirmed) return null;
+  return difference;
 }
 
 function renderClientes() {
