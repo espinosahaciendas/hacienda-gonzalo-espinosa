@@ -423,6 +423,47 @@ function buildExternalMovementItems(input, baseId) {
   }];
 }
 
+function externalMovementAccountingSignature(item) {
+  return {
+    id: normalizeText(item.id),
+    cliente: normalizeKey(item.cliente),
+    direccion: normalizeKey(item.direccion),
+    concepto: normalizeKey(item.concepto),
+    comprobante: normalizeKey(item.comprobante),
+    fechaVenta: formatDateForDisplay(item.fechaVenta),
+    vencimiento: formatDateForDisplay(item.vencimiento),
+    importe: Math.round(Number(item.importe || 0) * 100) / 100,
+    tipoDesglose: normalizeKey(item.tipoDesglose)
+  };
+}
+
+function sameExternalMovementAccounting(currentItems, nextItems) {
+  if (currentItems.length !== nextItems.length) return false;
+  const currentById = new Map(currentItems.map((item) => [normalizeText(item.id), externalMovementAccountingSignature(item)]));
+  return nextItems.every((item) => {
+    const current = currentById.get(normalizeText(item.id));
+    if (!current) return false;
+    const next = externalMovementAccountingSignature(item);
+    return Object.keys(current).every((key) => current[key] === next[key]);
+  });
+}
+
+function mergeExternalMovementCommissionFields(currentItems, nextItems) {
+  const nextById = new Map(nextItems.map((item) => [normalizeText(item.id), item]));
+  return currentItems.map((item) => {
+    const next = nextById.get(normalizeText(item.id));
+    if (!next) return item;
+    return {
+      ...item,
+      comisionista: next.comisionista || "",
+      baseComision: Number(next.baseComision || 0),
+      porcComision: Number(next.porcComision || 0),
+      importeComision: Number(next.importeComision || 0),
+      observacion: next.observacion || item.observacion || ""
+    };
+  });
+}
+
 function pushMovement(list, movement) {
   if (!movement.cliente || (!Number(movement.importe) && movement.estado !== "ANULADO")) return;
   list.push({
@@ -1764,6 +1805,7 @@ class BackupDataSource {
       throw error;
     }
     const cleanRenspa = normalizeText(renspaActual);
+    const newRenspa = normalizeText(input.renspa) || cleanRenspa;
     const establishments = asArray(data.establishments);
     const index = establishments.findIndex((item) => normalizeKey(item.cliente) === normalizeKey(cliente.nombre) && normalizeKey(item.renspa) === normalizeKey(cleanRenspa));
     if (index < 0) {
@@ -1771,15 +1813,44 @@ class BackupDataSource {
       error.statusCode = 404;
       throw error;
     }
+    const duplicate = establishments.find((item, itemIndex) => itemIndex !== index && normalizeKey(item.cliente) === normalizeKey(cliente.nombre) && normalizeKey(item.renspa) === normalizeKey(newRenspa));
+    if (duplicate) {
+      const error = new Error("Ese RENSPA ya esta asociado al cliente.");
+      error.statusCode = 409;
+      throw error;
+    }
     establishments[index] = {
       ...establishments[index],
       nombre: normalizeText(input.nombre) || "Establecimiento",
+      renspa: newRenspa,
       observaciones: normalizeText(input.observaciones),
       actualizadoEn: new Date().toISOString()
     };
     data.establishments = establishments;
     this.saveData(data);
     return establishments[index];
+  }
+
+  async deleteEstablecimiento(clienteId, renspaActual) {
+    const data = this.readData();
+    const clientes = await this.getClientes();
+    const cliente = clientes.find((item) => String(item.id) === String(clienteId));
+    if (!cliente) {
+      const error = new Error("Primero hay que guardar o seleccionar el cliente.");
+      error.statusCode = 404;
+      throw error;
+    }
+    const cleanRenspa = normalizeText(renspaActual);
+    const establishments = asArray(data.establishments);
+    const existing = establishments.find((item) => normalizeKey(item.cliente) === normalizeKey(cliente.nombre) && normalizeKey(item.renspa) === normalizeKey(cleanRenspa));
+    if (!existing) {
+      const error = new Error("No se encontro el RENSPA para dar de baja.");
+      error.statusCode = 404;
+      throw error;
+    }
+    data.establishments = establishments.filter((item) => !(normalizeKey(item.cliente) === normalizeKey(cliente.nombre) && normalizeKey(item.renspa) === normalizeKey(cleanRenspa)));
+    this.saveData(data);
+    return existing;
   }
 
   async ensureEstablecimiento(clienteId, renspa, nombre) {
@@ -3037,12 +3108,20 @@ class BackupDataSource {
       .filter((payment) => !payment.anulado)
       .some((payment) => asArray(payment.imputaciones)
         .some((item) => groupIds.includes(String(item.movementId || item.rowId || ""))));
-    if (hasActiveImputation) {
-      const error = new Error("Este movimiento ya tiene imputaciones activas. Anula primero el pago/cobro asociado y luego corregilo.");
-      error.statusCode = 409;
-      throw error;
-    }
     const savedItems = buildExternalMovementItems(input, baseId);
+    if (hasActiveImputation) {
+      const currentItems = movements.filter((item) => externalMovementBaseId(item.id) === baseId);
+      if (!sameExternalMovementAccounting(currentItems, savedItems)) {
+        const error = new Error("Este movimiento ya tiene imputaciones activas. Solo se puede corregir comisionista, base, porcentaje o importe de comision. Para cambiar importes, cliente o vencimientos, anula primero el pago/cobro asociado.");
+        error.statusCode = 409;
+        throw error;
+      }
+      const updatedItems = mergeExternalMovementCommissionFields(currentItems, savedItems);
+      const updatedById = new Map(updatedItems.map((item) => [String(item.id), item]));
+      data.currentAccountManualMovements = movements.map((item) => updatedById.get(String(item.id)) || item);
+      this.saveData(data);
+      return updatedItems.length === 1 ? updatedItems[0] : { items: updatedItems };
+    }
     data.currentAccountManualMovements = movements
       .filter((item) => externalMovementBaseId(item.id) !== baseId)
       .concat(savedItems);
@@ -3295,6 +3374,7 @@ class PostgresJsonDataSource extends BackupDataSource {
   async getEstablecimientos(clienteId) { return this.withRemoteData(() => super.getEstablecimientos(clienteId)); }
   async saveEstablecimiento(clienteId, input) { return this.withRemoteData(() => super.saveEstablecimiento(clienteId, input), true); }
   async updateEstablecimiento(clienteId, renspaActual, input) { return this.withRemoteData(() => super.updateEstablecimiento(clienteId, renspaActual, input), true); }
+  async deleteEstablecimiento(clienteId, renspaActual) { return this.withRemoteData(() => super.deleteEstablecimiento(clienteId, renspaActual), true); }
   async ensureEstablecimiento(clienteId, renspa, nombre) { return this.withRemoteData(() => super.ensureEstablecimiento(clienteId, renspa, nombre), true); }
   async saveOperacion(input) { return this.withRemoteData(() => super.saveOperacion(input), true); }
   async getCategorias() { return this.withRemoteData(() => super.getCategorias()); }
@@ -3506,16 +3586,48 @@ class PostgresDataSource {
 
   async updateEstablecimiento(clienteId, renspaActual, input) {
     const nombre = normalizeText(input.nombre) || "Establecimiento";
+    const renspa = normalizeText(input.renspa) || normalizeText(renspaActual);
     const observaciones = normalizeText(input.observaciones);
+    const duplicate = await this.query(
+      `SELECT id FROM establecimientos
+       WHERE cliente_id = $1 AND renspa = $2 AND renspa <> $3 AND activo = TRUE
+       LIMIT 1`,
+      [clienteId, renspa, normalizeText(renspaActual)]
+    );
+    if (duplicate.rows.length) {
+      const error = new Error("Ese RENSPA ya esta asociado al cliente.");
+      error.statusCode = 409;
+      throw error;
+    }
     const result = await this.query(
       `UPDATE establecimientos
-       SET nombre = $3, observaciones = $4
+       SET nombre = $3, renspa = $4, observaciones = $5
        WHERE cliente_id = $1 AND renspa = $2 AND activo = TRUE
        RETURNING nombre, renspa, observaciones`,
-      [clienteId, normalizeText(renspaActual), nombre, observaciones || null]
+      [clienteId, normalizeText(renspaActual), nombre, renspa, observaciones || null]
     );
     if (!result.rows.length) {
       const error = new Error("No se encontro el RENSPA para modificar.");
+      error.statusCode = 404;
+      throw error;
+    }
+    return {
+      nombre: result.rows[0].nombre,
+      renspa: result.rows[0].renspa || "",
+      observaciones: result.rows[0].observaciones || ""
+    };
+  }
+
+  async deleteEstablecimiento(clienteId, renspaActual) {
+    const result = await this.query(
+      `UPDATE establecimientos
+       SET activo = FALSE
+       WHERE cliente_id = $1 AND renspa = $2 AND activo = TRUE
+       RETURNING nombre, renspa, observaciones`,
+      [clienteId, normalizeText(renspaActual)]
+    );
+    if (!result.rows.length) {
+      const error = new Error("No se encontro el RENSPA para dar de baja.");
       error.statusCode = 404;
       throw error;
     }
