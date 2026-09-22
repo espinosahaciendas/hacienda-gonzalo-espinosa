@@ -477,6 +477,21 @@ function mergeExternalMovementCommissionFields(currentItems, nextItems) {
   });
 }
 
+function operationHasConsigneeCommission(operation = {}) {
+  const draft = operation.draftData || {};
+  const liquidacion = draft.liquidacion || operation.liquidacion || {};
+  return [
+    draft.porcComisionConsignataria,
+    draft.comisionConsignataria,
+    draft.ajusteConsignataria,
+    draft.totalCobrarConsignataria,
+    liquidacion.porcComisionConsignataria,
+    liquidacion.comisionConsignataria,
+    liquidacion.ajusteConsignataria,
+    liquidacion.totalCobrarConsignataria
+  ].some((value) => Math.abs(parseMoney(value)) > 0.01);
+}
+
 function pushMovement(list, movement) {
   if (!movement.cliente || (!Number(movement.importe) && movement.estado !== "ANULADO")) return;
   list.push({
@@ -2334,14 +2349,16 @@ class BackupDataSource {
         if (to && (!operation._date || operation._date > to)) return false;
         const draft = operation.draftData || {};
         const liquidacion = draft.liquidacion || {};
-        const keys = [
+        const explicitKeys = [
           draft.comisionista,
           draft.comisionistaAsociado,
           draft.comisionistaNombre,
           liquidacion.comisionista,
-          liquidacion.comisionistaAsociado,
-          operation.consignataria
+          liquidacion.comisionistaAsociado
         ].map(normalizeKey).filter(Boolean);
+        const keys = operationHasConsigneeCommission(operation)
+          ? [...explicitKeys, normalizeKey(operation.consignataria)].filter(Boolean)
+          : explicitKeys;
         return keys.includes(commissionistKey);
       })
       .map((operation) => {
