@@ -6033,6 +6033,18 @@ function syncExternalConceptFields() {
   renderExternalDueRows();
 }
 
+function ensureExternalConceptOption(concept) {
+  const select = $("#cc-external-concept");
+  const value = String(concept || "").trim();
+  if (!select || !value) return;
+  const exists = Array.from(select.options).some((option) => option.value === value || option.textContent === value);
+  if (exists) return;
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = value;
+  select.appendChild(option);
+}
+
 function externalDueTargetAmount() {
   if (isExternalMagSale()) {
     return Math.max(numberValue("#cc-external-mag-net") - numberValue("#cc-external-mag-iva"), 0);
@@ -6131,7 +6143,9 @@ function openExternalMovementEdit(movementId) {
   $("#cc-external-message").className = "form-message";
   $("#cc-external-client").value = signSource.cliente || "";
   $("#cc-external-direction").value = Number(signSource.importe || 0) >= 0 ? "COBRAR" : "PAGAR";
-  $("#cc-external-concept").value = isMag ? "Venta MAG" : (movement.concepto || "Otros gastos");
+  const conceptValue = isMag ? "Venta MAG" : (movement.concepto || "Otros gastos");
+  ensureExternalConceptOption(conceptValue);
+  $("#cc-external-concept").value = conceptValue;
   $("#cc-external-receipt").value = signSource.comprobante || "";
   $("#cc-external-date").value = dateToInput(signSource.fecha || "");
   $("#cc-external-due").value = dateToInput(signSource.vencimiento || "");
