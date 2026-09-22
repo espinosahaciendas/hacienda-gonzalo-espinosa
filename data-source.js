@@ -1015,7 +1015,7 @@ function buildAccountData(data) {
       origen: item.tipo || "PAGO/COBRO",
       concepto: item.tipo === "COMPENSACION"
         ? "COMPENSACION / aplicacion de saldo cobrado por fuera"
-        : `${item.tipo || "Movimiento"} - ${item.medio || ""}`.trim(),
+        : `${`${item.tipo || "Movimiento"} - ${item.medio || ""}`.trim()}${Number(item.saldoFavor || 0) > 0.01 ? ` | Saldo a favor / anticipo: ${formatMoney(item.saldoFavor)}` : ""}`,
       comprobante: item.referencia,
       paymentId: item.id,
       importe: item.anulado ? 0 : signedPayment(item),
@@ -3229,6 +3229,7 @@ class BackupDataSource {
       fecha: formatDateForDisplay(input.fecha),
       importe: importeFinal,
       importeFirmado: importeFirmadoFinal,
+      saldoFavor: Math.abs(parseMoney(input.saldoFavor)),
       medio: normalizeText(input.medio || "Transferencia"),
       referencia: normalizeText(input.referencia),
       observacion: normalizeText(input.observacion),
@@ -3255,6 +3256,7 @@ class BackupDataSource {
         id: `${saved.id}-CP`,
         tipo: normalizeKey(counterpartyInput.tipo) === "COBRO" ? "COBRO" : "PAGO",
         cliente: normalizeText(counterpartyInput.cliente),
+        saldoFavor: Math.abs(parseMoney(counterpartyInput.saldoFavor)),
         referencia: saved.referencia ? `${saved.referencia} / contrapartida` : `Contrapartida ${saved.id}`,
         instrumentos: saved.instrumentos.map((item) => ({ ...item })),
         imputaciones: asArray(counterpartyInput.imputaciones)
