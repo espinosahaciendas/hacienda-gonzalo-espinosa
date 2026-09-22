@@ -5473,7 +5473,10 @@ function commissionistStatusRows(commissionistName = $("#commissionist-client")?
       const total = Math.abs(Number(movement.importe || 0)) || Math.abs(Number(subtotals.facturado.comision || 0) + Number(subtotals.efectivo.comision || 0));
       const pending = Number(movement.importePendiente ?? total);
       const paid = Math.max(total - Math.abs(pending), 0);
+      const isGeneratedCommissionistMovement = Boolean(detail)
+        || normalizeSearch(movement.concepto || "").includes("comisionista");
       return {
+        id: movement.id,
         fecha: movement.fecha || movement.vencimiento || "",
         comprobante: movement.facturaComision
           ? `${movement.facturaComision} (${movement.comprobante || "-"})`
@@ -5483,7 +5486,8 @@ function commissionistStatusRows(commissionistName = $("#commissionist-client")?
         total,
         pending: Math.abs(pending),
         paid,
-        estado: movement.facturaComision ? `FACTURADO - ${movement.estado || "PENDIENTE"}` : `SIN FACTURAR - ${movement.estado || "PENDIENTE"}`
+        estado: movement.facturaComision ? `FACTURADO - ${movement.estado || "PENDIENTE"}` : `SIN FACTURAR - ${movement.estado || "PENDIENTE"}`,
+        canDelete: isGeneratedCommissionistMovement && canEditExternalMovement(movement)
       };
     })
     .sort((a, b) => (parseDisplayDate(b.fecha)?.getTime() || 0) - (parseDisplayDate(a.fecha)?.getTime() || 0));
@@ -5514,8 +5518,9 @@ function renderCommissionistStatus() {
         <td class="amount">${moneyValue(row.total)}</td>
         <td class="amount ${row.pending > 0.01 ? "negative" : "positive"}">${moneyValue(row.pending)}</td>
         <td>${escapeHtml(row.pending > 0.01 ? row.estado : "PAGADO")}</td>
+        <td>${row.canDelete ? `<button type="button" class="small-button danger-button" data-commissionist-status-delete="${escapeHtml(row.id)}">Anular</button>` : "-"}</td>
       </tr>`).join("")
-    : `<tr><td colspan="7">Seleccione un comisionista para ver su estado.</td></tr>`;
+    : `<tr><td colspan="8">Seleccione un comisionista para ver su estado.</td></tr>`;
 }
 
 function isCashDetailRow(row) {
@@ -7453,6 +7458,21 @@ function liquidatedCommissionistItemIds(commissionist) {
   return ids;
 }
 
+function liquidatedCommissionistExternalReceipts(commissionist) {
+  const key = normalizeSearch(commissionist);
+  const receipts = new Set();
+  (state.cuenta?.movimientos || []).forEach((movement) => {
+    const detail = commissionistDetailFromObservation(movement.observacion);
+    if (!detail || normalizeSearch(detail.comisionista) !== key) return;
+    (Array.isArray(detail.items) ? detail.items : []).forEach((item) => {
+      if (normalizeSearch(item.origen || "") === "movimiento externo" && item.comprobante) {
+        receipts.add(normalizeSearch(item.comprobante));
+      }
+    });
+  });
+  return receipts;
+}
+
 function commissionistAccountMovementApplies(movement, commissionist) {
   const key = normalizeSearch(commissionist);
   if (!key || movement.paymentId) return false;
@@ -7633,6 +7653,7 @@ async function loadCommissionistOperations() {
   $("#commissionist-message").textContent = "Buscando operaciones...";
   $("#commissionist-message").className = "form-message";
   const alreadyLiquidatedIds = liquidatedCommissionistItemIds(selectedCommissionist);
+  const alreadyLiquidatedExternalReceipts = liquidatedCommissionistExternalReceipts(selectedCommissionist);
   const accountCommissionOperationIds = commissionistAccountOperationIds(selectedCommissionist);
   let operationRows = [];
   try {
@@ -7683,6 +7704,7 @@ async function loadCommissionistOperations() {
     .filter((movement) => String(movement.tipoDesglose || "").toUpperCase() !== "IVA_FISCAL")
     .filter((movement) => normalizeSearch(movement.comisionista) === normalizeSearch(selectedCommissionist))
     .filter((movement) => !alreadyLiquidatedIds.has(String(movement.id)))
+    .filter((movement) => !alreadyLiquidatedExternalReceipts.has(normalizeSearch(movement.comprobante || "")))
     .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
     .map((movement) => ({
       id: movement.id,
@@ -10525,6 +10547,23 @@ async function init() {
   $("#commissionist-client").addEventListener("change", renderCommissionistStatus);
   $("#commissionist-body").addEventListener("change", handleCommissionistSelectionChange);
   $("#commissionist-invoice-body").addEventListener("change", handleCommissionistSelectionChange);
+  $("#commissionist-status-body").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-commissionist-status-delete]");
+    if (!button) return;
+    const confirmed = window.confirm("Se anulara/eliminara este movimiento de cuenta corriente del comisionista. Si tiene pagos imputados, el sistema no lo va a permitir. ¿Continuar?");
+    if (!confirmed) return;
+    try {
+      await fetchJson(`/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(button.dataset.commissionistStatusDelete)}`, { method: "DELETE" });
+      await reloadCurrentAccount();
+      renderCommissionistStatus();
+      await loadCommissionistOperations();
+      $("#commissionist-message").textContent = "Movimiento de comision anulado correctamente.";
+      $("#commissionist-message").className = "form-message ok";
+    } catch (error) {
+      $("#commissionist-message").textContent = error.message;
+      $("#commissionist-message").className = "form-message error";
+    }
+  });
 
   $("#client-search").addEventListener("input", renderClientes);
   $("#client-show-all").addEventListener("click", () => {
