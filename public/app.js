@@ -5248,7 +5248,9 @@ function commissionSplitSummary(movements, viewMode = "CLIENTE") {
   const byClient = new Map();
   (movements || []).forEach((movement) => {
     const status = String(movement?.estado || "").toUpperCase();
-    if (movement?.paymentId || status === "IMPUTADO" || status === "ANULADO") return;
+    const commissionistSource = viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
+    if (movement?.paymentId || status === "ANULADO") return;
+    if (status === "IMPUTADO" && !commissionistSource) return;
     if (movement?.facturaComisionId || movement?.facturaComision) return;
     if (!isCommissionPendingMovement(movement, viewMode)) return;
     const client = movement?.cliente || "Sin cliente";
@@ -5435,7 +5437,9 @@ function currentAccountBalanceMovements(movements, viewMode) {
       .filter((movement) => isConsigneeOwnCharge(movement) || movementCommissionistAccountKey(movement));
   }
   if (viewMode === "COMISIONISTA") {
-    return (movements || []).filter((movement) => !isCommissionistSourceOperation(movement));
+    return (movements || [])
+      .filter((movement) => !isCommissionistSourceOperation(movement))
+      .filter((movement) => !movement.paymentId);
   }
   return movements || [];
 }
@@ -5688,7 +5692,10 @@ function renderCuentaCorriente() {
         : matchesCurrentAccountClientSearch(movement, words, exactClient);
     if (!matchesEntity) return false;
     if (statusFilter !== "TODOS" && currentAccountMovementStatusFilterValue(movement, viewMode) !== statusFilter) return false;
-    if (conceptFilter === "COMISION" && (!isCommissionPendingMovement(movement, viewMode) || String(movement.estado || "").toUpperCase() === "IMPUTADO")) return false;
+    if (conceptFilter === "COMISION") {
+      const commissionistSource = viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
+      if (!isCommissionPendingMovement(movement, viewMode) || (String(movement.estado || "").toUpperCase() === "IMPUTADO" && !commissionistSource)) return false;
+    }
     if (!matchesCurrentAccountOperationType(movement, operationTypeFilter)) return false;
     if (!matchesCurrentAccountKeyword(movement, keywordWords)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
@@ -5840,7 +5847,7 @@ function matchesCurrentAccountDateRange(movement, from, to) {
 
 function matchesCurrentAccountDueFilter(movement, filter) {
   if (!filter || filter === "TODOS") return true;
-  if (String(movement.estado || "").toUpperCase() === "IMPUTADO") return false;
+  if (String(movement.estado || "").toUpperCase() === "IMPUTADO" && !isCommissionistSourceOperation(movement)) return false;
   const due = parseDisplayDate(movement.vencimiento);
   if (!due) return false;
   const today = new Date();
