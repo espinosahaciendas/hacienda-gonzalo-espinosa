@@ -49,6 +49,7 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
+let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
 const APP_BUILD = "20260908-hacienda-iva-porcentaje-v1";
@@ -665,6 +666,8 @@ function resetCashReconciliationForm() {
   $("#cash-rec-app-concept").value = "";
   $("#cash-rec-app-to").value = "";
   $("#cash-rec-app-amount").value = "";
+  editingCashReconciliationApplicationId = "";
+  if ($("#cash-rec-app-add")) $("#cash-rec-app-add").textContent = "Agregar aplicacion";
   if ($("#cash-rec-pay-date")) $("#cash-rec-pay-date").value = today;
   if ($("#cash-rec-pay-concept")) $("#cash-rec-pay-concept").value = "";
   if ($("#cash-rec-pay-to")) $("#cash-rec-pay-to").value = "";
@@ -796,12 +799,12 @@ function renderCashReconciliationApplications() {
     : recibido ? `Sin aplicaciones - saldo ${moneyValue(recibido)}` : "Sin aplicaciones cargadas";
   $("#cash-rec-app-body").innerHTML = cashReconciliationApplications.length
     ? cashReconciliationApplications.map((item) => `
-        <tr>
+        <tr class="${String(item.id) === String(editingCashReconciliationApplicationId) ? "selected-row" : ""}">
           <td>${escapeHtml(formatDate(item.fecha))}</td>
           <td>${escapeHtml(item.concepto || "-")}</td>
           <td>${escapeHtml(item.destino || "-")}</td>
           <td class="amount negative">${moneyValue(item.importe)}</td>
-          <td><button type="button" class="small-button danger-button" data-cash-rec-app-remove="${escapeHtml(item.id)}">Quitar</button></td>
+          <td><button type="button" class="small-button" data-cash-rec-app-edit="${escapeHtml(item.id)}">Editar</button> <button type="button" class="small-button danger-button" data-cash-rec-app-remove="${escapeHtml(item.id)}">Quitar</button></td>
         </tr>
       `).join("")
     : `<tr><td colspan="5">Sin aplicaciones cargadas.</td></tr>`;
@@ -853,6 +856,26 @@ function addCashReconciliationApplication() {
     setCashReconciliationMessage("Para agregar una aplicacion carga concepto e importe mayor a cero.", "error");
     return;
   }
+  if (editingCashReconciliationApplicationId) {
+    const index = cashReconciliationApplications.findIndex((item) => String(item.id) === String(editingCashReconciliationApplicationId));
+    if (index >= 0) {
+      cashReconciliationApplications[index] = {
+        ...cashReconciliationApplications[index],
+        fecha: $("#cash-rec-app-date").value || $("#cash-rec-date").value,
+        concepto,
+        destino: $("#cash-rec-app-to").value,
+        importe
+      };
+      editingCashReconciliationApplicationId = "";
+      $("#cash-rec-app-add").textContent = "Agregar aplicacion";
+      $("#cash-rec-app-concept").value = "";
+      $("#cash-rec-app-to").value = "";
+      $("#cash-rec-app-amount").value = "";
+      setCashReconciliationMessage("Aplicacion actualizada. Guarde la conciliacion para confirmar el cambio.", "ok");
+      renderCashReconciliationApplications();
+      return;
+    }
+  }
   cashReconciliationApplications.push({
     id: `APP-${Date.now()}-${cashReconciliationApplications.length}`,
     fecha: $("#cash-rec-app-date").value || $("#cash-rec-date").value,
@@ -864,6 +887,19 @@ function addCashReconciliationApplication() {
   $("#cash-rec-app-to").value = "";
   $("#cash-rec-app-amount").value = "";
   setCashReconciliationMessage("");
+  renderCashReconciliationApplications();
+}
+
+function editCashReconciliationApplication(applicationId) {
+  const item = cashReconciliationApplications.find((row) => String(row.id) === String(applicationId));
+  if (!item) return;
+  editingCashReconciliationApplicationId = String(item.id);
+  $("#cash-rec-app-date").value = dateToInput(item.fecha) || $("#cash-rec-date").value;
+  $("#cash-rec-app-concept").value = item.concepto || "";
+  $("#cash-rec-app-to").value = item.destino || "";
+  $("#cash-rec-app-amount").value = moneyValue(item.importe);
+  $("#cash-rec-app-add").textContent = "Guardar aplicacion";
+  setCashReconciliationMessage("Modifique la aplicacion y presione Guardar aplicacion. Luego guarde la conciliacion.", "ok");
   renderCashReconciliationApplications();
 }
 
@@ -931,6 +967,8 @@ function fillCashForm(item) {
 }
 
 function fillCashReconciliationForm(item) {
+  editingCashReconciliationApplicationId = "";
+  if ($("#cash-rec-app-add")) $("#cash-rec-app-add").textContent = "Agregar aplicacion";
   $("#cash-rec-id").value = item.id || "";
   $("#cash-rec-date").value = dateToInput(item.fecha);
   $("#cash-rec-client").value = item.recibidoDe || "";
@@ -10891,8 +10929,20 @@ async function init() {
   $("#cash-rec-print").addEventListener("click", () => printCashReconciliationReport());
   $("#cash-rec-summary-print").addEventListener("click", printCashReconciliationSummaryReport);
   $("#cash-rec-app-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-cash-rec-app-edit]");
     const removeButton = event.target.closest("[data-cash-rec-app-remove]");
+    if (editButton) {
+      editCashReconciliationApplication(editButton.dataset.cashRecAppEdit);
+      return;
+    }
     if (!removeButton) return;
+    if (String(editingCashReconciliationApplicationId) === String(removeButton.dataset.cashRecAppRemove)) {
+      editingCashReconciliationApplicationId = "";
+      $("#cash-rec-app-add").textContent = "Agregar aplicacion";
+      $("#cash-rec-app-concept").value = "";
+      $("#cash-rec-app-to").value = "";
+      $("#cash-rec-app-amount").value = "";
+    }
     cashReconciliationApplications = cashReconciliationApplications.filter((item) => item.id !== removeButton.dataset.cashRecAppRemove);
     renderCashReconciliationApplications();
   });
