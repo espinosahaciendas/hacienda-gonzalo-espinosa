@@ -53,7 +53,7 @@ let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260923-caja-editar-aplicaciones-v4";
+const APP_BUILD = "20260923-caja-editar-aplicaciones-v5";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -803,7 +803,7 @@ function renderCashReconciliationApplications() {
   $("#cash-rec-app-body").innerHTML = cashReconciliationApplications.length
     ? cashReconciliationApplications.map((item) => `
         <tr class="${String(item.id) === String(editingCashReconciliationApplicationId) ? "selected-row" : ""}">
-          <td>${escapeHtml(formatDate(item.fecha))}</td>
+          <td>${escapeHtml(item.fecha || "-")}</td>
           <td>${escapeHtml(item.concepto || "-")}</td>
           <td>${escapeHtml(item.destino || "-")}</td>
           <td class="amount negative">${moneyValue(item.importe)}</td>
