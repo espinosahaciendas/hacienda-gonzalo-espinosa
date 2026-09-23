@@ -53,7 +53,7 @@ let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260923-caja-editar-aplicaciones-v5";
+const APP_BUILD = "20260923-caja-editar-aplicaciones-v6";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -939,9 +939,16 @@ function editCashReconciliationApplication(applicationId) {
 
 function openCashReconciliationApplicationEdit(conciliationId, applicationId) {
   const item = (state.cajaConciliaciones.items || []).find((row) => String(row.id) === String(conciliationId));
-  if (!item) return;
+  if (!item) {
+    setCashReconciliationMessage("No se encontro la conciliacion para editar.", "error");
+    return;
+  }
   fillCashReconciliationForm(item);
-  if (applicationId) editCashReconciliationApplication(applicationId);
+  if (applicationId) {
+    const app = cashReconciliationApplications.find((row) => String(row.id) === String(applicationId));
+    if (app) editCashReconciliationApplication(app.id);
+    else setCashReconciliationMessage("Se abrio la conciliacion, pero no se encontro esa aplicacion puntual. Puede editarla desde el listado de aplicaciones.", "error");
+  }
   setCashTab("conciliaciones");
   $("#cash-rec-app-concept")?.scrollIntoView({ behavior: "smooth", block: "center" });
   $("#cash-rec-app-concept")?.focus();
@@ -11029,19 +11036,9 @@ async function init() {
     renderCashReconciliationBreakdown();
   });
   $("#cash-rec-body").addEventListener("click", (event) => {
-    const editApplicationButton = event.target.closest("[data-cash-rec-edit-app]");
-    const editApplicationsButton = event.target.closest("[data-cash-rec-edit-apps]");
     const editButton = event.target.closest("[data-cash-rec-edit]");
     const deleteButton = event.target.closest("[data-cash-rec-delete]");
     const printButton = event.target.closest("[data-cash-rec-print]");
-    if (editApplicationButton) {
-      openCashReconciliationApplicationEdit(editApplicationButton.dataset.cashRecEditApp, editApplicationButton.dataset.cashRecAppId);
-      return;
-    }
-    if (editApplicationsButton) {
-      openCashReconciliationApplicationEdit(editApplicationsButton.dataset.cashRecEditApps, "");
-      return;
-    }
     if (printButton) printCashReconciliationReport(printButton.dataset.cashRecPrint);
     if (editButton) {
       const item = (state.cajaConciliaciones.items || []).find((row) => row.id === editButton.dataset.cashRecEdit);
@@ -11633,6 +11630,18 @@ async function init() {
     openSale(button.dataset.openOperationSearch);
   });
   document.body.addEventListener("click", (event) => {
+    const cashApplicationButton = event.target.closest("[data-cash-rec-edit-app]");
+    if (cashApplicationButton) {
+      event.preventDefault();
+      openCashReconciliationApplicationEdit(cashApplicationButton.dataset.cashRecEditApp, cashApplicationButton.dataset.cashRecAppId);
+      return;
+    }
+    const cashApplicationsButton = event.target.closest("[data-cash-rec-edit-apps]");
+    if (cashApplicationsButton) {
+      event.preventDefault();
+      openCashReconciliationApplicationEdit(cashApplicationsButton.dataset.cashRecEditApps, "");
+      return;
+    }
     const button = event.target.closest("[data-page-action]");
     if (!button) return;
     const direction = button.dataset.pageDirection === "next" ? 1 : -1;
