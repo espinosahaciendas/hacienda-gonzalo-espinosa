@@ -49,10 +49,11 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
+let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260923-caja-editar-aplicaciones-v1";
+const APP_BUILD = "20260923-caja-editar-aplicaciones-v3";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -675,6 +676,8 @@ function resetCashReconciliationForm() {
   $("#cash-rec-break-concept").value = "";
   $("#cash-rec-break-detail").value = "";
   $("#cash-rec-break-amount").value = "";
+  editingCashReconciliationBreakdownId = "";
+  if ($("#cash-rec-break-add")) $("#cash-rec-break-add").textContent = "Agregar detalle";
   cashReconciliationBreakdown = [];
   cashReconciliationApplications = [];
   setCashReconciliationMessage("");
@@ -819,11 +822,11 @@ function renderCashReconciliationBreakdown() {
     : recibido ? `Sin detalle - recibido ${moneyValue(recibido)}` : "Sin detalle cargado";
   $("#cash-rec-break-body").innerHTML = cashReconciliationBreakdown.length
     ? cashReconciliationBreakdown.map((item) => `
-        <tr>
+        <tr class="${String(item.id) === String(editingCashReconciliationBreakdownId) ? "selected-row" : ""}">
           <td>${escapeHtml(item.concepto || "-")}</td>
           <td>${escapeHtml(item.detalle || "-")}</td>
           <td class="amount positive">${moneyValue(item.importe)}</td>
-          <td><button type="button" class="small-button danger-button" data-cash-rec-break-remove="${escapeHtml(item.id)}">Quitar</button></td>
+          <td><button type="button" class="small-button" data-cash-rec-break-edit="${escapeHtml(item.id)}">Editar</button> <button type="button" class="small-button danger-button" data-cash-rec-break-remove="${escapeHtml(item.id)}">Quitar</button></td>
         </tr>
       `).join("")
     : `<tr><td colspan="4">Sin detalle cargado.</td></tr>`;
@@ -836,6 +839,25 @@ function addCashReconciliationBreakdown() {
     setCashReconciliationMessage("Para agregar el detalle carga concepto e importe mayor a cero.", "error");
     return;
   }
+  if (editingCashReconciliationBreakdownId) {
+    const index = cashReconciliationBreakdown.findIndex((item) => String(item.id) === String(editingCashReconciliationBreakdownId));
+    if (index >= 0) {
+      cashReconciliationBreakdown[index] = {
+        ...cashReconciliationBreakdown[index],
+        concepto,
+        detalle: $("#cash-rec-break-detail").value,
+        importe
+      };
+      editingCashReconciliationBreakdownId = "";
+      $("#cash-rec-break-add").textContent = "Agregar detalle";
+      $("#cash-rec-break-concept").value = "";
+      $("#cash-rec-break-detail").value = "";
+      $("#cash-rec-break-amount").value = "";
+      setCashReconciliationMessage("Detalle actualizado. Guarde la conciliacion para confirmar el cambio.", "ok");
+      renderCashReconciliationBreakdown();
+      return;
+    }
+  }
   cashReconciliationBreakdown.push({
     id: `DET-${Date.now()}-${cashReconciliationBreakdown.length}`,
     concepto,
@@ -846,6 +868,18 @@ function addCashReconciliationBreakdown() {
   $("#cash-rec-break-detail").value = "";
   $("#cash-rec-break-amount").value = "";
   setCashReconciliationMessage("");
+  renderCashReconciliationBreakdown();
+}
+
+function editCashReconciliationBreakdown(detailId) {
+  const item = cashReconciliationBreakdown.find((row) => String(row.id) === String(detailId));
+  if (!item) return;
+  editingCashReconciliationBreakdownId = String(item.id);
+  $("#cash-rec-break-concept").value = item.concepto || "";
+  $("#cash-rec-break-detail").value = item.detalle || "";
+  $("#cash-rec-break-amount").value = moneyValue(item.importe);
+  $("#cash-rec-break-add").textContent = "Guardar detalle";
+  setCashReconciliationMessage("Modifique el detalle y presione Guardar detalle. Luego guarde la conciliacion.", "ok");
   renderCashReconciliationBreakdown();
 }
 
@@ -903,6 +937,15 @@ function editCashReconciliationApplication(applicationId) {
   renderCashReconciliationApplications();
 }
 
+function openCashReconciliationApplicationEdit(conciliationId, applicationId) {
+  const item = (state.cajaConciliaciones.items || []).find((row) => String(row.id) === String(conciliationId));
+  if (!item) return;
+  fillCashReconciliationForm(item);
+  editCashReconciliationApplication(applicationId);
+  setCashTab("conciliaciones");
+  $("#cash-rec-app-concept")?.focus();
+}
+
 function renderCashReconciliations() {
   if (!$("#cash-rec-body")) return;
   const data = state.cajaConciliaciones || {};
@@ -928,7 +971,7 @@ function renderCashReconciliations() {
           </td>
         </tr>
         ${item.detalleRecibido?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Detalle recibido:</strong> ${item.detalleRecibido.map((det) => `${escapeHtml(det.concepto || "-")} · ${escapeHtml(det.detalle || "-")} · ${moneyValue(det.importe)}`).join(" | ")}</td></tr>` : ""}
-        ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} · ${escapeHtml(app.concepto || "-")} · ${moneyValue(app.importe)}`).join(" | ")}</td></tr>` : ""}
+        ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} · ${escapeHtml(app.concepto || "-")} · ${moneyValue(app.importe)}${state.usuario?.rol === "CONSULTA" ? "" : ` <button type="button" class="small-button" data-cash-rec-edit-app="${escapeHtml(item.id)}" data-cash-rec-app-id="${escapeHtml(app.id)}">Editar aplicacion</button>`}`).join(" | ")}</td></tr>` : ""}
       `).join("")
     : `<tr><td colspan="8">Sin conciliaciones de efectivo cargadas.</td></tr>`;
   renderCashReconciliationOpenBalances(items);
@@ -967,6 +1010,8 @@ function fillCashForm(item) {
 }
 
 function fillCashReconciliationForm(item) {
+  editingCashReconciliationBreakdownId = "";
+  if ($("#cash-rec-break-add")) $("#cash-rec-break-add").textContent = "Agregar detalle";
   editingCashReconciliationApplicationId = "";
   if ($("#cash-rec-app-add")) $("#cash-rec-app-add").textContent = "Agregar aplicacion";
   $("#cash-rec-id").value = item.id || "";
@@ -10947,15 +10992,32 @@ async function init() {
     renderCashReconciliationApplications();
   });
   $("#cash-rec-break-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-cash-rec-break-edit]");
     const removeButton = event.target.closest("[data-cash-rec-break-remove]");
+    if (editButton) {
+      editCashReconciliationBreakdown(editButton.dataset.cashRecBreakEdit);
+      return;
+    }
     if (!removeButton) return;
+    if (String(editingCashReconciliationBreakdownId) === String(removeButton.dataset.cashRecBreakRemove)) {
+      editingCashReconciliationBreakdownId = "";
+      $("#cash-rec-break-add").textContent = "Agregar detalle";
+      $("#cash-rec-break-concept").value = "";
+      $("#cash-rec-break-detail").value = "";
+      $("#cash-rec-break-amount").value = "";
+    }
     cashReconciliationBreakdown = cashReconciliationBreakdown.filter((item) => item.id !== removeButton.dataset.cashRecBreakRemove);
     renderCashReconciliationBreakdown();
   });
   $("#cash-rec-body").addEventListener("click", (event) => {
+    const editApplicationButton = event.target.closest("[data-cash-rec-edit-app]");
     const editButton = event.target.closest("[data-cash-rec-edit]");
     const deleteButton = event.target.closest("[data-cash-rec-delete]");
     const printButton = event.target.closest("[data-cash-rec-print]");
+    if (editApplicationButton) {
+      openCashReconciliationApplicationEdit(editApplicationButton.dataset.cashRecEditApp, editApplicationButton.dataset.cashRecAppId);
+      return;
+    }
     if (printButton) printCashReconciliationReport(printButton.dataset.cashRecPrint);
     if (editButton) {
       const item = (state.cajaConciliaciones.items || []).find((row) => row.id === editButton.dataset.cashRecEdit);
