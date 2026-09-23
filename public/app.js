@@ -52,7 +52,7 @@ let cashReconciliationApplications = [];
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260908-hacienda-iva-porcentaje-v1";
+const APP_BUILD = "20260923-caja-editar-aplicaciones-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
