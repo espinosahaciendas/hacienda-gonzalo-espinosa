@@ -53,7 +53,7 @@ let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260923-caja-editar-aplicaciones-v3";
+const APP_BUILD = "20260923-caja-editar-aplicaciones-v4";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -941,9 +941,27 @@ function openCashReconciliationApplicationEdit(conciliationId, applicationId) {
   const item = (state.cajaConciliaciones.items || []).find((row) => String(row.id) === String(conciliationId));
   if (!item) return;
   fillCashReconciliationForm(item);
-  editCashReconciliationApplication(applicationId);
+  if (applicationId) editCashReconciliationApplication(applicationId);
   setCashTab("conciliaciones");
+  $("#cash-rec-app-concept")?.scrollIntoView({ behavior: "smooth", block: "center" });
   $("#cash-rec-app-concept")?.focus();
+}
+
+function cashReconciliationApplicationsDetailHtml(item) {
+  const applications = item.aplicaciones || [];
+  if (!applications.length && Math.abs(Number(item.totalAplicado || 0)) <= 0.01) return "";
+  const body = applications.length
+    ? applications.map((app) => `
+        <tr>
+          <td>${escapeHtml(app.fecha || "-")}</td>
+          <td>${escapeHtml(app.concepto || "-")}</td>
+          <td>${escapeHtml(app.destino || "-")}</td>
+          <td class="amount negative">${moneyValue(app.importe)}</td>
+          <td>${state.usuario?.rol === "CONSULTA" ? "-" : `<button type="button" class="small-button" data-cash-rec-edit-app="${escapeHtml(item.id)}" data-cash-rec-app-id="${escapeHtml(app.id)}">Editar aplicacion</button>`}</td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="5">Este efectivo tiene importe aplicado (${moneyValue(item.totalAplicado)}), pero no tiene detalle de aplicaciones guardado.</td></tr>`;
+  return `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones / imputaciones:</strong><table class="nested-table"><thead><tr><th>Fecha</th><th>Concepto</th><th>Destino</th><th>Importe</th><th></th></tr></thead><tbody>${body}</tbody></table></td></tr>`;
 }
 
 function renderCashReconciliations() {
@@ -967,11 +985,12 @@ function renderCashReconciliations() {
           <td>
             <button type="button" class="small-button" data-cash-rec-print="${escapeHtml(item.id)}">PDF</button>
             ${state.usuario?.rol === "CONSULTA" ? "" : `<button type="button" class="small-button" data-cash-rec-edit="${escapeHtml(item.id)}">Editar</button>
+            <button type="button" class="small-button" data-cash-rec-edit-apps="${escapeHtml(item.id)}">Editar aplicaciones</button>
             <button type="button" class="small-button danger-button" data-cash-rec-delete="${escapeHtml(item.id)}">Eliminar</button>`}
           </td>
         </tr>
         ${item.detalleRecibido?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Detalle recibido:</strong> ${item.detalleRecibido.map((det) => `${escapeHtml(det.concepto || "-")} · ${escapeHtml(det.detalle || "-")} · ${moneyValue(det.importe)}`).join(" | ")}</td></tr>` : ""}
-        ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} · ${escapeHtml(app.concepto || "-")} · ${moneyValue(app.importe)}${state.usuario?.rol === "CONSULTA" ? "" : ` <button type="button" class="small-button" data-cash-rec-edit-app="${escapeHtml(item.id)}" data-cash-rec-app-id="${escapeHtml(app.id)}">Editar aplicacion</button>`}`).join(" | ")}</td></tr>` : ""}
+        ${cashReconciliationApplicationsDetailHtml(item)}
       `).join("")
     : `<tr><td colspan="8">Sin conciliaciones de efectivo cargadas.</td></tr>`;
   renderCashReconciliationOpenBalances(items);
@@ -11011,11 +11030,16 @@ async function init() {
   });
   $("#cash-rec-body").addEventListener("click", (event) => {
     const editApplicationButton = event.target.closest("[data-cash-rec-edit-app]");
+    const editApplicationsButton = event.target.closest("[data-cash-rec-edit-apps]");
     const editButton = event.target.closest("[data-cash-rec-edit]");
     const deleteButton = event.target.closest("[data-cash-rec-delete]");
     const printButton = event.target.closest("[data-cash-rec-print]");
     if (editApplicationButton) {
       openCashReconciliationApplicationEdit(editApplicationButton.dataset.cashRecEditApp, editApplicationButton.dataset.cashRecAppId);
+      return;
+    }
+    if (editApplicationsButton) {
+      openCashReconciliationApplicationEdit(editApplicationsButton.dataset.cashRecEditApps, "");
       return;
     }
     if (printButton) printCashReconciliationReport(printButton.dataset.cashRecPrint);
