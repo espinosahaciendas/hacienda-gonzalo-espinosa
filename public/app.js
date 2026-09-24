@@ -53,7 +53,7 @@ let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260924-comisionista-separacion-v3";
+const APP_BUILD = "20260924-comisionista-reporte-agrupado-v4";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -5310,7 +5310,8 @@ function isConsigneeInformationalDue(movement) {
 function isCommissionPendingMovement(movement, viewMode = "CLIENTE") {
   if (viewMode === "CONSIGNATARIA") return isConsigneeOwnCharge(movement) || Boolean(movementCommissionistAccountKey(movement));
   if (viewMode === "COMISIONISTA") {
-    return isCommissionistSourceOperation(movement) && !isCommissionistSourceLiquidated(movement);
+    if (isCommissionistSourceOperation(movement)) return !isCommissionistSourceLiquidated(movement);
+    return Boolean(commissionistDetailFromObservation(movement?.observacion));
   }
   return String(movement?.origen || "").toUpperCase() === "COMISION";
 }
@@ -5365,12 +5366,14 @@ function commissionSplitSummary(movements, viewMode = "CLIENTE") {
     const commissionistSource = viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
     if (movement?.paymentId || status === "ANULADO") return;
     if (status === "IMPUTADO" && !commissionistSource) return;
-    if (movement?.facturaComisionId || movement?.facturaComision) return;
+    if (viewMode !== "COMISIONISTA" && (movement?.facturaComisionId || movement?.facturaComision)) return;
     if (!isCommissionPendingMovement(movement, viewMode)) return;
     const client = movement?.cliente || "Sin cliente";
     const row = byClient.get(client) || { cliente: client, facturado: 0, efectivo: 0, total: 0 };
-    const amount = viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)
-      ? Number(movement.importeComision || 0)
+    const amount = viewMode === "COMISIONISTA"
+      ? isCommissionistSourceOperation(movement)
+        ? Number(movement.importeComision || 0)
+        : Math.abs(pendingSignedAmount(movement))
       : pendingSignedAmount(movement);
     if (commissionKind(movement) === "efectivo") row.efectivo += amount;
     else row.facturado += amount;
@@ -7026,7 +7029,47 @@ function commissionistDetailReportRow(detail) {
 
 function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode = "CLIENTE") {
   if (!rows.length) return `<tr><td colspan="10">Sin movimientos para los filtros aplicados.</td></tr>`;
+  const renderedCommissionistGroups = new Set();
   return rows.map((movement) => {
+    const detail = commissionistDetailFromObservation(movement.observacion);
+    const groupId = detail?.liquidacionId || "";
+    if (groupId) {
+      if (renderedCommissionistGroups.has(groupId)) return "";
+      const grouped = rows.filter((candidate) => commissionistDetailFromObservation(candidate.observacion)?.liquidacionId === groupId);
+      if (grouped.length > 1) {
+        renderedCommissionistGroups.add(groupId);
+        const details = grouped.map((candidate) => commissionistDetailFromObservation(candidate.observacion)).filter(Boolean);
+        const items = details.flatMap((item) => Array.isArray(item.items) ? item.items : [])
+          .sort((a, b) => (parseDisplayDate(a.fecha)?.getTime() || 0) - (parseDisplayDate(b.fecha)?.getTime() || 0)
+            || String(a.vendedor || "").localeCompare(String(b.vendedor || ""), "es")
+            || Number(isCashDetailRow(a)) - Number(isCashDetailRow(b)));
+        const mergedDetail = {
+          ...details[0],
+          tipoComision: "MIXTA",
+          base: items.reduce((sum, item) => sum + Number(item.base || 0), 0),
+          comision: items.reduce((sum, item) => sum + Number(item.comision || 0), 0),
+          items
+        };
+        const original = grouped.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+        const imputed = grouped.reduce((sum, item) => sum + Math.sign(Number(item.importe || 0)) * Number(item.importeImputado || 0), 0);
+        const pending = grouped.reduce((sum, item) => sum + Math.sign(Number(item.importe || 0)) * Number(item.importePendiente ?? Math.abs(Number(item.importe || 0))), 0);
+        const statuses = grouped.map((item) => String(item.estado || "PENDIENTE").toUpperCase());
+        const status = statuses.every((item) => item === "IMPUTADO") ? "IMPUTADO" : statuses.every((item) => item === "PENDIENTE") ? "PENDIENTE" : "PARCIAL";
+        const period = `${mergedDetail.periodoDesde || "inicio"} a ${mergedDetail.periodoHasta || "fin"}`;
+        return `<tr>
+          <td>${escapeHtml(movement.fecha || "-")}</td>
+          <td>${escapeHtml(movement.vencimiento || "-")}</td>
+          <td>${escapeHtml(movement.cliente || "-")}</td>
+          <td>${escapeHtml(`Comisionista ${mergedDetail.porcentaje || 0}% periodo ${period}`)}</td>
+          <td>${escapeHtml(`COMISIONISTA ${mergedDetail.periodoDesde || ""}/${mergedDetail.periodoHasta || ""}`)}</td>
+          <td>-</td>
+          <td class="amount ${original < 0 ? "negative" : "positive"}">${moneyValue(original)}</td>
+          <td class="amount">${moneyValue(imputed)}</td>
+          <td class="amount ${pending < 0 ? "negative" : "positive"}">${moneyValue(pending)}</td>
+          <td class="status">${escapeHtml(status)}</td>
+        </tr>${commissionistDetailReportRow(mergedDetail)}`;
+      }
+    }
     const isPayment = Boolean(movement.paymentId);
     const payment = isPayment ? (state.cuenta.pagos || []).find((item) => item.id === movement.paymentId) : null;
     const commissionistReference = viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
@@ -7049,7 +7092,7 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
       <td class="amount">${imputed === null ? "-" : moneyValue(imputed)}</td>
       <td class="amount ${pending !== null && pending < 0 ? "negative" : "positive"}">${pending === null ? "-" : moneyValue(pending)}</td>
       <td class="status">${escapeHtml(currentAccountMovementStatusForDisplay(movement, viewMode))}</td>
-    </tr>${compensationSummaryTableRow(payment, 10)}${commissionistDetailReportRow(commissionistDetailFromObservation(movement.observacion))}`;
+    </tr>${compensationSummaryTableRow(payment, 10)}${commissionistDetailReportRow(detail)}`;
   }).join("");
 }
 
