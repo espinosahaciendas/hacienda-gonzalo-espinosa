@@ -53,7 +53,7 @@ let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260924-cuenta-detalle-interno-v2";
+const APP_BUILD = "20260924-comisionista-separacion-v3";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -5316,6 +5316,10 @@ function isCommissionPendingMovement(movement, viewMode = "CLIENTE") {
 }
 
 function commissionKind(movement) {
+  const detail = commissionistDetailFromObservation(movement?.observacion);
+  const explicitKind = normalizeSearch(detail?.tipoComision || movement?.tipoComision || "");
+  if (explicitKind === "efectivo") return "efectivo";
+  if (explicitKind === "facturado") return "facturado";
   const text = normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.observacion || ""}`);
   return text.includes("efectivo") ? "efectivo" : "facturado";
 }
@@ -5348,6 +5352,7 @@ function applyCommissionInvoiceMarks(cuenta) {
       movement.facturaComision = invoice.numero;
       movement.fechaFacturaComision = invoice.fecha;
       movement.estadoFacturacionComision = "FACTURADO";
+      movement.detalleFacturaComision = item.detalleComisionista || null;
     });
   });
   return cuenta;
@@ -6463,6 +6468,10 @@ function commissionInvoicePaymentGroups(movements, type = $("#cc-payment-type")?
     const group = groups.get(id);
     if (movement.comprobante) group.comprobantes.add(movement.comprobante);
     if (movement.operacion) group.operaciones.add(movement.operacion);
+    (movement.detalleFacturaComision?.items || []).forEach((item) => {
+      if (item.comprobante) group.comprobantes.add(item.comprobante);
+      if (item.id) group.operaciones.add(item.id);
+    });
     group.items.push({
       movementId: movement.id,
       pending,
@@ -7855,6 +7864,9 @@ function pendingCommissionistAccountRows(commissionist, from, to, alreadyLiquida
     .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
     .map((movement) => {
       const amount = Math.abs(signedPendingAmount(movement));
+      const kind = commissionKind(movement);
+      const detail = commissionistDetailFromObservation(movement.observacion);
+      const sourceReceipts = Array.from(new Set((detail?.items || []).map((item) => item.comprobante).filter(Boolean)));
       return {
         id: movement.id,
         operacion: movement.operacion || movement.id,
@@ -7868,15 +7880,16 @@ function pendingCommissionistAccountRows(commissionist, from, to, alreadyLiquida
         detalle: movement.concepto || "-",
         vendedor: movement.cliente || commissionist,
         comprador: operationBusinessText(movement) || movement.concepto || "-",
-        comprobante: movement.comprobante || "",
+        comprobante: sourceReceipts.join(" / ") || movement.comprobante || "",
         base: amount,
         porcentaje: 0,
         comisionManual: amount,
         selected: false,
-        invoiceSelected: true,
-        invoiceCandidate: true,
+        commissionKind: kind,
+        invoiceSelected: kind === "facturado",
+        invoiceCandidate: kind === "facturado",
         noGenerate: true,
-        note: "Lista para facturar"
+        note: kind === "facturado" ? "Lista para facturar" : "Pendiente sobre efectivo"
       };
     });
 }
@@ -8083,8 +8096,8 @@ async function generateCommissionistMovement() {
   const client = $("#commissionist-client").value.trim();
   const percent = percentValue("#commissionist-percent");
   const selected = state.commissionistRows.filter((row) => row.selected && !row.noGenerate);
-  const base = selected.reduce((sum, row) => sum + Number(row.base || 0), 0);
-  const amount = selected.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
+  const totals = commissionistRowsSplitTotals(selected, percent);
+  const amount = totals.total;
   if (!client || !selected.length || !amount) {
     $("#commissionist-message").textContent = "Falta comisionista, operaciones seleccionadas o porcentaje.";
     $("#commissionist-message").className = "form-message error";
@@ -8092,44 +8105,58 @@ async function generateCommissionistMovement() {
   }
   const fromText = $("#commissionist-from").value || "inicio";
   const toText = $("#commissionist-to").value || "fin";
-  const operations = selected.map((row) => row.id).join(", ");
-  const detail = {
-    tipo: "COMISIONISTA",
-    comisionista: client,
-    periodoDesde: fromText,
-    periodoHasta: toText,
-    porcentaje: percent,
-    base,
-      comision: amount,
-      items: selected.map((row) => ({
-      id: row.id,
-      fecha: row.fecha,
-      origen: row.origen,
-      vendedor: row.vendedor,
-      comprador: row.comprador,
-        comprobante: row.comprobante,
-        base: Number(row.base || 0),
-        porcentaje: Number(row.porcentaje || percent || 0),
-        comision: commissionistRowCommission(row, percent)
-      }))
-  };
+  const settlementId = `COMISIONISTA-${Date.now()}`;
+  const groups = ["facturado", "efectivo"]
+    .map((kind) => {
+      const rows = selected.filter((row) => commissionistRowKind(row) === kind);
+      const groupAmount = rows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
+      const base = rows.reduce((sum, row) => sum + Number(row.base || 0), 0);
+      return { kind, rows, amount: groupAmount, base };
+    })
+    .filter((group) => group.rows.length && group.amount > 0.01);
   try {
-    await fetchJson("/api/cuenta-corriente/movimientos-externos", {
-      method: "POST",
-      body: JSON.stringify({
-        cliente: client,
-        direccion: "PAGAR",
-        concepto: `Comisionista ${percent}% periodo ${fromText} a ${toText}`,
-        comprobante: `COMISIONISTA ${fromText}/${toText}`,
-        fechaVenta: new Date().toISOString().slice(0, 10),
-        vencimiento: $("#commissionist-due").value || new Date().toISOString().slice(0, 10),
-        importe: amount,
-        observacion: `COMISIONISTA_DETALLE:${JSON.stringify(detail)}`
-      })
-    });
+    for (const group of groups) {
+      const kindLabel = group.kind === "efectivo" ? "sobre efectivo" : "sobre facturado";
+      const detail = {
+        tipo: "COMISIONISTA",
+        tipoComision: group.kind.toUpperCase(),
+        liquidacionId: settlementId,
+        comisionista: client,
+        periodoDesde: fromText,
+        periodoHasta: toText,
+        porcentaje: percent,
+        base: group.base,
+        comision: group.amount,
+        items: group.rows.map((row) => ({
+          id: row.id,
+          fecha: row.fecha,
+          origen: row.origen,
+          vendedor: row.vendedor,
+          comprador: row.comprador,
+          comprobante: row.comprobante,
+          tipoComision: group.kind.toUpperCase(),
+          base: Number(row.base || 0),
+          porcentaje: Number(row.porcentaje || percent || 0),
+          comision: commissionistRowCommission(row, percent)
+        }))
+      };
+      await fetchJson("/api/cuenta-corriente/movimientos-externos", {
+        method: "POST",
+        body: JSON.stringify({
+          cliente: client,
+          direccion: "PAGAR",
+          concepto: `Comisionista ${kindLabel} ${percent}% periodo ${fromText} a ${toText}`,
+          comprobante: `COMISIONISTA ${group.kind.toUpperCase()} ${fromText}/${toText}`,
+          fechaVenta: new Date().toISOString().slice(0, 10),
+          vencimiento: $("#commissionist-due").value || new Date().toISOString().slice(0, 10),
+          importe: group.amount,
+          observacion: `COMISIONISTA_DETALLE:${JSON.stringify(detail)}`
+        })
+      });
+    }
     await reloadCurrentAccount();
     renderCommissionistStatus();
-    $("#commissionist-message").textContent = `Movimiento generado por ${moneyValue(amount)}.`;
+    $("#commissionist-message").textContent = `Cuenta corriente generada: sobre facturado ${moneyValue(totals.facturado)} - sobre efectivo ${moneyValue(totals.efectivo)} - total ${moneyValue(amount)}.`;
     $("#commissionist-message").className = "form-message ok";
   } catch (error) {
     $("#commissionist-message").textContent = error.message;
