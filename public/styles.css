@@ -1861,6 +1861,30 @@ label textarea {
   padding: 10px;
 }
 
+.cc-internal-row td {
+  background: #f5f8fc;
+  border-left: 3px solid #8aa7bd;
+  color: #2f4f63;
+  padding: 7px 10px;
+}
+
+.cc-internal-row details {
+  margin: 0;
+}
+
+.cc-internal-row summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+.cc-internal-row summary span {
+  color: #5f7381;
+  font-weight: 400;
+  margin-left: 8px;
+}
+
 .cc-detail-row .nested-table {
   width: 100%;
   margin-top: 6px;

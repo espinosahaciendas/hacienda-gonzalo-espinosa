@@ -1,4 +1,4 @@
-﻿const state = {
+const state = {
   clientes: [],
   operaciones: [],
   cuenta: null,
@@ -53,7 +53,7 @@ let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260924-cuenta-imputaciones-parcial-v1";
+const APP_BUILD = "20260924-cuenta-detalle-interno-v2";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -6717,14 +6717,9 @@ function currentAccountMovementAmountForDisplay(movement, payment) {
   }
   const raw = Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
   if (payment?.tipo !== "COMPENSACION") {
-    const original = Math.abs(Number(movement.importe || 0));
-    const imputed = Math.abs(Number(movement.importeImputado || 0));
-    const hasBreakdown = !movement.paymentId && (imputed > 0.01 || String(movement.estado || "").toUpperCase() === "PARCIAL");
     return {
       value: raw,
-      text: hasBreakdown
-        ? `${moneyValue(raw)}<small>Original ${moneyValue(original)} | Imputado ${moneyValue(imputed)}</small>`
-        : moneyValue(raw),
+      text: moneyValue(raw),
       className: amountClass(raw)
     };
   }
@@ -6987,14 +6982,15 @@ function currentAccountImputationRowsHtml(movement, imputations, colspan = 9) {
     </tr>
   `).join("");
   return `
-    <tr class="cc-detail-row">
+    <tr class="cc-detail-row cc-internal-row">
       <td colspan="${colspan}">
-        <strong>Imputaciones aplicadas</strong>
-        <span class="subtle-line">Original ${moneyValue(original)} | Imputado ${moneyValue(imputed)} | Saldo pendiente ${moneyValue(pending)}</span>
-        <table class="nested-table">
-          <thead><tr><th>Fecha</th><th>Comprobante</th><th>Tipo / medio</th><th>Referencia</th><th>Importe imputado</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
+        <details>
+          <summary>Control interno: ver imputaciones (${imputations.length}) <span>Original ${moneyValue(original)} | Imputado ${moneyValue(imputed)} | Saldo ${moneyValue(pending)}</span></summary>
+          <table class="nested-table">
+            <thead><tr><th>Fecha</th><th>Comprobante</th><th>Tipo / medio</th><th>Referencia</th><th>Importe imputado</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </details>
       </td>
     </tr>
   `;
@@ -7032,17 +7028,6 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
     const conceptDisplay = payment?.tipo === "COMPENSACION"
       ? currentAccountMovementConceptForDisplay(movement, payment)
       : currentAccountConceptText(movement, viewMode);
-    const imputations = imputationsByMovement.get(String(movement.id)) || [];
-    const allocationRows = imputations.map((item) => `
-      <tr class="allocation-row">
-        <td>${escapeHtml(item.fecha || "-")}</td>
-        <td></td>
-        <td colspan="4" class="allocation-label">Imputacion ${escapeHtml(item.paymentId)} - ${escapeHtml(item.tipo || "")} ${escapeHtml(item.medio || "")}${item.referencia ? ` - ${escapeHtml(item.referencia)}` : ""}</td>
-        <td></td>
-        <td class="amount">${moneyValue(item.importe)}</td>
-        <td></td>
-        <td></td>
-      </tr>`).join("");
     const cashClass = isCashMovement(movement) ? "movement-cash" : "";
     return `<tr class="${cashClass}">
       <td>${escapeHtml(movement.fecha || "-")}</td>
@@ -7055,7 +7040,7 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
       <td class="amount">${imputed === null ? "-" : moneyValue(imputed)}</td>
       <td class="amount ${pending !== null && pending < 0 ? "negative" : "positive"}">${pending === null ? "-" : moneyValue(pending)}</td>
       <td class="status">${escapeHtml(currentAccountMovementStatusForDisplay(movement, viewMode))}</td>
-    </tr>${compensationSummaryTableRow(payment, 10)}${commissionistDetailReportRow(commissionistDetailFromObservation(movement.observacion))}${allocationRows}`;
+    </tr>${compensationSummaryTableRow(payment, 10)}${commissionistDetailReportRow(commissionistDetailFromObservation(movement.observacion))}`;
   }).join("");
 }
 
@@ -7161,7 +7146,7 @@ function printCurrentAccountReport(forcedType = "") {
   ${balancesTable}
   ${expensesTable}
   ${commissionsTable}
-  <h2>Detalle de movimientos e imputaciones</h2>
+  <h2>Detalle de movimientos</h2>
   <table><thead><tr><th>Fecha</th><th>Vencimiento</th><th>Cliente</th><th>Concepto</th><th>Comprobante</th><th>Operacion</th><th>Importe original</th><th>Imputado</th><th>Saldo pendiente</th><th>Estado</th></tr></thead><tbody>${currentAccountReportMovementRows(rows, imputationsByMovement, filters.viewMode)}</tbody></table><button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
   popup.document.close();
 }
