@@ -114,6 +114,17 @@ function normalizeText(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
 
+function parseCommissionistDetail(value) {
+  const text = String(value || "").trim();
+  const prefix = "COMISIONISTA_DETALLE:";
+  if (!text.startsWith(prefix)) return null;
+  try {
+    return JSON.parse(text.slice(prefix.length));
+  } catch (error) {
+    return null;
+  }
+}
+
 function normalizePartialText(value) {
   const text = normalizeText(value);
   return text === "-" ? "" : text;
@@ -926,7 +937,8 @@ function buildAccountData(data) {
         fecha: invoice.fecha,
         cliente: invoice.cliente,
         periodoDesde: invoice.periodoDesde,
-        periodoHasta: invoice.periodoHasta
+        periodoHasta: invoice.periodoHasta,
+        detalleComisionista: item.detalleComisionista || null
       });
     });
   });
@@ -1020,6 +1032,7 @@ function buildAccountData(data) {
       movement.facturaComision = commissionInvoice.numero;
       movement.fechaFacturaComision = commissionInvoice.fecha;
       movement.estadoFacturacionComision = "FACTURADO";
+      movement.detalleFacturaComision = commissionInvoice.detalleComisionista || null;
     }
     if (imputed >= Math.abs(movement.importe) - 0.01) movement.estado = "IMPUTADO";
     else if (imputed > 0.01) movement.estado = "PARCIAL";
@@ -2464,6 +2477,7 @@ class BackupDataSource {
         error.statusCode = 409;
         throw error;
       }
+      const detalleComisionista = parseCommissionistDetail(movement.observacion);
       return {
         movementId: id,
         fecha: movement.fecha,
@@ -2472,7 +2486,8 @@ class BackupDataSource {
         comprobante: movement.comprobante,
         operacion: movement.operacion,
         contraparte: movement.contraparte || movement.vendedor || movement.comprador || "",
-        importe: Math.abs(parseMoney(movement.importePendiente ?? movement.importe))
+        importe: Math.abs(parseMoney(movement.importePendiente ?? movement.importe)),
+        detalleComisionista
       };
     });
     const now = new Date().toISOString();
