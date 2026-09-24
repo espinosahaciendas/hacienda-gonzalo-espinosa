@@ -625,10 +625,12 @@ function compensationImputationOffset(items, movements, resolveMovementId = (id)
   return Math.max(totals.positive, totals.negative);
 }
 
-function buildOperationAccountMovements(operation) {
+function buildOperationAccountMovements(operation, options = {}) {
   const draft = operation.draftData || {};
   const liq = draft.liquidacion || {};
-  const liquidationConfirmed = Boolean(draft.liquidacionConfirmada) || normalizeKey(operation.liquidacionEstado) === "CONFIRMADA";
+  const liquidationConfirmed = Boolean(draft.liquidacionConfirmada)
+    || normalizeKey(operation.liquidacionEstado) === "CONFIRMADA"
+    || Boolean(options.forceAccount);
   if (!liquidationConfirmed) return [];
   const operationDate = operation.fecha || draft.fecha || "";
   const dueBaseDate = draft.fechaCarga || operationDate;
@@ -905,6 +907,14 @@ function buildOperationAccountMovements(operation) {
 function buildAccountData(data) {
   const movements = [];
   const commissionInvoiceByMovement = new Map();
+  const operationIdsWithPayment = new Set();
+  asArray(data.currentAccountPayments).forEach((payment) => {
+    if (payment.anulado) return;
+    asArray(payment.imputaciones).forEach((item) => {
+      const match = String(item.movementId || item.rowId || "").match(/^(20\d{2}-\d{4})-/);
+      if (match) operationIdsWithPayment.add(match[1]);
+    });
+  });
   asArray(data.commissionInvoices).forEach((invoice) => {
     if (invoice.anulado) return;
     asArray(invoice.movimientos).forEach((item) => {
@@ -921,7 +931,8 @@ function buildAccountData(data) {
     });
   });
   asArray(data.operations).forEach((operation) => {
-    buildOperationAccountMovements(operation).forEach((movement) => pushMovement(movements, movement));
+    buildOperationAccountMovements(operation, { forceAccount: operationIdsWithPayment.has(String(operation.id || "")) })
+      .forEach((movement) => pushMovement(movements, movement));
   });
   asArray(data.currentAccountManualMovements).forEach((item) => {
     pushMovement(movements, {
