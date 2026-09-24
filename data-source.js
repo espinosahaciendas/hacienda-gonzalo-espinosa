@@ -644,6 +644,13 @@ function buildOperationAccountMovements(operation) {
     : 0;
   const efectivoProdSinIva = normalizeFrigorificoEfectivoSinIva(liq.efectivoProd, frigoEfectivoBase, frigo);
   const efectivoProdCuenta = frigo ? efectivoProdSinIva * 1.105 : efectivoProdSinIva;
+  const consignada = normalizeKey(operation.tipo || draft.tipo) === "CONSIGNADA";
+  const facturadoCuentaProd = consignada
+    ? parseMoney(liq.netoLiquidacionProd)
+    : parseMoney(liq.importeFacturado) + parseMoney(liq.ivaProd);
+  const facturadoCuentaComp = consignada
+    ? parseMoney(liq.netoLiquidacionComp)
+    : parseMoney(liq.importeFacturado) + parseMoney(liq.ivaComp) + parseMoney(liq.totalGastosComp);
   const movements = [];
   const partialAccountLines = operationPartialBillingLines(operation).filter((line) => {
     const parteCuenta = normalizeKey(line.parteCuenta || "NINGUNA");
@@ -705,11 +712,11 @@ function buildOperationAccountMovements(operation) {
     });
   };
 
-  if (!accountByPartialBillingProd && liq.netoLiquidacionProd) {
+  if (!accountByPartialBillingProd && facturadoCuentaProd) {
     addPlan({
       cliente: operation.vendedor || draft.vendedor,
       role: "VENDEDOR-FACT",
-      amount: -Math.abs(Number(liq.netoLiquidacionProd || 0)),
+      amount: -Math.abs(Number(facturadoCuentaProd || 0)),
       plan: draft.planFacturadoProd || liq.planFacturadoProd || "0",
       comprobante: liq.comprobanteProd || draft.comprobanteProd,
       counterpart: counterpartForRole("VENDEDOR-FACT", operation.comprador || draft.comprador || operationConsignee),
@@ -727,11 +734,11 @@ function buildOperationAccountMovements(operation) {
       conceptSuffix: "efectivo vendedor"
     });
   }
-  if (!accountByPartialBillingComp && liq.netoLiquidacionComp) {
+  if (!accountByPartialBillingComp && facturadoCuentaComp) {
     addPlan({
       cliente: operation.comprador || draft.comprador,
       role: "COMPRADOR-FACT",
-      amount: Math.abs(Number(liq.netoLiquidacionComp || 0)),
+      amount: Math.abs(Number(facturadoCuentaComp || 0)),
       plan: draft.planFacturadoComp || liq.planFacturadoComp || "0",
       comprobante: liq.comprobanteComp || draft.comprobanteComp,
       counterpart: counterpartForRole("COMPRADOR-FACT", operation.vendedor || draft.vendedor || operationConsignee),
