@@ -53,7 +53,7 @@ let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260923-caja-editar-aplicaciones-v6";
+const APP_BUILD = "20260924-cuenta-imputaciones-parcial-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -5860,6 +5860,7 @@ function renderCuentaCorriente() {
     ? "Incluye vencimientos informativos entre la consignataria y tus clientes, y comisiones pendientes a cobrar."
     : "Ordenados por fecha de vencimiento.";
 
+  const imputationsByMovement = currentAccountImputationsByMovement();
   $("#cc-movements-body").innerHTML = movements.length
     ? movements.slice(0, 200).map((movement) => {
         const detail = commissionistDetailFromObservation(movement.observacion);
@@ -5873,6 +5874,7 @@ function renderCuentaCorriente() {
             : externalMovementActions(movement);
         const quickAction = currentAccountQuickPaymentButton(movement);
         const amountDisplay = currentAccountMovementAmountForDisplay(movement, payment);
+        const imputationRows = currentAccountImputationRowsHtml(movement, imputationsByMovement.get(String(movement.id)) || [], 9);
         return `
         <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
           <td>${escapeHtml(movement.fecha || "-")}</td>
@@ -5886,6 +5888,7 @@ function renderCuentaCorriente() {
           <td>${quickAction}${quickAction && baseActions ? " " : ""}${baseActions}${documentActionButtons(movement)}</td>
         </tr>
         ${compensationSummaryTableRow(payment, 9)}
+        ${imputationRows}
         ${detail ? `<tr class="cc-detail-row"><td colspan="9">${commissionistDetailHtml(detail)}</td></tr>` : ""}
       `;
       }).join("")
@@ -6714,7 +6717,16 @@ function currentAccountMovementAmountForDisplay(movement, payment) {
   }
   const raw = Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
   if (payment?.tipo !== "COMPENSACION") {
-    return { value: raw, text: moneyValue(raw), className: amountClass(raw) };
+    const original = Math.abs(Number(movement.importe || 0));
+    const imputed = Math.abs(Number(movement.importeImputado || 0));
+    const hasBreakdown = !movement.paymentId && (imputed > 0.01 || String(movement.estado || "").toUpperCase() === "PARCIAL");
+    return {
+      value: raw,
+      text: hasBreakdown
+        ? `${moneyValue(raw)}<small>Original ${moneyValue(original)} | Imputado ${moneyValue(imputed)}</small>`
+        : moneyValue(raw),
+      className: amountClass(raw)
+    };
   }
   const summary = compensationSummary(payment);
   const signed = compensationSignedAmount(payment);
@@ -6958,6 +6970,34 @@ function currentAccountImputationsByMovement() {
     });
   });
   return result;
+}
+
+function currentAccountImputationRowsHtml(movement, imputations, colspan = 9) {
+  if (!imputations?.length) return "";
+  const original = Math.abs(Number(movement.importe || 0));
+  const imputed = Math.abs(Number(movement.importeImputado || 0));
+  const pending = Math.abs(Number(movement.importePendiente ?? original));
+  const rows = imputations.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.fecha || "-")}</td>
+      <td>${escapeHtml(item.paymentId || "-")}</td>
+      <td>${escapeHtml([item.tipo, item.medio].filter(Boolean).join(" ") || "-")}</td>
+      <td>${escapeHtml(item.referencia || item.comprobante || "-")}</td>
+      <td class="amount">${moneyValue(item.importe)}</td>
+    </tr>
+  `).join("");
+  return `
+    <tr class="cc-detail-row">
+      <td colspan="${colspan}">
+        <strong>Imputaciones aplicadas</strong>
+        <span class="subtle-line">Original ${moneyValue(original)} | Imputado ${moneyValue(imputed)} | Saldo pendiente ${moneyValue(pending)}</span>
+        <table class="nested-table">
+          <thead><tr><th>Fecha</th><th>Comprobante</th><th>Tipo / medio</th><th>Referencia</th><th>Importe imputado</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </td>
+    </tr>
+  `;
 }
 
 function commissionistDetailReportRow(detail) {

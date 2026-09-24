@@ -1861,6 +1861,27 @@ label textarea {
   padding: 10px;
 }
 
+.cc-detail-row .nested-table {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+}
+
+.cc-detail-row .nested-table th,
+.cc-detail-row .nested-table td {
+  padding: 6px 8px;
+  border: 1px solid #d4e0dd;
+  background: #fff;
+}
+
+#cc-movements-body td.amount small {
+  display: block;
+  margin-top: 3px;
+  color: #52706b;
+  font-weight: 400;
+  white-space: normal;
+}
+
 .cc-commissionist-detail {
   display: grid;
   gap: 7px;
