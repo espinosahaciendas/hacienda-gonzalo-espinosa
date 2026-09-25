@@ -54,7 +54,7 @@ let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260925-anular-operacion-sin-liquidar-v1";
+const APP_BUILD = "20260925-anular-operacion-sin-liquidar-v2";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -4839,8 +4839,11 @@ function operationSearchDate(operation) {
 function operationSearchStatusInfo(operation) {
   const liquidationStatus = normalizeSearch(operation.liquidacionEstado || operation.draftData?.liquidacionEstado);
   const operationStatus = normalizeSearch(operation.estado || operation.draftData?.estado);
+  const hasAccountMovements = Boolean(operation.enCuentaCorriente)
+    || (state.cuenta?.movimientos || []).some((movement) => String(movement.operacion || "") === String(operation.id || "") && String(movement.estado || "").toUpperCase() !== "ANULADO");
   const annulled = operationStatus.includes("anulada");
   const confirmed = !annulled && (Boolean(operation.liquidacionConfirmada || operation.draftData?.liquidacionConfirmada)
+    || hasAccountMovements
     || liquidationStatus.includes("confirmada")
     || liquidationStatus.includes("cerrada")
     || operationStatus.includes("confirmada")
@@ -4849,7 +4852,7 @@ function operationSearchStatusInfo(operation) {
     pending: !confirmed && !annulled,
     confirmed,
     annulled,
-    label: annulled ? "Anulada" : confirmed ? "Confirmada" : "Pendiente"
+    label: annulled ? "Anulada" : confirmed ? (hasAccountMovements ? "En cuenta corriente" : "Confirmada") : "Pendiente"
   };
 }
 
