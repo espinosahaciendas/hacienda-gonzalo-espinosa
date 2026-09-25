@@ -2376,7 +2376,10 @@ class BackupDataSource {
   async getOperaciones() {
     const data = this.readData();
     return asArray(data.operations)
-      .map((operation) => ({
+      .map((operation) => {
+        const enCuentaCorriente = buildOperationAccountMovements(operation).length > 0
+          || asArray(data.currentAccountManualMovements).some((item) => String(item.operacion || "") === String(operation.id));
+        return ({
         id: operation.id,
         fecha: operation.fecha,
         tipo: operation.tipo,
@@ -2384,6 +2387,7 @@ class BackupDataSource {
         estado: operation.estado,
         liquidacionEstado: operation.liquidacionEstado,
         liquidacionConfirmada: Boolean(operation.draftData && operation.draftData.liquidacionConfirmada),
+        enCuentaCorriente,
         vendedor: operation.vendedor,
         comprador: operation.comprador,
         consignataria: operation.draftData && operation.draftData.consignataria,
@@ -2394,7 +2398,7 @@ class BackupDataSource {
         dte: operation.dte,
         renspaOrigen: operation.renspaOrigen,
         renspaDestino: operation.renspaDestino
-      }))
+      });})
       .filter((operation) => operation.id);
   }
 
