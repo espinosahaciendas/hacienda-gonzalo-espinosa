@@ -53,8 +53,12 @@ let cashReconciliationApplications = [];
 let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
+let periodStatsRequestId = 0;
+let operationSearchRequestId = 0;
+let periodStatsTimer = null;
+let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260925-anular-operacion-sin-liquidar-v2";
+const APP_BUILD = "20260925-buscadores-operaciones-v3";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -4726,6 +4730,8 @@ function periodDestinationLabel(operation) {
 }
 
 async function renderPeriodStats() {
+  clearTimeout(periodStatsTimer);
+  const requestId = ++periodStatsRequestId;
   const from = parseInputDate($("#dashboard-period-from").value);
   const to = parseInputDate($("#dashboard-period-to").value);
   const typeFilter = normalizeSearch($("#period-type-filter").value);
@@ -4733,13 +4739,17 @@ async function renderPeriodStats() {
   const categoryFilter = normalizeSearch($("#period-category-filter").value);
   const clientFilter = normalizeSearch($("#period-client-filter").value);
   const message = $("#period-message");
+  const runButton = $("#dashboard-period-run");
   message.textContent = "Calculando periodo...";
   message.className = "form-message";
+  runButton.disabled = true;
+  runButton.textContent = "Calculando...";
   const details = await Promise.all(state.operaciones.map((operation) =>
     fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`)
       .then((response) => ({ ...operation, ...(response.item || {}) }))
       .catch(() => operation)
   ));
+  if (requestId !== periodStatsRequestId) return;
   const operations = details.filter((operation) => {
     const date = operationDateForPeriod(operation);
     if (!date) return false;
@@ -4826,6 +4836,13 @@ async function renderPeriodStats() {
     : `<tr><td colspan="5">Sin clientes para el periodo.</td></tr>`;
   message.textContent = operations.length ? "Periodo calculado." : "No hay operaciones en ese periodo.";
   message.className = `form-message ${operations.length ? "ok" : ""}`.trim();
+  runButton.disabled = false;
+  runButton.textContent = "Ver periodo";
+}
+
+function schedulePeriodStats() {
+  clearTimeout(periodStatsTimer);
+  periodStatsTimer = setTimeout(renderPeriodStats, 300);
 }
 
 function operationLineKilos(line) {
@@ -4905,6 +4922,8 @@ function operationSearchLineSummary(operation, categoryFilter = "") {
 }
 
 async function renderOperationSearch() {
+  clearTimeout(operationSearchTimer);
+  const requestId = ++operationSearchRequestId;
   const filters = {
     from: parseInputDate($("#operation-search-from").value),
     to: parseInputDate($("#operation-search-to").value),
@@ -4915,15 +4934,21 @@ async function renderOperationSearch() {
     text: normalizeSearch($("#operation-search-text").value)
   };
   const message = $("#operation-search-message");
+  const runButton = $("#operation-search-run");
   message.textContent = "Buscando operaciones...";
   message.className = "form-message";
-  const candidates = state.operaciones.filter((operation) => operationSearchBasicMatches(operation, filters));
+  runButton.disabled = true;
+  runButton.textContent = "Buscando...";
+  const coarseFilters = { ...filters, client: "", type: "", text: "" };
+  const candidates = state.operaciones.filter((operation) => operationSearchBasicMatches(operation, coarseFilters));
   const details = await Promise.all(candidates.map((operation) =>
     fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`)
       .then((response) => ({ ...operation, ...(response.item || {}) }))
       .catch(() => operation)
   ));
+  if (requestId !== operationSearchRequestId) return;
   const rows = details
+    .filter((operation) => operationSearchBasicMatches(operation, filters))
     .map((operation) => ({ operation, summary: operationSearchLineSummary(operation, filters.category) }))
     .filter((item) => !filters.category || item.summary.heads || item.summary.kilos || item.summary.amount)
     .sort((a, b) => {
@@ -4946,6 +4971,13 @@ async function renderOperationSearch() {
   renderOperationSearchPage();
   message.textContent = rows.length ? "Busqueda lista." : "No se encontraron operaciones.";
   message.className = `form-message ${rows.length ? "ok" : ""}`.trim();
+  runButton.disabled = false;
+  runButton.textContent = "Buscar";
+}
+
+function scheduleOperationSearch() {
+  clearTimeout(operationSearchTimer);
+  operationSearchTimer = setTimeout(renderOperationSearch, 300);
 }
 
 function renderOperationSearchPage() {
@@ -11032,10 +11064,11 @@ async function init() {
     renderWeightCalculator();
   });
   ["#period-type-filter", "#period-destination-filter", "#period-category-filter", "#period-client-filter"].forEach((selector) => {
-    $(selector).addEventListener("input", renderPeriodStats);
+    $(selector).addEventListener("input", schedulePeriodStats);
     $(selector).addEventListener("change", renderPeriodStats);
   });
   ["#operation-search-from", "#operation-search-to", "#operation-search-client", "#operation-search-type", "#operation-search-category", "#operation-search-status", "#operation-search-text"].forEach((selector) => {
+    $(selector).addEventListener("input", scheduleOperationSearch);
     $(selector).addEventListener("change", renderOperationSearch);
   });
   $("#commissionist-load").addEventListener("click", loadCommissionistOperations);
