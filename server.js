@@ -478,10 +478,16 @@ async function handleApi(req, res) {
   }
 
   const establecimientoMatch = parsed.pathname.match(/^\/api\/clientes\/([^/]+)\/establecimientos\/([^/]+)$/);
-  if (establecimientoMatch && req.method === "PUT") {
-    const body = await readBody(req);
-    sendJson(res, 200, { item: await dataSource.updateEstablecimiento(decodeURIComponent(establecimientoMatch[1]), decodeURIComponent(establecimientoMatch[2]), body) });
-    return;
+  if (establecimientoMatch) {
+    if (req.method === "PUT") {
+      const body = await readBody(req);
+      sendJson(res, 200, { item: await dataSource.updateEstablecimiento(decodeURIComponent(establecimientoMatch[1]), decodeURIComponent(establecimientoMatch[2]), body) });
+      return;
+    }
+    if (req.method === "DELETE") {
+      sendJson(res, 200, { item: await dataSource.deleteEstablecimiento(decodeURIComponent(establecimientoMatch[1]), decodeURIComponent(establecimientoMatch[2])) });
+      return;
+    }
   }
 
   if (parsed.pathname === "/api/campos/contratos") {
@@ -571,6 +577,15 @@ async function handleApi(req, res) {
   const operacionDetalleMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)$/);
   if (operacionDetalleMatch && req.method === "GET") {
     sendJson(res, 200, { item: await dataSource.getOperacionDetalle(decodeURIComponent(operacionDetalleMatch[1])) });
+    return;
+  }
+
+  const operacionAnularMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/anular$/);
+  if (operacionAnularMatch && req.method === "POST") {
+    const body = await readBody(req);
+    sendJson(res, 200, {
+      item: await dataSource.anularOperacion(decodeURIComponent(operacionAnularMatch[1]), body)
+    });
     return;
   }
 

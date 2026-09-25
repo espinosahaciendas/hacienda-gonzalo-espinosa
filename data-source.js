@@ -2006,6 +2006,50 @@ class BackupDataSource {
     return operation;
   }
 
+  async anularOperacion(operationId, input = {}) {
+    const data = this.readData();
+    const operations = asArray(data.operations);
+    const operation = operations.find((item) => String(item.id) === String(operationId));
+    if (!operation) {
+      const error = new Error("No se encontro la operacion.");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (normalizeKey(operation.estado) === "ANULADA") return operation;
+
+    const draft = operation.draftData || {};
+    const liquidationConfirmed = Boolean(draft.liquidacionConfirmada)
+      || normalizeKey(operation.liquidacionEstado) === "CONFIRMADA";
+    const hasAccountMovements = buildOperationAccountMovements(operation).length > 0
+      || asArray(data.currentAccountManualMovements).some((item) => String(item.operacion || "") === String(operationId));
+    const operationMovementPrefix = `${operationId}-`;
+    const hasActiveImputations = asArray(data.currentAccountPayments)
+      .filter((payment) => !payment.anulado)
+      .some((payment) => asArray(payment.imputaciones).some((item) => {
+        const movementId = String(item.movementId || item.rowId || "");
+        return movementId === String(operationId) || movementId.startsWith(operationMovementPrefix);
+      }));
+    if (liquidationConfirmed || hasAccountMovements || hasActiveImputations) {
+      const error = new Error("La operacion ya tiene liquidacion o movimientos en cuenta corriente y no se puede anular desde Operaciones.");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const anuladaEn = new Date().toISOString();
+    operation.estado = "ANULADA";
+    operation.anuladaEn = anuladaEn;
+    operation.motivoAnulacion = normalizeText(input.motivo) || "Operacion reemplazada por carga como movimiento externo";
+    operation.draftData = {
+      ...draft,
+      estado: "ANULADA",
+      anuladaEn,
+      motivoAnulacion: operation.motivoAnulacion
+    };
+    data.operations = operations;
+    this.saveData(data);
+    return operation;
+  }
+
   async getCategorias() {
     const data = this.readData();
     return [...new Set(asArray(data.categories).map((item) => normalizeText(item)).filter(Boolean))]
@@ -2338,6 +2382,8 @@ class BackupDataSource {
         tipo: operation.tipo,
         destino: operation.destino,
         estado: operation.estado,
+        liquidacionEstado: operation.liquidacionEstado,
+        liquidacionConfirmada: Boolean(operation.draftData && operation.draftData.liquidacionConfirmada),
         vendedor: operation.vendedor,
         comprador: operation.comprador,
         consignataria: operation.draftData && operation.draftData.consignataria,
@@ -3444,6 +3490,7 @@ class PostgresJsonDataSource extends BackupDataSource {
   async deleteEstablecimiento(clienteId, renspaActual) { return this.withRemoteData(() => super.deleteEstablecimiento(clienteId, renspaActual), true); }
   async ensureEstablecimiento(clienteId, renspa, nombre) { return this.withRemoteData(() => super.ensureEstablecimiento(clienteId, renspa, nombre), true); }
   async saveOperacion(input) { return this.withRemoteData(() => super.saveOperacion(input), true); }
+  async anularOperacion(operationId, input) { return this.withRemoteData(() => super.anularOperacion(operationId, input), true); }
   async getCategorias() { return this.withRemoteData(() => super.getCategorias()); }
   async saveCategoria(currentName, input) { return this.withRemoteData(() => super.saveCategoria(currentName, input), true); }
   async deleteCategoria(currentName) { return this.withRemoteData(() => super.deleteCategoria(currentName), true); }
