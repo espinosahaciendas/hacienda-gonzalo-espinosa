@@ -24,6 +24,7 @@ const state = {
   liquidationIvaCompTouched: false,
   frigoBrutoSinIvaTouched: false,
   externalDueRows: [],
+  editingExternalDueRowId: "",
   commissionistRows: [],
   commissionistPage: 1,
   operationSearchRows: [],
@@ -53,7 +54,7 @@ let editingCashReconciliationBreakdownId = "";
 let editingCashReconciliationApplicationId = "";
 let fieldLeaseManualProductQuoteKeys = new Set();
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260924-comisionista-reporte-agrupado-v4";
+const APP_BUILD = "20260925-anular-operacion-sin-liquidar-v1";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -4838,14 +4839,17 @@ function operationSearchDate(operation) {
 function operationSearchStatusInfo(operation) {
   const liquidationStatus = normalizeSearch(operation.liquidacionEstado || operation.draftData?.liquidacionEstado);
   const operationStatus = normalizeSearch(operation.estado || operation.draftData?.estado);
-  const confirmed = Boolean(operation.liquidacionConfirmada || operation.draftData?.liquidacionConfirmada)
+  const annulled = operationStatus.includes("anulada");
+  const confirmed = !annulled && (Boolean(operation.liquidacionConfirmada || operation.draftData?.liquidacionConfirmada)
     || liquidationStatus.includes("confirmada")
     || liquidationStatus.includes("cerrada")
     || operationStatus.includes("confirmada")
-    || operationStatus.includes("cerrada");
+    || operationStatus.includes("cerrada"));
   return {
-    pending: !confirmed,
-    label: confirmed ? "Confirmada" : "Pendiente"
+    pending: !confirmed && !annulled,
+    confirmed,
+    annulled,
+    label: annulled ? "Anulada" : confirmed ? "Confirmada" : "Pendiente"
   };
 }
 
@@ -4857,7 +4861,8 @@ function operationSearchBasicMatches(operation, filters) {
   if (filters.to && date > dateOnly(filters.to)) return false;
   const statusInfo = operationSearchStatusInfo(operation);
   if (filters.status === "PENDIENTES" && !statusInfo.pending) return false;
-  if (filters.status === "CONFIRMADAS" && statusInfo.pending) return false;
+  if (filters.status === "CONFIRMADAS" && !statusInfo.confirmed) return false;
+  if (filters.status === "ANULADAS" && !statusInfo.annulled) return false;
   const clientText = normalizeSearch([
     operation.vendedor,
     operation.comprador,
@@ -4960,7 +4965,7 @@ function renderOperationSearchPage() {
           <td>${plainNumberValue(summary.heads)}</td>
           <td>${plainNumberValue(summary.kilos)} kgs</td>
           <td>${moneyValue(summary.amount)}</td>
-          <td><button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button></td>
+          <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : `<button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button>`}</td>
         </tr>`;
       }).join("")
     : `<tr><td colspan="11">No hay operaciones para los filtros aplicados.</td></tr>`;
@@ -6041,6 +6046,7 @@ function openCurrentAccountPanel(panelId) {
     $("#cc-external-due-date").value = today;
     setMoneyInput("#cc-external-due-amount", 0);
     state.externalDueRows = [];
+    state.editingExternalDueRowId = "";
     $("#cc-external-commissionist").value = "";
     setMoneyInput("#cc-external-commission-base", 0);
     $("#cc-external-commission-percent").value = "";
@@ -6323,7 +6329,7 @@ function renderExternalDueRows() {
     ? `${state.externalDueRows.length} vencimiento/s - total ${moneyValue(total)}${target ? ` / esperado ${moneyValue(target)}` : ""}`
     : `Sin vencimientos cargados${target ? ` - esperado ${moneyValue(target)}` : ""}`;
   body.innerHTML = state.externalDueRows.length
-    ? state.externalDueRows.map((item) => `<tr><td>${escapeHtml(formatDate(item.vencimiento))}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button danger-button" data-cc-remove-external-due="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
+    ? state.externalDueRows.map((item) => `<tr><td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(item.vencimiento)) || item.vencimiento || "-")}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button" data-cc-edit-external-due="${escapeHtml(item.id)}">Editar</button> <button type="button" class="small-button danger-button" data-cc-remove-external-due="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
     : `<tr><td colspan="3">Sin vencimientos cargados.</td></tr>`;
 }
 
@@ -6335,16 +6341,34 @@ function addExternalDueRow() {
     $("#cc-external-message").className = "form-message error";
     return;
   }
-  state.externalDueRows.push({
-    id: `VTO-${Date.now()}-${state.externalDueRows.length}`,
-    vencimiento,
-    importe
-  });
+  const editingId = state.editingExternalDueRowId;
+  if (editingId) {
+    state.externalDueRows = state.externalDueRows.map((item) => item.id === editingId
+      ? { ...item, vencimiento, importe }
+      : item);
+  } else {
+    state.externalDueRows.push({
+      id: `VTO-${Date.now()}-${state.externalDueRows.length}`,
+      vencimiento,
+      importe
+    });
+  }
+  state.editingExternalDueRowId = "";
+  $("#cc-external-due-add").textContent = "Agregar vencimiento";
   $("#cc-external-message").textContent = "";
   $("#cc-external-message").className = "form-message";
   $("#cc-external-due-date").value = vencimiento;
   setMoneyInput("#cc-external-due-amount", 0);
   renderExternalDueRows();
+}
+
+function editExternalDueRow(id) {
+  const row = state.externalDueRows.find((item) => item.id === id);
+  if (!row) return;
+  state.editingExternalDueRowId = row.id;
+  $("#cc-external-due-date").value = dateToInput(row.vencimiento);
+  setMoneyInput("#cc-external-due-amount", Number(row.importe || 0));
+  $("#cc-external-due-add").textContent = "Guardar cambio";
 }
 
 function collectExternalDueRows() {
@@ -6422,6 +6446,8 @@ function openExternalMovementEdit(movementId) {
         importe: Math.abs(Number(item.importe || 0))
       }))
     : [];
+  state.editingExternalDueRowId = "";
+  $("#cc-external-due-add").textContent = "Agregar vencimiento";
   $("#cc-external-multiple-due").checked = accountRows.length > 1;
   $("#cc-external-due-panel").hidden = accountRows.length <= 1;
   syncExternalConceptFields();
@@ -8480,18 +8506,41 @@ function renderClientNameSuggestions() {
 
 function renderOperaciones() {
   $("#operaciones-body").innerHTML = state.operaciones
-    .map((operation) => `
-      <tr>
+    .map((operation) => {
+      const statusInfo = operationSearchStatusInfo(operation);
+      return `
+      <tr class="${statusInfo.annulled ? "movement-cancelled" : ""}">
         <td>${escapeHtml(operation.id)}</td>
         <td>${escapeHtml(operation.fecha || "-")}</td>
         <td>${escapeHtml(operationTypeLabel(operation))}</td>
         <td>${escapeHtml(operation.vendedor || "-")}</td>
         <td>${escapeHtml(operation.comprador || operation.consignataria || "-")}</td>
         <td>${escapeHtml(operation.total || "-")}</td>
-        <td><button type="button" class="small-button" data-open-sale="${escapeHtml(operation.id)}">Continuar</button></td>
+        <td>${escapeHtml(statusInfo.label.toUpperCase())}</td>
+        <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : `<button type="button" class="small-button" data-open-sale="${escapeHtml(operation.id)}">Continuar</button>${statusInfo.pending ? ` <button type="button" class="small-button danger-button" data-cancel-operation="${escapeHtml(operation.id)}">Anular</button>` : ""}`}</td>
       </tr>
-    `)
+    `;})
     .join("");
+}
+
+async function cancelOperation(operationId) {
+  const operation = state.operaciones.find((item) => String(item.id) === String(operationId));
+  if (!operation) return;
+  const confirmed = window.confirm(`Se anulara la operacion ${operation.id}. Solo se permite si todavia no tiene liquidacion ni movimientos en cuenta corriente. ¿Continuar?`);
+  if (!confirmed) return;
+  try {
+    await fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}/anular`, {
+      method: "POST",
+      body: JSON.stringify({ motivo: "Operacion reemplazada por carga como movimiento externo" })
+    });
+    const response = await fetchJson("/api/operaciones");
+    state.operaciones = response.items || [];
+    renderOperaciones();
+    renderMetrics();
+    setOperationMessage(`Operacion ${operation.id} anulada. Ya puede cargar la venta correcta como movimiento externo.`, "ok");
+  } catch (error) {
+    setOperationMessage(error.message, "error");
+  }
 }
 
 function renderCategories() {
@@ -11411,9 +11460,19 @@ async function init() {
   $("#cc-external-multiple-due").addEventListener("change", toggleExternalDuePanel);
   $("#cc-external-due-add").addEventListener("click", addExternalDueRow);
   $("#cc-external-due-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-cc-edit-external-due]");
+    if (editButton) {
+      editExternalDueRow(editButton.dataset.ccEditExternalDue);
+      return;
+    }
     const button = event.target.closest("[data-cc-remove-external-due]");
     if (!button) return;
     state.externalDueRows = state.externalDueRows.filter((item) => item.id !== button.dataset.ccRemoveExternalDue);
+    if (state.editingExternalDueRowId === button.dataset.ccRemoveExternalDue) {
+      state.editingExternalDueRowId = "";
+      $("#cc-external-due-add").textContent = "Agregar vencimiento";
+      setMoneyInput("#cc-external-due-amount", 0);
+    }
     renderExternalDueRows();
   });
   $("#cc-external-amount").addEventListener("input", renderExternalDueRows);
@@ -11714,6 +11773,11 @@ async function init() {
     editClient(button.dataset.editClient);
   });
   $("#operaciones-body").addEventListener("click", (event) => {
+    const cancelButton = event.target.closest("[data-cancel-operation]");
+    if (cancelButton) {
+      cancelOperation(cancelButton.dataset.cancelOperation);
+      return;
+    }
     const button = event.target.closest("[data-open-sale]");
     if (!button) return;
     openSale(button.dataset.openSale);
