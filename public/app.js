@@ -58,7 +58,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260928-panel-clientes-v5";
+const APP_BUILD = "20260928-clientes-id-cuit-v8";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -9936,10 +9936,13 @@ async function fillOperationForm(operation) {
 
   $("#operation-seller-name").value = operation.vendedor || "";
   $("#operation-seller-id").value = vendedor ? vendedor.id : "";
+  $("#operation-seller-name").dataset.clientId = vendedor ? vendedor.id : "";
   $("#operation-buyer-name").value = operation.comprador || "";
   $("#operation-buyer-id").value = comprador ? comprador.id : "";
+  $("#operation-buyer-name").dataset.clientId = comprador ? comprador.id : "";
   $("#operation-consignee-name").value = operation.consignataria || "";
   $("#operation-consignee-id").value = consignataria ? consignataria.id : "";
+  $("#operation-consignee-name").dataset.clientId = consignataria ? consignataria.id : "";
 
   if (vendedor) {
     const est = await fetchJson(`/api/clientes/${encodeURIComponent(vendedor.id)}/establecimientos`);
@@ -9963,6 +9966,9 @@ function resetOperationForm() {
   showOperationWorkspace();
   closeSuggestions();
   $("#operation-form").reset();
+  ["#operation-seller-name", "#operation-buyer-name", "#operation-consignee-name"].forEach((selector) => {
+    $(selector).dataset.clientId = "";
+  });
   $("#sale-form").reset();
   $("#liquidation-form").reset();
   $("#operation-id").value = "";
@@ -9999,6 +10005,8 @@ function resetOperationForm() {
 
 function renderPartySuggestions(inputId, suggestionsId, hiddenId) {
   const node = $(suggestionsId);
+  $(hiddenId).value = "";
+  $(inputId).dataset.clientId = "";
   const query = $(inputId).value;
   if (query.length < 3) {
     node.hidden = true;
@@ -10035,6 +10043,7 @@ async function pickOperationClient(clientId, inputSelector, hiddenSelector) {
   if (!client) return;
   $(inputSelector).value = client.nombre;
   $(hiddenSelector).value = client.id;
+  $(inputSelector).dataset.clientId = client.id;
   closeSuggestions();
 
   const establishments = await fetchJson(`/api/clientes/${encodeURIComponent(client.id)}/establecimientos`);
@@ -10044,6 +10053,7 @@ async function pickOperationClient(clientId, inputSelector, hiddenSelector) {
   if (hiddenSelector === "#operation-buyer-id") {
     setSelectOptions("#operation-renspa-destination-select", establishments.items || [], "Elegir RENSPA destino");
   }
+  $(hiddenSelector).value = client.id;
 }
 
 function syncOperationType() {
@@ -10070,9 +10080,9 @@ async function saveOperation(event) {
     tipo: $("#operation-type").value,
     ventaAnticipada: $("#operation-anticipated").checked,
     destino: $("#operation-destination").value,
-    vendedorId: $("#operation-seller-id").value,
-    compradorId: $("#operation-buyer-id").value,
-    consignatariaId: $("#operation-consignee-id").value,
+    vendedorId: $("#operation-seller-id").value || $("#operation-seller-name").dataset.clientId || "",
+    compradorId: $("#operation-buyer-id").value || $("#operation-buyer-name").dataset.clientId || "",
+    consignatariaId: $("#operation-consignee-id").value || $("#operation-consignee-name").dataset.clientId || "",
     calculoFrigorificoComp: $("#operation-frigo-mode").value,
     renspaOrigen: originManual || $("#operation-renspa-origin-select").value,
     renspaDestino: destinationManual || $("#operation-renspa-destination-select").value,
