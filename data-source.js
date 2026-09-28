@@ -110,6 +110,17 @@ function normalizeCuit(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function clientRecordId(client) {
+  if (client && client.id) return String(client.id);
+  const nameKey = normalizeKey(client && client.nombre);
+  const cuit = normalizeCuit(client && client.cuit);
+  const nameSignature = crypto.createHash("sha1")
+    .update(normalizeText(client && client.nombre))
+    .digest("hex")
+    .slice(0, 10);
+  return `${nameKey}__${cuit || "SIN_CUIT"}__${nameSignature}`;
+}
+
 function normalizeText(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
@@ -1615,7 +1626,7 @@ class BackupDataSource {
     const data = this.readData();
     return asArray(data.clients)
       .map((client) => ({
-        id: client.id || normalizeKey(client.nombre),
+        id: clientRecordId(client),
         nombre: normalizeText(client.nombre),
         cuit: client.cuit || "",
         tipo: client.tipo || "Cliente",
@@ -1640,7 +1651,7 @@ class BackupDataSource {
       throw error;
     }
 
-    const duplicateByName = clients.find((client) => normalizeKey(client.nombre) === normalizeKey(name) && String(client.id || normalizeKey(client.nombre)) !== String(id));
+    const duplicateByName = clients.find((client) => normalizeKey(client.nombre) === normalizeKey(name) && clientRecordId(client) !== String(id));
     if (duplicateByName) {
       const error = new Error(`Ya existe un cliente con ese nombre: ${duplicateByName.nombre}`);
       error.statusCode = 409;
@@ -1650,7 +1661,7 @@ class BackupDataSource {
 
     const cuitDigits = normalizeCuit(cuit);
     if (cuitDigits) {
-      const duplicateByCuit = clients.find((client) => normalizeCuit(client.cuit) === cuitDigits && String(client.id || normalizeKey(client.nombre)) !== String(id));
+      const duplicateByCuit = clients.find((client) => normalizeCuit(client.cuit) === cuitDigits && clientRecordId(client) !== String(id));
       if (duplicateByCuit) {
         const error = new Error(`Ya existe un cliente con ese CUIT: ${duplicateByCuit.nombre}`);
         error.statusCode = 409;
@@ -1659,7 +1670,7 @@ class BackupDataSource {
       }
     }
 
-    const index = clients.findIndex((client) => String(client.id || normalizeKey(client.nombre)) === String(id));
+    const index = clients.findIndex((client) => clientRecordId(client) === String(id));
     const saved = {
       id,
       nombre: name,
@@ -1742,7 +1753,7 @@ class BackupDataSource {
   async mergeCliente(sourceId, input) {
     const data = this.readData();
     const clients = asArray(data.clients);
-    const sourceIndex = clients.findIndex((client) => String(client.id || normalizeKey(client.nombre)) === String(sourceId));
+    const sourceIndex = clients.findIndex((client) => clientRecordId(client) === String(sourceId));
     const source = clients[sourceIndex];
     if (!source) {
       const error = new Error("No se encontro el cliente a fusionar.");
@@ -1752,14 +1763,14 @@ class BackupDataSource {
     const targetName = normalizeText(input.targetName);
     const targetId = normalizeText(input.targetId);
     const target = targetId
-      ? clients.find((client) => String(client.id || normalizeKey(client.nombre)) === String(targetId))
-      : clients.find((client) => normalizeKey(client.nombre) === normalizeKey(targetName) && String(client.id || normalizeKey(client.nombre)) !== String(source.id || normalizeKey(source.nombre)));
+      ? clients.find((client) => clientRecordId(client) === String(targetId))
+      : clients.find((client) => normalizeKey(client.nombre) === normalizeKey(targetName) && clientRecordId(client) !== clientRecordId(source));
     if (!target) {
       const error = new Error("No se encontro el cliente correcto de destino.");
       error.statusCode = 404;
       throw error;
     }
-    if (String(target.id || normalizeKey(target.nombre)) === String(source.id || normalizeKey(source.nombre))) {
+    if (clientRecordId(target) === clientRecordId(source)) {
       const error = new Error("El cliente destino no puede ser el mismo registro.");
       error.statusCode = 400;
       throw error;
@@ -1777,7 +1788,7 @@ class BackupDataSource {
   async deleteCliente(clientId) {
     const data = this.readData();
     const clients = asArray(data.clients);
-    const index = clients.findIndex((client) => String(client.id || normalizeKey(client.nombre)) === String(clientId));
+    const index = clients.findIndex((client) => clientRecordId(client) === String(clientId));
     const client = clients[index];
     if (!client) {
       const error = new Error("No se encontro el cliente.");
