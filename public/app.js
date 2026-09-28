@@ -58,7 +58,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260925-buscadores-operaciones-v3";
+const APP_BUILD = "20260928-panel-clientes-v5";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -148,6 +148,19 @@ function normalizeAccountName(value) {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function clientLookupText(client) {
+  const cuit = String(client?.cuit || "");
+  const cuitDigits = cuit.replace(/\D/g, "");
+  return normalizeAccountName(`${client?.nombre || ""} ${cuit} ${cuitDigits} ${client?.tipo || ""}`);
+}
+
+function matchesClientLookup(client, query) {
+  const words = normalizeAccountName(query).split(" ").filter(Boolean);
+  if (!words.length) return true;
+  const haystack = clientLookupText(client);
+  return words.every((word) => haystack.includes(word));
 }
 
 function setView(view) {
@@ -8462,7 +8475,7 @@ function confirmCurrentAccountPaymentDifference(amount, rows, paymentType = "") 
 }
 
 function renderClientes() {
-  const query = $("#client-search").value.trim().toLowerCase();
+  const query = $("#client-search").value.trim();
   const hasFilter = Boolean(query);
   $("#client-list-hint").textContent = hasFilter
     ? "Resultados de la busqueda."
@@ -8472,10 +8485,7 @@ function renderClientes() {
     $("#clientes-body").innerHTML = `<tr><td colspan="4">La lista se mostrara cuando busque un cliente.</td></tr>`;
     return;
   }
-  const rows = state.clientes.filter((client) => {
-    const haystack = `${client.nombre} ${client.cuit} ${client.tipo}`.toLowerCase();
-    return haystack.includes(query);
-  });
+  const rows = state.clientes.filter((client) => matchesClientLookup(client, query));
 
   $("#clientes-body").innerHTML = rows
     .map((client) => `
@@ -8556,6 +8566,15 @@ function renderOperaciones() {
       </tr>
     `;})
     .join("");
+}
+
+function handleClientSearchInput() {
+  const query = $("#client-search").value.trim();
+  const selected = state.clientes.find((client) => String(client.id) === String(state.selectedClientId));
+  if (selected && query && !matchesClientLookup(selected, query)) {
+    resetClientForm();
+  }
+  renderClientes();
 }
 
 async function cancelOperation(operationId) {
@@ -9980,18 +9999,14 @@ function resetOperationForm() {
 
 function renderPartySuggestions(inputId, suggestionsId, hiddenId) {
   const node = $(suggestionsId);
-  const query = normalizeSearch($(inputId).value);
+  const query = $(inputId).value;
   if (query.length < 3) {
     node.hidden = true;
     node.innerHTML = "";
     return;
   }
-  const words = query.split(" ").filter(Boolean);
   const matches = state.clientes
-    .filter((client) => {
-      const haystack = normalizeSearch(`${client.nombre} ${client.cuit}`);
-      return words.every((word) => haystack.includes(word));
-    })
+    .filter((client) => matchesClientLookup(client, query))
     .slice(0, 6);
 
   node.hidden = false;
@@ -11097,7 +11112,7 @@ async function init() {
     }
   });
 
-  $("#client-search").addEventListener("input", renderClientes);
+  $("#client-search").addEventListener("input", handleClientSearchInput);
   $("#client-show-all").addEventListener("click", () => {
     state.showAllClients = !state.showAllClients;
     renderClientes();
