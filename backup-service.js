@@ -75,7 +75,7 @@ function createBackupAutomation({ dataSource, storageConfig, auditEvent = async 
       headers: authHeaders(cfg)
     });
     if (detail.ok) return;
-    if (detail.status !== 404) throw new Error(`No se pudo consultar el bucket de backups (${detail.status}).`);
+    if (![400, 404].includes(detail.status)) throw new Error(`No se pudo consultar el bucket de backups (${detail.status}).`);
     const created = await fetchImpl(`${cfg.url}/storage/v1/bucket`, {
       method: "POST",
       headers: authHeaders(cfg, { "Content-Type": "application/json" }),
