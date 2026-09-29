@@ -1193,6 +1193,54 @@ label textarea {
   max-height: 72vh;
 }
 
+.operation-row-actions {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.operation-action-button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  height: 32px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 32px;
+}
+
+.operation-action-button:focus-visible {
+  outline: 3px solid rgba(185, 134, 70, 0.35);
+  outline-offset: 2px;
+}
+
+.operation-action-open {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: white;
+}
+
+.operation-action-open:hover {
+  background: #174440;
+}
+
+.operation-action-derive {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: #704816;
+}
+
+.operation-action-derive:hover {
+  background: #f4d7ad;
+}
+
 .liquidation-form {
   display: grid;
   gap: 13px;

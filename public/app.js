@@ -58,7 +58,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260929-backups-automaticos-v10";
+const APP_BUILD = "20260929-acciones-operaciones-v12";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -72,6 +72,13 @@ function $(selector) {
 
 function $all(selector) {
   return Array.from(document.querySelectorAll(selector));
+}
+
+function finishPrintPopup(popup, autoPrint = false) {
+  popup.document.close();
+  const printButton = popup.document.querySelector("[data-print-popup]");
+  if (printButton) printButton.addEventListener("click", () => popup.print());
+  if (autoPrint) setTimeout(() => popup.print(), 250);
 }
 
 async function fetchJson(path, options = {}) {
@@ -1209,9 +1216,9 @@ function printCashReport() {
     <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoria</th><th>Importe</th><th>Salio de</th><th>Pagado por</th><th>Comprobante</th><th>Estado</th><th>Observacion</th></tr></thead><tbody>
       ${rows.map((item) => `<tr><td>${escapeHtml(item.fecha || "-")}</td><td>${escapeHtml(item.concepto || "-")}${item.proveedor ? `<br>${escapeHtml(item.proveedor)}` : ""}</td><td>${escapeHtml(item.categoria || "-")}</td><td class="amount">${moneyValue(item.importe)}</td><td>${escapeHtml(item.origenEfectivo || "-")}</td><td>${escapeHtml(item.pagadoPor || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td class="${item.recuperado ? "" : "pending"}">${item.recuperado ? "Recuperado" : "Pendiente"}</td><td>${escapeHtml(item.observacion || "-")}</td></tr>`).join("")}
     </tbody></table>
-    <button onclick="window.print()">Imprimir / guardar PDF</button>
+    <button type="button" data-print-popup>Imprimir / guardar PDF</button>
   </body></html>`);
-  popup.document.close();
+  finishPrintPopup(popup);
 }
 
 function cashReconciliationReportItems(itemId = "") {
@@ -1287,9 +1294,9 @@ function printCashReconciliationReport(itemId = "") {
       <div><span>Movimientos</span><strong>${items.length}</strong></div>
     </div>
     <table><thead><tr><th>Fecha</th><th>Recibido de</th><th>Referencia</th><th>Ingreso</th><th>Egreso</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>${cashReconciliationRowsHtml(items)}</tbody></table>
-    <button onclick="window.print()">Imprimir / guardar PDF</button>
+    <button type="button" data-print-popup>Imprimir / guardar PDF</button>
   </body></html>`);
-  popup.document.close();
+  finishPrintPopup(popup);
 }
 
 function cashReconciliationSummaryEntries(items) {
@@ -1365,9 +1372,9 @@ function printCashReconciliationSummaryReport() {
         <table><thead><tr class="out-title"><th>Fecha</th><th>Concepto</th><th>Destino</th><th>Importe</th></tr></thead><tbody>${summaryColumnRows(outcomes, "out")}</tbody><tfoot><tr><td colspan="3">Total egresos</td><td class="amount negative">${moneyValue(totalOut)}</td></tr><tr><td colspan="3" class="balance">Saldo del periodo</td><td class="amount balance">${moneyValue(balance)}</td></tr></tfoot></table>
       </section>
     </div>
-    <button onclick="window.print()">Imprimir / guardar PDF</button>
+    <button type="button" data-print-popup>Imprimir / guardar PDF</button>
   </body></html>`);
-  popup.document.close();
+  finishPrintPopup(popup);
 }
 
 function setFieldLeaseMessage(message, type = "") {
@@ -4449,9 +4456,9 @@ function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTE
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
     ${isGeneralReport ? "" : `<h2>Pagos imputados a esta cuota</h2>
     <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="7">Total pagado</td><td class="amount">${moneyValue(paymentsTotals.pagado)}</td></tr><tr class="total"><td colspan="7">Comision/descuento registrado</td><td class="amount">${moneyValue(paymentsTotals.comision)}</td></tr><tr class="total"><td colspan="7">Total aplicado al saldo</td><td class="amount">${moneyValue(paymentsAppliedToBalance)}</td></tr><tr class="total"><td colspan="7">Saldo pendiente general</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>`}
-    <div class="print-actions"><button onclick="window.print()">Imprimir / guardar PDF</button></div>
+    <div class="print-actions"><button type="button" data-print-popup>Imprimir / guardar PDF</button></div>
   </body></html>`);
-  popup.document.close();
+  finishPrintPopup(popup);
 }
 
 function printCurrentFieldLeaseReport(audience = "INTERNO") {
@@ -4676,9 +4683,9 @@ function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDA
     <h2>Pagos, descuentos o comisiones imputadas</h2>
     <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="6">Pagos por contrato / facturado</td><td class="amount">${moneyValue(paymentTotals.facturado)}</td></tr><tr class="total"><td colspan="6">Pagos en efectivo</td><td class="amount">${moneyValue(paymentTotals.efectivo)}</td></tr><tr class="total"><td colspan="6">Otros pagos registrados</td><td class="amount">${moneyValue(paymentTotals.pagos)}</td></tr><tr class="total"><td colspan="6">Comisiones / descuentos registrados</td><td class="amount">${moneyValue(paymentTotals.comision)}</td></tr><tr class="total"><td colspan="6">Total aplicado al saldo</td><td class="amount">${moneyValue(paymentAppliedToBalance)}</td></tr><tr class="total"><td colspan="6">Saldo de la parte</td><td class="amount">${moneyValue(balance)}</td></tr></tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
-    <div class="print-actions"><button onclick="window.print()">Imprimir / guardar PDF</button></div>
+    <div class="print-actions"><button type="button" data-print-popup>Imprimir / guardar PDF</button></div>
   </body></html>`);
-  popup.document.close();
+  finishPrintPopup(popup);
 }
 
 function printCurrentFieldLeaseReceipt(role = "ARRENDADOR") {
@@ -7033,8 +7040,8 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   ${paidDeliveryHistory ? `<h2>Entregas realizadas a cuenta</h2><table><thead><tr><th>Fecha</th><th>Recibo</th><th>Medio / referencia</th><th>Importe</th><th>Estado</th></tr></thead><tbody>${paidDeliveryHistory}</tbody></table>` : ""}
   <h2>Descuentos aplicados</h2>
   <table class="discount"><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe original</th><th>Importe descontado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(discountImputations, "Sin descuentos aplicados.")}<tr class="discount-total"><td colspan="4">Total descuentos / comisiones</td><td class="amount">${moneyValue(discountTotal)}</td><td></td></tr><tr class="net-total"><td colspan="4">Neto del comprobante</td><td class="amount">${moneyValue(instrumentTotal || payment.importe)}</td><td></td></tr></tbody></table>
-  <button onclick="window.print()">Imprimir / guardar PDF</button>${autoPrint ? `<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),250));</script>` : ""}</body></html>`);
-  popup.document.close();
+  <button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
+  finishPrintPopup(popup, autoPrint);
 }
 
 function getCurrentAccountReportFilters() {
@@ -7320,8 +7327,8 @@ function printCurrentAccountReport(forcedType = "") {
   ${expensesTable}
   ${commissionsTable}
   <h2>Detalle de movimientos</h2>
-  <table><thead><tr><th>Fecha</th><th>Vencimiento</th><th>Cliente</th><th>Concepto</th><th>Comprobante</th><th>Operacion</th><th>Importe original</th><th>Imputado</th><th>Saldo pendiente</th><th>Estado</th></tr></thead><tbody>${currentAccountReportMovementRows(rows, imputationsByMovement, filters.viewMode)}</tbody></table><button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
-  popup.document.close();
+  <table><thead><tr><th>Fecha</th><th>Vencimiento</th><th>Cliente</th><th>Concepto</th><th>Comprobante</th><th>Operacion</th><th>Importe original</th><th>Imputado</th><th>Saldo pendiente</th><th>Estado</th></tr></thead><tbody>${currentAccountReportMovementRows(rows, imputationsByMovement, filters.viewMode)}</tbody></table><button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
+  finishPrintPopup(popup);
 }
 
 function dueDateInRange(movement, from, to) {
@@ -7557,8 +7564,8 @@ function printCurrentAccountDueReport(options = {}) {
   <div class="summary"><div><span>Periodo</span><strong>${escapeHtml(finalPeriodLabel)}</strong></div><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>A cobrar</span><strong class="receivable">${moneyValue(totals.cobrar)}</strong></div><div><span>A pagar</span><strong class="payable">${moneyValue(totals.pagar)}</strong></div><div><span>Movimientos</span><strong>${dueRows.length}</strong></div></div>
   <h2>Agenda resumida</h2>
   <table><thead><tr><th style="width:18%">Cliente</th><th style="width:35%">Negocio</th><th style="width:11%">Facturado</th><th style="width:11%">Efectivo</th><th style="width:12%">Total</th><th style="width:13%">Comprobante</th></tr></thead><tbody>${dueRowsHtml}</tbody></table>
-  <button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
-  popup.document.close();
+  <button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
+  finishPrintPopup(popup);
 }
 
 function dueReportBusinessLabel(movement) {
@@ -8609,7 +8616,7 @@ function renderOperaciones() {
         <td>${escapeHtml(operation.comprador || operation.consignataria || "-")}</td>
         <td>${escapeHtml(operation.total || "-")}</td>
         <td>${escapeHtml(statusInfo.label.toUpperCase())}</td>
-        <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? '<span class="subtle">Registro comercial</span>' : `<button type="button" class="small-button" data-open-sale="${escapeHtml(operation.id)}">Continuar</button>${statusInfo.pending ? ` <button type="button" class="small-button" data-derive-operation="${escapeHtml(operation.id)}">Derivar a externo</button>` : ""}`}</td>
+        <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? '<span class="subtle">Registro comercial</span>' : `<div class="operation-row-actions"><button type="button" class="operation-action-button operation-action-open" data-open-sale="${escapeHtml(operation.id)}" title="Continuar operacion" aria-label="Continuar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8594;</span></button>${statusInfo.pending ? `<button type="button" class="operation-action-button operation-action-derive" data-derive-operation="${escapeHtml(operation.id)}" title="Derivar a movimiento externo" aria-label="Derivar operacion ${escapeHtml(operation.id)} a movimiento externo"><span aria-hidden="true">&#8599;</span></button>` : ""}</div>`}</td>
       </tr>
     `;})
     .join("");
@@ -10551,8 +10558,8 @@ function printReportParty(party) {
     .report-table th,.report-table td{border:1px solid #cbd7d4;padding:3px 4px;text-align:left;vertical-align:top}
     .report-total{background:#edf3f1;font-weight:bold}.seller-net{background:#eaf2ff}.buyer-net{background:#fff0e6}
     button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:6mm}body{margin:0}button{display:none}}
-  </style></head><body>${clone.outerHTML}<button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
-  popup.document.close();
+  </style></head><body>${clone.outerHTML}<button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
+  finishPrintPopup(popup);
   popup.focus();
 }
 
@@ -10581,8 +10588,8 @@ function printReportSheet() {
     .report-table th,.report-table td{border:1px solid #cbd7d4;padding:3px 4px;text-align:left;vertical-align:top}
     .report-total{background:#edf3f1;font-weight:bold}.seller-net{background:#eaf2ff}.buyer-net{background:#fff0e6}
     button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:6mm}body{margin:0}button{display:none}}
-  </style></head><body>${clone.innerHTML}<button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
-  popup.document.close();
+  </style></head><body>${clone.innerHTML}<button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
+  finishPrintPopup(popup);
   popup.focus();
 }
 
@@ -11342,6 +11349,8 @@ async function init() {
   $("#field-contract-pdf-upload").addEventListener("click", uploadFieldContractPdf);
   $("#field-contract-pdf-open").addEventListener("click", () => openFieldContractPdf());
   $("#field-contract-party-add").addEventListener("click", addFieldContractPartyRow);
+  $("#field-contract-line-add").addEventListener("click", addFieldContractLineRow);
+  $("#field-contract-installment-add").addEventListener("click", addFieldContractInstallmentRow);
   $all("#field-contract-form input, #field-contract-form select, #field-contract-form textarea").forEach((node) => {
     node.addEventListener("input", () => {
       syncFieldContractFormToActive();
