@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { createDataSource } = require("./data-source");
+const { createBackupAutomation } = require("./backup-service");
 
 const PORT = Number(process.env.PORT || 4100);
 const AUTH_REQUIRED = process.env.AUTH_REQUIRED === "1";
@@ -14,6 +15,18 @@ const PUBLIC_DIR = path.join(ROOT, "public");
 const LOCAL_DOCUMENTS_DIR = path.join(ROOT, "data", "documentos");
 assertProductionConfig();
 const dataSource = createDataSource();
+const backupAutomation = createBackupAutomation({
+  dataSource,
+  storageConfig,
+  auditEvent: async (action, details) => {
+    if (typeof dataSource.auditSecurityEvent !== "function") return;
+    try {
+      await dataSource.auditSecurityEvent({ entidad: "SEGURIDAD", accion: action, despues: details });
+    } catch (error) {
+      console.error("No se pudo auditar el backup automatico:", error.message);
+    }
+  }
+});
 const LOGIN_MAX_FAILURES = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_BLOCK_MS = 15 * 60 * 1000;
@@ -42,8 +55,8 @@ function sendJson(res, statusCode, payload) {
 }
 
 function requestIp(req) {
-  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
-  return forwarded || req.socket.remoteAddress || "unknown";
+  const forwarded = String(req?.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
+  return forwarded || req?.socket?.remoteAddress || "sistema";
 }
 
 function loginAttemptKey(req, email) {
@@ -502,6 +515,15 @@ async function handleApi(req, res) {
     return;
   }
 
+  if (parsed.pathname === "/api/backup/status" && req.method === "GET") {
+    if (session.rol !== "ADMIN") {
+      sendJson(res, 403, { error: "Solo un usuario administrador puede consultar los backups." });
+      return;
+    }
+    sendJson(res, 200, backupAutomation.status());
+    return;
+  }
+
   if (parsed.pathname === "/api/backup/download" && req.method === "GET") {
     if (session.rol !== "ADMIN") {
       sendJson(res, 403, { error: "Solo un usuario administrador puede descargar backups." });
@@ -938,4 +960,5 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`Gonzalo Espinosa Hacienda listo en http://localhost:${PORT}`);
   console.log(`Modo de datos: ${dataSource.mode()}`);
+  backupAutomation.start();
 });

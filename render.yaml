@@ -23,3 +23,13 @@ services:
         value: "0"
       - key: CONSULTA_DOCUMENTS_ENABLED
         value: "0"
+      - key: BACKUP_AUTOMATION_ENABLED
+        value: "1"
+      - key: SUPABASE_BACKUP_BUCKET
+        value: backups-hacienda
+      - key: BACKUP_ENCRYPTION_KEY
+        sync: false
+      - key: BACKUP_RETENTION_COUNT
+        value: "35"
+      - key: BACKUP_RESTORE_TEST_DAYS
+        value: "7"
