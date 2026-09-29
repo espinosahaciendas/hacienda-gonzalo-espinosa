@@ -58,7 +58,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260928-clientes-id-cuit-v8";
+const APP_BUILD = "20260929-operaciones-derivadas-v9";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -4764,6 +4764,7 @@ async function renderPeriodStats() {
   ));
   if (requestId !== periodStatsRequestId) return;
   const operations = details.filter((operation) => {
+    if (operationSearchStatusInfo(operation).annulled) return false;
     const date = operationDateForPeriod(operation);
     if (!date) return false;
     date.setHours(0, 0, 0, 0);
@@ -4871,18 +4872,23 @@ function operationSearchStatusInfo(operation) {
   const operationStatus = normalizeSearch(operation.estado || operation.draftData?.estado);
   const hasAccountMovements = Boolean(operation.enCuentaCorriente)
     || (state.cuenta?.movimientos || []).some((movement) => String(movement.operacion || "") === String(operation.id || "") && String(movement.estado || "").toUpperCase() !== "ANULADO");
-  const annulled = operationStatus.includes("anulada");
-  const confirmed = !annulled && (Boolean(operation.liquidacionConfirmada || operation.draftData?.liquidacionConfirmada)
+  const derivationReason = normalizeSearch(operation.motivoDerivacion || operation.draftData?.motivoDerivacion || operation.motivoAnulacion || operation.draftData?.motivoAnulacion);
+  const annulledStatus = operationStatus.includes("anulada");
+  const derived = operationStatus.includes("derivada")
+    || (annulledStatus && derivationReason.includes("movimiento externo"));
+  const annulled = annulledStatus && !derived;
+  const confirmed = !annulled && !derived && (Boolean(operation.liquidacionConfirmada || operation.draftData?.liquidacionConfirmada)
     || hasAccountMovements
     || liquidationStatus.includes("confirmada")
     || liquidationStatus.includes("cerrada")
     || operationStatus.includes("confirmada")
     || operationStatus.includes("cerrada"));
   return {
-    pending: !confirmed && !annulled,
+    pending: !confirmed && !annulled && !derived,
     confirmed,
     annulled,
-    label: annulled ? "Anulada" : confirmed ? (hasAccountMovements ? "En cuenta corriente" : "Confirmada") : "Pendiente"
+    derived,
+    label: derived ? "Derivada a movimiento externo" : annulled ? "Anulada" : confirmed ? (hasAccountMovements ? "En cuenta corriente" : "Confirmada") : "Pendiente"
   };
 }
 
@@ -4895,6 +4901,7 @@ function operationSearchBasicMatches(operation, filters) {
   const statusInfo = operationSearchStatusInfo(operation);
   if (filters.status === "PENDIENTES" && !statusInfo.pending) return false;
   if (filters.status === "CONFIRMADAS" && !statusInfo.confirmed) return false;
+  if (filters.status === "DERIVADAS" && !statusInfo.derived) return false;
   if (filters.status === "ANULADAS" && !statusInfo.annulled) return false;
   const clientText = normalizeSearch([
     operation.vendedor,
@@ -5013,7 +5020,7 @@ function renderOperationSearchPage() {
           <td>${plainNumberValue(summary.heads)}</td>
           <td>${plainNumberValue(summary.kilos)} kgs</td>
           <td>${moneyValue(summary.amount)}</td>
-          <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : `<button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button>`}</td>
+          <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? '<span class="subtle">Registro comercial</span>' : `<button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button>`}</td>
         </tr>`;
       }).join("")
     : `<tr><td colspan="11">No hay operaciones para los filtros aplicados.</td></tr>`;
@@ -8562,7 +8569,7 @@ function renderOperaciones() {
         <td>${escapeHtml(operation.comprador || operation.consignataria || "-")}</td>
         <td>${escapeHtml(operation.total || "-")}</td>
         <td>${escapeHtml(statusInfo.label.toUpperCase())}</td>
-        <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : `<button type="button" class="small-button" data-open-sale="${escapeHtml(operation.id)}">Continuar</button>${statusInfo.pending ? ` <button type="button" class="small-button danger-button" data-cancel-operation="${escapeHtml(operation.id)}">Anular</button>` : ""}`}</td>
+        <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? '<span class="subtle">Registro comercial</span>' : `<button type="button" class="small-button" data-open-sale="${escapeHtml(operation.id)}">Continuar</button>${statusInfo.pending ? ` <button type="button" class="small-button" data-derive-operation="${escapeHtml(operation.id)}">Derivar a externo</button>` : ""}`}</td>
       </tr>
     `;})
     .join("");
@@ -8577,21 +8584,21 @@ function handleClientSearchInput() {
   renderClientes();
 }
 
-async function cancelOperation(operationId) {
+async function deriveOperationToExternal(operationId) {
   const operation = state.operaciones.find((item) => String(item.id) === String(operationId));
   if (!operation) return;
-  const confirmed = window.confirm(`Se anulara la operacion ${operation.id}. Solo se permite si todavia no tiene liquidacion ni movimientos en cuenta corriente. ¿Continuar?`);
+  const confirmed = window.confirm(`La operacion ${operation.id} quedara registrada como venta derivada a movimiento externo. No generara cuenta corriente desde Operaciones. Solo se permite si no tiene liquidacion ni imputaciones. ¿Continuar?`);
   if (!confirmed) return;
   try {
-    await fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}/anular`, {
+    await fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}/derivar-externo`, {
       method: "POST",
-      body: JSON.stringify({ motivo: "Operacion reemplazada por carga como movimiento externo" })
+      body: JSON.stringify({ motivo: "Operacion comercial registrada; liquidacion cargada como movimiento externo" })
     });
     const response = await fetchJson("/api/operaciones");
     state.operaciones = response.items || [];
     renderOperaciones();
     renderMetrics();
-    setOperationMessage(`Operacion ${operation.id} anulada. Ya puede cargar la venta correcta como movimiento externo.`, "ok");
+    setOperationMessage(`Operacion ${operation.id} conservada como registro comercial y derivada a movimiento externo.`, "ok");
   } catch (error) {
     setOperationMessage(error.message, "error");
   }
@@ -11834,9 +11841,9 @@ async function init() {
     editClient(button.dataset.editClient);
   });
   $("#operaciones-body").addEventListener("click", (event) => {
-    const cancelButton = event.target.closest("[data-cancel-operation]");
-    if (cancelButton) {
-      cancelOperation(cancelButton.dataset.cancelOperation);
+    const deriveButton = event.target.closest("[data-derive-operation]");
+    if (deriveButton) {
+      deriveOperationToExternal(deriveButton.dataset.deriveOperation);
       return;
     }
     const button = event.target.closest("[data-open-sale]");
