@@ -1,7 +1,7 @@
 const http = require("http");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const url = require("url");
 const { createDataSource } = require("./data-source");
 
 const PORT = Number(process.env.PORT || 4100);
@@ -14,6 +14,10 @@ const PUBLIC_DIR = path.join(ROOT, "public");
 const LOCAL_DOCUMENTS_DIR = path.join(ROOT, "data", "documentos");
 assertProductionConfig();
 const dataSource = createDataSource();
+const LOGIN_MAX_FAILURES = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_BLOCK_MS = 15 * 60 * 1000;
+const loginAttempts = new Map();
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -31,9 +35,71 @@ function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     ...securityHeaders(),
     "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
     "Content-Length": Buffer.byteLength(body)
   });
   res.end(body);
+}
+
+function requestIp(req) {
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return forwarded || req.socket.remoteAddress || "unknown";
+}
+
+function loginAttemptKey(req, email) {
+  return `${requestIp(req)}|${String(email || "").trim().toLowerCase()}`;
+}
+
+function pruneLoginAttempts(now = Date.now()) {
+  if (loginAttempts.size < 1000) return;
+  for (const [key, entry] of loginAttempts.entries()) {
+    const lastFailure = entry.failures[entry.failures.length - 1] || 0;
+    if ((entry.blockedUntil || 0) <= now && lastFailure < now - LOGIN_WINDOW_MS) {
+      loginAttempts.delete(key);
+    }
+  }
+}
+
+function loginThrottleStatus(req, email) {
+  const now = Date.now();
+  const key = loginAttemptKey(req, email);
+  const entry = loginAttempts.get(key);
+  if (!entry) return { key, blocked: false, retryAfterSeconds: 0 };
+  entry.failures = entry.failures.filter((timestamp) => timestamp >= now - LOGIN_WINDOW_MS);
+  if ((entry.blockedUntil || 0) > now) {
+    return { key, blocked: true, retryAfterSeconds: Math.ceil((entry.blockedUntil - now) / 1000) };
+  }
+  if (!entry.failures.length) loginAttempts.delete(key);
+  return { key, blocked: false, retryAfterSeconds: 0 };
+}
+
+function recordLoginFailure(key) {
+  const now = Date.now();
+  pruneLoginAttempts(now);
+  const entry = loginAttempts.get(key) || { failures: [], blockedUntil: 0 };
+  entry.failures = entry.failures.filter((timestamp) => timestamp >= now - LOGIN_WINDOW_MS);
+  entry.failures.push(now);
+  if (entry.failures.length >= LOGIN_MAX_FAILURES) entry.blockedUntil = now + LOGIN_BLOCK_MS;
+  loginAttempts.set(key, entry);
+  return {
+    blocked: entry.blockedUntil > now,
+    retryAfterSeconds: entry.blockedUntil > now ? Math.ceil((entry.blockedUntil - now) / 1000) : 0
+  };
+}
+
+async function auditSecurityEvent(action, session, req, details = {}) {
+  if (typeof dataSource.auditSecurityEvent !== "function") return;
+  try {
+    await dataSource.auditSecurityEvent({
+      usuarioId: session?.id || null,
+      entidad: "SEGURIDAD",
+      entidadId: session?.id || null,
+      accion: action,
+      despues: { ...details, ip: requestIp(req) }
+    });
+  } catch (error) {
+    console.error("No se pudo registrar el evento de seguridad:", error.message);
+  }
 }
 
 function sendJsonDownload(res, filename, payload) {
@@ -314,7 +380,7 @@ async function deleteDocumentFile(documento) {
 }
 
 function sendStatic(req, res) {
-  const parsed = url.parse(req.url);
+  const parsed = new URL(req.url, "http://localhost");
   const safePath = parsed.pathname === "/" ? "/index.html" : decodeURIComponent(parsed.pathname);
   const filePath = path.normalize(path.join(PUBLIC_DIR, safePath));
 
@@ -341,7 +407,11 @@ function sendStatic(req, res) {
 }
 
 async function handleApi(req, res) {
-  const parsed = url.parse(req.url, true);
+  const requestUrl = new URL(req.url, "http://localhost");
+  const parsed = {
+    pathname: requestUrl.pathname,
+    query: Object.fromEntries(requestUrl.searchParams.entries())
+  };
 
   if (parsed.pathname === "/api" || parsed.pathname === "/api/") {
     sendJson(res, 200, {
@@ -375,11 +445,27 @@ async function handleApi(req, res) {
       return;
     }
     const body = await readBody(req);
+    const throttle = loginThrottleStatus(req, body.email);
+    if (throttle.blocked) {
+      res.setHeader("Retry-After", String(throttle.retryAfterSeconds));
+      await auditSecurityEvent("LOGIN_BLOQUEADO", null, req, { email: String(body.email || "").trim().toLowerCase() });
+      sendJson(res, 429, { error: "Demasiados intentos de acceso. Espere 15 minutos antes de volver a intentar." });
+      return;
+    }
     const session = await dataSource.createSession(body.email, body.password);
     if (!session) {
+      const failure = recordLoginFailure(throttle.key);
+      await auditSecurityEvent("LOGIN_FALLIDO", null, req, { email: String(body.email || "").trim().toLowerCase() });
+      if (failure.blocked) {
+        res.setHeader("Retry-After", String(failure.retryAfterSeconds));
+        sendJson(res, 429, { error: "Demasiados intentos de acceso. Espere 15 minutos antes de volver a intentar." });
+        return;
+      }
       sendJson(res, 401, { error: "Correo o contraseña incorrectos." });
       return;
     }
+    loginAttempts.delete(throttle.key);
+    await auditSecurityEvent("LOGIN_EXITOSO", session.usuario, req, { email: session.usuario.email });
     setSessionCookie(res, session.token);
     sendJson(res, 200, { usuario: session.usuario });
     return;
@@ -426,7 +512,9 @@ async function handleApi(req, res) {
       return;
     }
     const stamp = new Date().toISOString().slice(0, 10);
-    sendJsonDownload(res, `backup-completo-hacienda-gonzalo-espinosa-${stamp}.json`, await exportBackupWithDocumentFiles());
+    const backup = await exportBackupWithDocumentFiles();
+    await auditSecurityEvent("BACKUP_DESCARGADO", session, req);
+    sendJsonDownload(res, `backup-completo-hacienda-gonzalo-espinosa-${stamp}.json`, backup);
     return;
   }
 
@@ -784,6 +872,7 @@ async function handleApi(req, res) {
       return;
     }
     const content = await downloadDocumentFile(documento);
+    await auditSecurityEvent("DOCUMENTO_DESCARGADO", session, req, { documentoId: documento.id });
     sendBinaryDownload(res, documento.nombreOriginal || `${documento.id}.pdf`, documento.mimeType || "application/pdf", content);
     return;
   }
@@ -831,7 +920,14 @@ async function handleApi(req, res) {
 const server = http.createServer((req, res) => {
   if (req.url.startsWith("/api/")) {
     handleApi(req, res).catch((error) => {
-      sendJson(res, error.statusCode || 500, { error: error.message || "Error interno", code: error.code || "ERROR" });
+      const statusCode = error.statusCode || 500;
+      if (statusCode < 500) {
+        sendJson(res, statusCode, { error: error.message || "Solicitud invalida", code: error.code || "ERROR" });
+        return;
+      }
+      const traceId = crypto.randomUUID();
+      console.error("API_ERROR", traceId, error);
+      sendJson(res, 500, { error: "Ocurrio un error interno. Intente nuevamente.", traceId });
     });
     return;
   }

@@ -3465,6 +3465,7 @@ class PostgresJsonDataSource extends BackupDataSource {
 
   async createSession(email, password) {
     const pool = await this.getPool();
+    await pool.query("DELETE FROM sesiones WHERE expira_en <= now()");
     const result = await pool.query(
       "SELECT id, nombre, email, password_hash, rol FROM usuarios WHERE lower(email) = lower($1) AND activo = TRUE LIMIT 1",
       [normalizeText(email)]
@@ -3500,6 +3501,22 @@ class PostgresJsonDataSource extends BackupDataSource {
     const pool = await this.getPool();
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     await pool.query("DELETE FROM sesiones WHERE token_hash = $1", [tokenHash]);
+  }
+
+  async auditSecurityEvent(input = {}) {
+    const pool = await this.getPool();
+    await pool.query(
+      `INSERT INTO auditoria_eventos (usuario_id, entidad, entidad_id, accion, antes, despues)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)`,
+      [
+        input.usuarioId || null,
+        normalizeText(input.entidad || "SEGURIDAD").slice(0, 80),
+        input.entidadId || null,
+        normalizeText(input.accion || "EVENTO").slice(0, 80),
+        JSON.stringify(input.antes || null),
+        JSON.stringify(input.despues || null)
+      ]
+    );
   }
 
   async getClientes() { return this.withRemoteData(() => super.getClientes()); }
