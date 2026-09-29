@@ -589,6 +589,15 @@ async function handleApi(req, res) {
     return;
   }
 
+  const operacionDerivarExternoMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/derivar-externo$/);
+  if (operacionDerivarExternoMatch && req.method === "POST") {
+    const body = await readBody(req);
+    sendJson(res, 200, {
+      item: await dataSource.derivarOperacionExterna(decodeURIComponent(operacionDerivarExternoMatch[1]), body)
+    });
+    return;
+  }
+
   const ventaLineaMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/venta-lineas$/);
   if (ventaLineaMatch && req.method === "POST") {
     const body = await readBody(req);

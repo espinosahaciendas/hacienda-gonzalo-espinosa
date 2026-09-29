@@ -2017,7 +2017,7 @@ class BackupDataSource {
     return operation;
   }
 
-  async anularOperacion(operationId, input = {}) {
+  async derivarOperacionExterna(operationId, input = {}) {
     const data = this.readData();
     const operations = asArray(data.operations);
     const operation = operations.find((item) => String(item.id) === String(operationId));
@@ -2026,7 +2026,7 @@ class BackupDataSource {
       error.statusCode = 404;
       throw error;
     }
-    if (normalizeKey(operation.estado) === "ANULADA") return operation;
+    if (normalizeKey(operation.estado) === "DERIVADA_EXTERNO") return operation;
 
     const draft = operation.draftData || {};
     const liquidationConfirmed = Boolean(draft.liquidacionConfirmada)
@@ -2041,24 +2041,28 @@ class BackupDataSource {
         return movementId === String(operationId) || movementId.startsWith(operationMovementPrefix);
       }));
     if (liquidationConfirmed || hasAccountMovements || hasActiveImputations) {
-      const error = new Error("La operacion ya tiene liquidacion o movimientos en cuenta corriente y no se puede anular desde Operaciones.");
+      const error = new Error("La operacion ya tiene liquidacion o movimientos en cuenta corriente y no se puede derivar a movimiento externo.");
       error.statusCode = 409;
       throw error;
     }
 
-    const anuladaEn = new Date().toISOString();
-    operation.estado = "ANULADA";
-    operation.anuladaEn = anuladaEn;
-    operation.motivoAnulacion = normalizeText(input.motivo) || "Operacion reemplazada por carga como movimiento externo";
+    const derivadaExternoEn = new Date().toISOString();
+    operation.estado = "DERIVADA_EXTERNO";
+    operation.derivadaExternoEn = derivadaExternoEn;
+    operation.motivoDerivacion = normalizeText(input.motivo) || "Operacion comercial registrada; liquidacion cargada como movimiento externo";
     operation.draftData = {
       ...draft,
-      estado: "ANULADA",
-      anuladaEn,
-      motivoAnulacion: operation.motivoAnulacion
+      estado: "DERIVADA_EXTERNO",
+      derivadaExternoEn,
+      motivoDerivacion: operation.motivoDerivacion
     };
     data.operations = operations;
     this.saveData(data);
     return operation;
+  }
+
+  async anularOperacion(operationId, input = {}) {
+    return this.derivarOperacionExterna(operationId, input);
   }
 
   async getCategorias() {
@@ -2396,6 +2400,9 @@ class BackupDataSource {
         tipo: operation.tipo,
         destino: operation.destino,
         estado: operation.estado,
+        motivoAnulacion: operation.motivoAnulacion || (operation.draftData && operation.draftData.motivoAnulacion) || "",
+        motivoDerivacion: operation.motivoDerivacion || (operation.draftData && operation.draftData.motivoDerivacion) || "",
+        derivadaExternoEn: operation.derivadaExternoEn || (operation.draftData && operation.draftData.derivadaExternoEn) || "",
         liquidacionEstado: operation.liquidacionEstado,
         liquidacionConfirmada: Boolean(operation.draftData && operation.draftData.liquidacionConfirmada),
         enCuentaCorriente,
@@ -2422,7 +2429,7 @@ class BackupDataSource {
     if (!commissionistKey) return [];
 
     return asArray(data.operations)
-      .filter((operation) => operation.estado !== "ANULADA")
+      .filter((operation) => !["ANULADA", "DERIVADA_EXTERNO"].includes(String(operation.estado || "").toUpperCase()))
       .map((operation) => {
         const draft = operation.draftData || {};
         const fecha = operation.fecha || draft.fecha || draft.fechaOperacion || "";
@@ -3506,6 +3513,7 @@ class PostgresJsonDataSource extends BackupDataSource {
   async ensureEstablecimiento(clienteId, renspa, nombre) { return this.withRemoteData(() => super.ensureEstablecimiento(clienteId, renspa, nombre), true); }
   async saveOperacion(input) { return this.withRemoteData(() => super.saveOperacion(input), true); }
   async anularOperacion(operationId, input) { return this.withRemoteData(() => super.anularOperacion(operationId, input), true); }
+  async derivarOperacionExterna(operationId, input) { return this.withRemoteData(() => super.derivarOperacionExterna(operationId, input), true); }
   async getCategorias() { return this.withRemoteData(() => super.getCategorias()); }
   async saveCategoria(currentName, input) { return this.withRemoteData(() => super.saveCategoria(currentName, input), true); }
   async deleteCategoria(currentName) { return this.withRemoteData(() => super.deleteCategoria(currentName), true); }
