@@ -58,7 +58,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260929-operaciones-derivadas-v9";
+const APP_BUILD = "20260929-backups-automaticos-v10";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -4852,6 +4852,46 @@ async function renderPeriodStats() {
   message.className = `form-message ${operations.length ? "ok" : ""}`.trim();
   runButton.disabled = false;
   runButton.textContent = "Ver periodo";
+}
+
+function formatBackupDate(value) {
+  if (!value) return "pendiente";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "pendiente" : date.toLocaleString("es-AR");
+}
+
+async function loadBackupAutomationStatus() {
+  const backupNode = $("#automatic-backup-status");
+  const restoreNode = $("#restore-test-status");
+  if (!backupNode || !restoreNode) return;
+  if (state.usuario?.rol !== "ADMIN") {
+    backupNode.hidden = true;
+    restoreNode.hidden = true;
+    return;
+  }
+  try {
+    const status = await fetchJson("/api/backup/status");
+    if (!status.enabled) {
+      backupNode.textContent = "Backup automático: pendiente de activar en el servidor.";
+      restoreNode.textContent = "Prueba de restauración: pendiente de activar.";
+      return;
+    }
+    backupNode.textContent = status.running
+      ? "Backup automático cifrado: en proceso..."
+      : status.lastBackupPath
+        ? `Último backup cifrado: ${formatBackupDate(status.lastBackupAt || status.lastRunAt)}. Próximo control: ${formatBackupDate(status.nextRunAt)}.`
+        : `Backup automático cifrado: programado. Próximo control: ${formatBackupDate(status.nextRunAt)}.`;
+    restoreNode.textContent = status.lastError
+      ? `Backups: requiere atención. ${status.lastError}`
+      : status.lastRestoreTestOk === true
+        ? `Última prueba de restauración: ${formatBackupDate(status.lastRestoreTestAt)}. Resultado correcto.`
+        : "Prueba de restauración: se realizará con el primer backup y luego cada 7 días.";
+    restoreNode.className = status.lastError ? "form-message error" : "subtle";
+  } catch (error) {
+    backupNode.textContent = "Backup automático: no se pudo consultar el estado.";
+    restoreNode.textContent = error.message;
+    restoreNode.className = "form-message error";
+  }
 }
 
 function schedulePeriodStats() {
@@ -11945,6 +11985,7 @@ async function init() {
 
   const health = await fetchJson("/api/health");
   $("#status").textContent = health.modo === "postgres" ? "PostgreSQL conectado" : "Backup local";
+  await loadBackupAutomationStatus();
 
   await reloadAppData();
   setSelectOptions("#operation-renspa-origin-select", [], "Elegir RENSPA origen");
