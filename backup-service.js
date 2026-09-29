@@ -113,7 +113,7 @@ function createBackupAutomation({ dataSource, storageConfig, auditEvent = async 
     const response = await fetchImpl(`${cfg.url}/storage/v1/object/${encodeURIComponent(cfg.bucket)}/${encodeStoragePath(storagePath)}`, {
       headers: authHeaders(cfg)
     });
-    if (optional && response.status === 404) return null;
+    if (optional && [400, 404].includes(response.status)) return null;
     if (!response.ok) throw new Error(`No se pudo descargar ${storagePath} (${response.status}).`);
     return Buffer.from(await response.arrayBuffer());
   }
