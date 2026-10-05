@@ -58,7 +58,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20260929-acciones-operaciones-v12";
+const APP_BUILD = "20261005-comisiones-pendientes-v13";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -8252,7 +8252,9 @@ async function loadCommissionistOperations() {
       selected: true
     }))
     .filter((row) => Number(row.base || 0) > 0);
-  const accountRows = pendingCommissionistAccountRows(selectedCommissionist, from, to, alreadyLiquidatedIds);
+  // La facturacion toma todas las comisiones ya generadas y pendientes en cuenta
+  // corriente. El rango se usa solo para buscar operaciones nuevas del periodo.
+  const accountRows = pendingCommissionistAccountRows(selectedCommissionist, null, null, alreadyLiquidatedIds);
   state.commissionistRows = [...state.commissionistRows, ...accountRows, ...externalRows]
     .sort((a, b) => (parseDisplayDate(a.fecha)?.getTime() || 0) - (parseDisplayDate(b.fecha)?.getTime() || 0));
   state.commissionistPage = 1;
