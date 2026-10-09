@@ -20,6 +20,8 @@ const state = {
   editingSaleLineId: "",
   editingExternalMovementId: "",
   liquidationFacturadoTouched: false,
+  liquidationCashProdTouched: false,
+  liquidationCashCompTouched: false,
   liquidationIvaProdTouched: false,
   liquidationIvaCompTouched: false,
   frigoBrutoSinIvaTouched: false,
@@ -58,7 +60,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20261005-comisiones-pendientes-v13";
+const APP_BUILD = "20261009-efectivo-vendedor-v14";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -9481,25 +9483,39 @@ function liquidationCashValues(frigoCalc = null) {
   };
 }
 
-function syncLiquidationCashFromFacturado() {
+function automaticFixedLiquidationCashValues() {
   const facturado = numberValue("#liq-facturado");
   const brutoVend = numberValue("#liq-bruto-vend");
   const brutoComp = numberValue("#liq-bruto-comp");
+  const frigo = isFrigorificoIvaOperation() ? getFrigorificoCalc() : null;
+  const brutoBaseProd = frigo ? Number(frigo.brutoSinIva || 0) : brutoVend;
+  return {
+    prod: Math.max(brutoBaseProd - facturado, 0),
+    comp: frigo ? Number(frigo.efectivoComp || 0) : Math.max(brutoComp - facturado, 0)
+  };
+}
+
+function syncLiquidationCashFromFacturado() {
   if (isAnticipatedOperation()) {
     setMoneyInput("#liq-efectivo-prod", 0);
     setMoneyInput("#liq-efectivo-comp", 0);
+    state.liquidationCashProdTouched = false;
+    state.liquidationCashCompTouched = false;
     return;
   }
   if (String($("#liq-cash-mode")?.value || "").toUpperCase() === "PORCENTAJE") {
     const values = liquidationCashValues();
     setMoneyInput("#liq-efectivo-prod", values.prod);
     setMoneyInput("#liq-efectivo-comp", values.comp);
+    state.liquidationCashProdTouched = false;
+    state.liquidationCashCompTouched = false;
     return;
   }
-  const frigoCalc = isFrigorificoIvaOperation() ? getFrigorificoCalc() : null;
-  const brutoBaseProd = frigoCalc ? frigoCalc.brutoSinIva : brutoVend;
-  setMoneyInput("#liq-efectivo-prod", Math.max(brutoBaseProd - facturado, 0));
-  setMoneyInput("#liq-efectivo-comp", frigoCalc ? frigoCalc.efectivoComp : Math.max(brutoComp - facturado, 0));
+  const values = automaticFixedLiquidationCashValues();
+  setMoneyInput("#liq-efectivo-prod", values.prod);
+  setMoneyInput("#liq-efectivo-comp", values.comp);
+  state.liquidationCashProdTouched = false;
+  state.liquidationCashCompTouched = false;
 }
 
 function currentAutomaticFacturado(operation = state.currentOperation) {
@@ -9593,15 +9609,28 @@ function fillLiquidationForm(liquidacion) {
   const netoFinalFrigo = Number(liquidacion.netoFinalFrigorificoComp || draft.netoFinalFrigorificoComp || liquidacion.brutoVend || 0);
   state.frigoBrutoSinIvaTouched = Boolean(liquidacion.brutoSinIvaFrigorificoManual || draft.brutoSinIvaFrigorificoManual);
   setMoneyInput("#frigo-bruto-sin-iva", storedBrutoSinIvaFrigo || (netoFinalFrigo ? netoFinalFrigo / 1.105 : 0));
-  setMoneyInput("#liq-efectivo-prod", normalizeFrigorificoCashInput(liquidacion.efectivoProd));
-  setMoneyInput("#liq-efectivo-comp", isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : liquidacion.efectivoComp);
+  $("#liq-cash-mode").value = liquidacion.efectivoModo || draft.efectivoModo || "MONTO";
+  $("#liq-cash-percent").value = liquidacion.efectivoPorc || draft.efectivoPorc || "";
+  const automaticCash = automaticFixedLiquidationCashValues();
+  const storedCashProd = normalizeFrigorificoCashInput(liquidacion.efectivoProd);
+  const storedCashComp = isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : Number(liquidacion.efectivoComp || 0);
+  const confirmed = Boolean(state.currentOperation?.liquidacionConfirmada);
+  const hasCashProdManualFlag = Object.prototype.hasOwnProperty.call(liquidacion, "efectivoProdManual");
+  const hasCashCompManualFlag = Object.prototype.hasOwnProperty.call(liquidacion, "efectivoCompManual");
+  state.liquidationCashProdTouched = hasCashProdManualFlag
+    ? Boolean(liquidacion.efectivoProdManual)
+    : Math.abs(storedCashProd) > 0.01 && Math.abs(storedCashProd - automaticCash.prod) > 0.01;
+  state.liquidationCashCompTouched = hasCashCompManualFlag
+    ? Boolean(liquidacion.efectivoCompManual)
+    : Math.abs(storedCashComp) > 0.01 && Math.abs(storedCashComp - automaticCash.comp) > 0.01;
+  const percentageCashMode = String($("#liq-cash-mode").value || "").toUpperCase() === "PORCENTAJE";
+  setMoneyInput("#liq-efectivo-prod", !confirmed && !percentageCashMode && !state.liquidationCashProdTouched ? automaticCash.prod : storedCashProd);
+  setMoneyInput("#liq-efectivo-comp", !confirmed && !percentageCashMode && !state.liquidationCashCompTouched ? automaticCash.comp : storedCashComp);
   setMoneyInput("#liq-comision-fact-prod", liquidacion.comisionFacturadoProd);
   setMoneyInput("#liq-comision-fact-comp", liquidacion.comisionFacturadoComp);
   setMoneyInput("#liq-comision-efect-prod", liquidacion.comisionEfectivoProd);
   setMoneyInput("#liq-comision-efect-comp", liquidacion.comisionEfectivoComp);
   $("#liq-consignee-settled-party").value = liquidacion.liquidacionConsignatariaA || draft.liquidacionConsignatariaA || "VENDEDOR";
-  $("#liq-cash-mode").value = liquidacion.efectivoModo || draft.efectivoModo || "MONTO";
-  $("#liq-cash-percent").value = liquidacion.efectivoPorc || draft.efectivoPorc || "";
   $("#liq-plan-fact-prod").value = liquidacion.planFacturadoProd || draft.planFacturadoProd || "30";
   $("#liq-plan-fact-comp").value = liquidacion.planFacturadoComp || draft.planFacturadoComp || "30";
   $("#liq-plan-cash-prod").value = liquidacion.planEfectivoProd || draft.planEfectivoProd || "0";
@@ -10388,6 +10417,8 @@ async function saveLiquidation(event) {
     ivaCompManual: Boolean(state.liquidationIvaCompTouched),
     efectivoProd: isAnticipatedOperation() ? 0 : calc.efectivoProd,
     efectivoComp: isAnticipatedOperation() ? 0 : calc.efectivoComp,
+    efectivoProdManual: Boolean(state.liquidationCashProdTouched),
+    efectivoCompManual: Boolean(state.liquidationCashCompTouched),
     comisionFacturadoProd: parseMoneyInput($("#liq-comision-fact-prod").value),
     comisionFacturadoComp: parseMoneyInput($("#liq-comision-fact-comp").value),
     comisionEfectivoProd: parseMoneyInput($("#liq-comision-efect-prod").value),
@@ -11757,6 +11788,8 @@ async function init() {
     if (button) deletePartialBilling(button.dataset.partialDelete);
   });
   $("#liquidation-form").addEventListener("submit", saveLiquidation);
+  $("#liq-efectivo-prod").addEventListener("input", () => { state.liquidationCashProdTouched = true; });
+  $("#liq-efectivo-comp").addEventListener("input", () => { state.liquidationCashCompTouched = true; });
   $("#sale-buyer-different").addEventListener("change", syncBuyerDiff);
   $("#sale-buyer-different-faena").addEventListener("change", syncBuyerDiff);
   $("#tab-save").addEventListener("click", saveTabRule);
