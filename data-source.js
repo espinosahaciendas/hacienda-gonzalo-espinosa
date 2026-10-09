@@ -1464,6 +1464,7 @@ function calculateLiquidacion(operation, input = {}) {
     efectivoConIvaProd,
     efectivoComp,
     efectivoCompManual: Boolean(source.efectivoCompManual),
+    efectivoManualVersion: Number(source.efectivoManualVersion || 0),
     comisionFacturadoProd,
     comisionFacturadoComp,
     comisionEfectivoProd,
