@@ -60,7 +60,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20261009-efectivo-vendedor-v14";
+const APP_BUILD = "20261009-efectivo-vendedor-v16";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -9614,18 +9614,20 @@ function fillLiquidationForm(liquidacion) {
   const automaticCash = automaticFixedLiquidationCashValues();
   const storedCashProd = normalizeFrigorificoCashInput(liquidacion.efectivoProd);
   const storedCashComp = isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : Number(liquidacion.efectivoComp || 0);
-  const confirmed = Boolean(state.currentOperation?.liquidacionConfirmada);
   const hasCashProdManualFlag = Object.prototype.hasOwnProperty.call(liquidacion, "efectivoProdManual");
   const hasCashCompManualFlag = Object.prototype.hasOwnProperty.call(liquidacion, "efectivoCompManual");
-  state.liquidationCashProdTouched = hasCashProdManualFlag
+  const cashManualVersion = Number(liquidacion.efectivoManualVersion || 0);
+  const legacyZeroCashProd = cashManualVersion < 1 && Math.abs(storedCashProd) <= 0.01 && automaticCash.prod > 0.01;
+  const legacyZeroCashComp = cashManualVersion < 1 && Math.abs(storedCashComp) <= 0.01 && automaticCash.comp > 0.01;
+  state.liquidationCashProdTouched = legacyZeroCashProd ? false : hasCashProdManualFlag
     ? Boolean(liquidacion.efectivoProdManual)
     : Math.abs(storedCashProd) > 0.01 && Math.abs(storedCashProd - automaticCash.prod) > 0.01;
-  state.liquidationCashCompTouched = hasCashCompManualFlag
+  state.liquidationCashCompTouched = legacyZeroCashComp ? false : hasCashCompManualFlag
     ? Boolean(liquidacion.efectivoCompManual)
     : Math.abs(storedCashComp) > 0.01 && Math.abs(storedCashComp - automaticCash.comp) > 0.01;
   const percentageCashMode = String($("#liq-cash-mode").value || "").toUpperCase() === "PORCENTAJE";
-  setMoneyInput("#liq-efectivo-prod", !confirmed && !percentageCashMode && !state.liquidationCashProdTouched ? automaticCash.prod : storedCashProd);
-  setMoneyInput("#liq-efectivo-comp", !confirmed && !percentageCashMode && !state.liquidationCashCompTouched ? automaticCash.comp : storedCashComp);
+  setMoneyInput("#liq-efectivo-prod", !percentageCashMode && !state.liquidationCashProdTouched ? automaticCash.prod : storedCashProd);
+  setMoneyInput("#liq-efectivo-comp", !percentageCashMode && !state.liquidationCashCompTouched ? automaticCash.comp : storedCashComp);
   setMoneyInput("#liq-comision-fact-prod", liquidacion.comisionFacturadoProd);
   setMoneyInput("#liq-comision-fact-comp", liquidacion.comisionFacturadoComp);
   setMoneyInput("#liq-comision-efect-prod", liquidacion.comisionEfectivoProd);
@@ -10419,6 +10421,7 @@ async function saveLiquidation(event) {
     efectivoComp: isAnticipatedOperation() ? 0 : calc.efectivoComp,
     efectivoProdManual: Boolean(state.liquidationCashProdTouched),
     efectivoCompManual: Boolean(state.liquidationCashCompTouched),
+    efectivoManualVersion: 1,
     comisionFacturadoProd: parseMoneyInput($("#liq-comision-fact-prod").value),
     comisionFacturadoComp: parseMoneyInput($("#liq-comision-fact-comp").value),
     comisionEfectivoProd: parseMoneyInput($("#liq-comision-efect-prod").value),
