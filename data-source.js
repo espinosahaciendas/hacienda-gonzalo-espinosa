@@ -325,6 +325,7 @@ function signedExternalMovement(item) {
 }
 
 function signedPayment(item) {
+  if (normalizeKey(item.tipo) === "FONDO") return 0;
   if (item.importeFirmado !== undefined && item.importeFirmado !== "") return parseMoney(item.importeFirmado);
   const type = normalizeKey(item.tipo);
   const amount = Math.abs(parseMoney(item.importe));
@@ -1049,6 +1050,7 @@ function buildAccountData(data) {
     else if (imputed > 0.01) movement.estado = "PARCIAL";
   });
   payments.forEach((item) => {
+    if (normalizeKey(item.tipo) === "FONDO") return;
     pushMovement(movements, {
       id: item.id,
       cliente: item.cliente,
@@ -2496,12 +2498,15 @@ class BackupDataSource {
     const movimientos = asArray(data.currentAccountManualMovements);
     const pagos = asArray(data.currentAccountPayments);
     const pagosVigentes = pagos.filter((pago) => !pago.anulado);
+    const pagosConMovimientoDeDinero = pagosVigentes.filter(
+      (pago) => !["FONDO", "COMPENSACION"].includes(normalizeKey(pago.tipo))
+    );
     const cuenta = buildAccountData(data);
     return {
       movimientosExternos: movimientos.length,
-      pagosCobros: pagosVigentes.length,
+      pagosCobros: pagosConMovimientoDeDinero.length,
       totalMovimientos: movimientos.reduce((sum, item) => sum + parseMoney(item.importe), 0),
-      totalPagos: pagosVigentes.reduce((sum, item) => sum + parseMoney(item.importe), 0),
+      totalPagos: pagosConMovimientoDeDinero.reduce((sum, item) => sum + parseMoney(item.importe), 0),
       clientes: cuenta.clientes,
       movimientos: cuenta.movimientos,
       vencimientos: cuenta.vencimientos,
@@ -3298,7 +3303,10 @@ class BackupDataSource {
     const cliente = normalizeText(input.cliente);
     const importe = Math.abs(parseMoney(input.importe));
     const tipoInput = normalizeKey(input.tipo);
-    const tipo = tipoInput === "PAGO" ? "PAGO" : tipoInput === "COMPENSACION" ? "COMPENSACION" : "COBRO";
+    const tipo = tipoInput === "PAGO" ? "PAGO" : tipoInput === "COMPENSACION" ? "COMPENSACION" : tipoInput === "FONDO" ? "FONDO" : "COBRO";
+    const payments = asArray(data.currentAccountPayments);
+    const sourcePaymentId = normalizeText(input.sourcePaymentId);
+    const sourceInstrumentId = normalizeText(input.sourceInstrumentId);
     let imputacionesInput = asArray(input.imputaciones)
       .map((item) => ({ movementId: normalizeText(item.movementId || item.rowId), importe: Math.abs(parseMoney(item.importe)) }))
       .filter((item) => item.movementId);
@@ -3306,6 +3314,32 @@ class BackupDataSource {
       const error = new Error("Falta seleccionar cliente o cargar un importe mayor a cero.");
       error.statusCode = 400;
       throw error;
+    }
+    if (tipo === "FONDO") {
+      const sourcePayment = payments.find((payment) => payment.id === sourcePaymentId && !payment.anulado && normalizeKey(payment.cliente) === normalizeKey(cliente));
+      const sourceInstruments = asArray(sourcePayment?.instrumentos);
+      const sourceInstrument = sourceInstrumentId === "PAYMENT"
+        ? (sourcePayment ? { id: "PAYMENT", importe: sourcePayment.importe, medio: sourcePayment.medio, referencia: sourcePayment.referencia } : null)
+        : sourceInstruments.find((item) => String(item.id || "") === sourceInstrumentId);
+      if (!sourcePayment || !sourceInstrument) {
+        const error = new Error("Seleccione una transferencia o instrumento existente del cliente para abrir el saldo disponible.");
+        error.statusCode = 400;
+        throw error;
+      }
+      if (Math.abs(importe - Math.abs(parseMoney(sourceInstrument.importe))) > 0.01) {
+        const error = new Error("El saldo disponible debe coincidir con el importe del instrumento seleccionado.");
+        error.statusCode = 400;
+        throw error;
+      }
+      const duplicate = payments.some((payment) => !payment.anulado
+        && normalizeKey(payment.tipo) === "FONDO"
+        && normalizeText(payment.sourcePaymentId) === sourcePaymentId
+        && normalizeText(payment.sourceInstrumentId) === sourceInstrumentId);
+      if (duplicate) {
+        const error = new Error("Ese instrumento ya fue registrado como saldo disponible del cliente.");
+        error.statusCode = 409;
+        throw error;
+      }
     }
     let importeFinal = importe;
     let importeFirmadoFinal = input.importeFirmado !== undefined && input.importeFirmado !== "" ? parseMoney(input.importeFirmado) : undefined;
@@ -3319,11 +3353,10 @@ class BackupDataSource {
         importeFirmadoFinal = Math.sign(importeFirmadoFinal || 1) * Math.abs(importeFinal);
       }
     }
-    const payments = asArray(data.currentAccountPayments);
     const year = new Date().getFullYear();
-    const prefix = tipo === "PAGO" ? "PAG" : tipo === "COMPENSACION" ? "COMP" : "COB";
+    const prefix = tipo === "PAGO" ? "PAG" : tipo === "COMPENSACION" ? "COMP" : tipo === "FONDO" ? "FDO" : "COB";
     const number = payments.reduce((max, item) => {
-      const match = String(item.id || "").match(new RegExp(`^(?:PAG|COB|COMP)-${year}-(\\d+)$`));
+      const match = String(item.id || "").match(new RegExp(`^(?:PAG|COB|COMP|FDO)-${year}-(\\d+)$`));
       return match ? Math.max(max, Number(match[1])) : max;
     }, 0) + 1;
     const saved = {
@@ -3339,6 +3372,8 @@ class BackupDataSource {
       observacion: normalizeText(input.observacion),
       compensationOriginId: normalizeText(input.compensationOriginId),
       compensationOriginLabel: normalizeText(input.compensationOriginLabel),
+      sourcePaymentId,
+      sourceInstrumentId,
       instrumentos: asArray(input.instrumentos).map((item) => ({
         id: normalizeText(item.id) || `INST-${Date.now()}`,
         medio: normalizeText(item.medio),
@@ -3385,6 +3420,18 @@ class BackupDataSource {
       const error = new Error("No se encontro el comprobante de pago / cobro.");
       error.statusCode = 404;
       throw error;
+    }
+    const fundOrigin = affected.find((payment) => normalizeKey(payment.tipo) === "FONDO");
+    if (fundOrigin) {
+      const hasApplications = payments.some((payment) => !payment.anulado
+        && normalizeKey(payment.tipo) === "COMPENSACION"
+        && normalizeText(payment.compensationOriginId) === normalizeText(fundOrigin.compensationOriginId || fundOrigin.id)
+        && signedPayment(payment) < -0.01);
+      if (hasApplications) {
+        const error = new Error("Este fondo tiene aplicaciones activas. Anule primero esas aplicaciones y luego el origen.");
+        error.statusCode = 409;
+        throw error;
+      }
     }
     const anuladoEn = new Date().toISOString();
     affected.forEach((payment) => {
@@ -4021,9 +4068,11 @@ class PostgresDataSource {
     const result = await this.query(
       `SELECT
          COUNT(*) FILTER (WHERE origen = 'EXTERNO') AS movimientos_externos,
-         (SELECT COUNT(*) FROM pagos_cobros) AS pagos_cobros,
+         (SELECT COUNT(*) FROM pagos_cobros
+           WHERE COALESCE(UPPER(tipo), '') NOT IN ('FONDO', 'COMPENSACION')) AS pagos_cobros,
          COALESCE(SUM(CASE WHEN origen = 'EXTERNO' THEN ABS(importe) ELSE 0 END), 0) AS total_movimientos,
-         (SELECT COALESCE(SUM(importe), 0) FROM pagos_cobros) AS total_pagos
+         (SELECT COALESCE(SUM(importe), 0) FROM pagos_cobros
+           WHERE COALESCE(UPPER(tipo), '') NOT IN ('FONDO', 'COMPENSACION')) AS total_pagos
        FROM cuenta_corriente_movimientos`
     );
     const row = result.rows[0] || {};
