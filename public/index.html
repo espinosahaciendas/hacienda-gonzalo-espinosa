@@ -2127,7 +2127,7 @@
             <div class="panel-head"><h3 id="cc-payment-title">Registrar pago / cobro</h3><button type="button" class="ghost-button" id="cc-close-payment">Cerrar</button></div>
             <div class="cc-mode-help" id="cc-payment-mode-help"></div>
             <div class="form-grid">
-              <label>Tipo<select id="cc-payment-type"><option value="COBRO">Cobro recibido</option><option value="PAGO">Pago realizado</option><option value="COMPENSACION">Compensacion / aplicacion de saldo</option></select></label>
+              <label>Tipo<select id="cc-payment-type"><option value="COBRO">Cobro recibido</option><option value="PAGO">Pago realizado</option><option value="FONDO">Fondos recibidos directamente por el cliente</option><option value="COMPENSACION">Aplicar saldo disponible</option></select></label>
               <label>Cliente<input id="cc-payment-client" list="cc-client-list"></label>
               <label>Fecha<input id="cc-payment-date" type="date"></label>
               <label>Importe<input id="cc-payment-amount" class="money-input" inputmode="decimal"></label>
@@ -2176,7 +2176,18 @@
                 <div><span>Disponible que queda al cliente</span><strong id="cc-comp-balance-after">$ 0,00</strong></div>
               </div>
             </div>
-            <div class="cc-subpanel">
+            <div class="cc-subpanel" id="cc-fund-panel" hidden>
+              <div class="panel-head">
+                <h3>Origen del dinero disponible</h3>
+                <span class="subtle">Registra solamente el importe que efectivamente recibió el cliente en su cuenta. No genera un nuevo cobro ni modifica nuevamente la cuenta corriente.</span>
+              </div>
+              <div class="form-grid">
+                <label class="span-2">Tomar transferencia o instrumento de<select id="cc-fund-source"></select></label>
+                <label class="span-2">Identificacion del origen<input id="cc-fund-origin-label" placeholder="Ej.: Venta Ronchi - transferencia recibida por Odriozola"></label>
+              </div>
+              <p class="subtle" id="cc-fund-source-help">Primero seleccione el cliente para ver sus pagos registrados.</p>
+            </div>
+            <div class="cc-subpanel" id="cc-imputation-panel">
               <div class="panel-head"><h3 id="cc-imputation-title">Imputar pendientes / descontar comisiones y gastos</h3><span class="subtle" id="cc-imputation-summary">Seleccione un cliente</span></div>
               <label class="check-field"><input type="checkbox" id="cc-discount-only"> Descontar gastos/comisiones y dejar saldo pendiente</label>
               <div class="table-wrap compact-table"><table><thead><tr><th></th><th>Vto.</th><th>Concepto</th><th>Comprobante</th><th>Importe</th></tr></thead><tbody id="cc-imputation-body"></tbody></table></div>
@@ -2191,6 +2202,21 @@
             <div><span>Cliente</span><strong id="cc-selected-client">Todos</strong></div>
             <div><span>Saldo</span><strong id="cc-selected-balance">$ 0,00</strong></div>
             <div><span>Movimientos</span><strong id="cc-selected-count">0</strong></div>
+          </div>
+          <div class="cc-subpanel" id="cc-funds-summary-panel" hidden>
+            <div class="panel-head">
+              <div>
+                <h3>Fondos disponibles del cliente</h3>
+                <p class="subtle">Dinero recibido directamente por el cliente, separado por origen y con sus aplicaciones.</p>
+              </div>
+              <span class="subtle" id="cc-funds-summary-total">Disponible $ 0,00</span>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead><tr><th>Origen</th><th>Recibido</th><th>Aplicado</th><th>Disponible</th><th>Acciones</th></tr></thead>
+                <tbody id="cc-funds-summary-body"></tbody>
+              </table>
+            </div>
           </div>
           <div class="cc-subpanel" id="cc-commission-summary-panel" hidden>
             <div class="panel-head">
@@ -2772,7 +2798,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20261009-efectivo-vendedor-v16"></script>
+    <script src="/app.js?v=20261015-fondos-cliente-v17"></script>
   </body>
 </html>
 
