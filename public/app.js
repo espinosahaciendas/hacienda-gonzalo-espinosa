@@ -60,7 +60,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20261015-fondos-cliente-v17";
+const APP_BUILD = "20261019-clientes-edicion-v18";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -8759,7 +8759,7 @@ function renderOperaciones() {
 function handleClientSearchInput() {
   const query = $("#client-search").value.trim();
   const selected = state.clientes.find((client) => String(client.id) === String(state.selectedClientId));
-  if (selected && query && !matchesClientLookup(selected, query)) {
+  if (selected && normalizeSearch(query) !== normalizeSearch(selected.nombre)) {
     resetClientForm();
   }
   renderClientes();
@@ -11070,6 +11070,8 @@ function renderReport() {
 
 function resetClientForm() {
   $("#client-form").reset();
+  $all("#client-type option[data-existing-client-type]").forEach((option) => option.remove());
+  $("#client-type").value = "Cliente";
   $("#client-id").value = "";
   state.selectedClientId = "";
   resetRenspaForm();
@@ -11084,6 +11086,21 @@ function resetClientForm() {
   $("#client-name-suggestions").innerHTML = "";
   setClientMessage("");
   setRenspaMessage("");
+}
+
+function setExistingClientType(value) {
+  const select = $("#client-type");
+  const type = String(value || "Cliente").trim() || "Cliente";
+  $all("#client-type option[data-existing-client-type]").forEach((option) => option.remove());
+  const existing = Array.from(select.options).some((option) => option.value === type);
+  if (!existing) {
+    const option = document.createElement("option");
+    option.value = type;
+    option.textContent = type;
+    option.dataset.existingClientType = "1";
+    select.appendChild(option);
+  }
+  select.value = type;
 }
 
 function resetRenspaForm() {
@@ -11142,10 +11159,11 @@ async function editClient(clientId) {
   const client = state.clientes.find((item) => String(item.id) === String(clientId));
   if (!client) return;
   state.selectedClientId = client.id;
+  $("#client-search").value = client.nombre || "";
   $("#client-id").value = client.id;
   $("#client-name").value = client.nombre || "";
   $("#client-cuit").value = client.cuit || "";
-  $("#client-type").value = client.tipo || "Cliente";
+  setExistingClientType(client.tipo);
   $("#client-notes").value = client.observaciones || "";
   $("#client-name-suggestions").hidden = true;
   $("#client-name-suggestions").innerHTML = "";
@@ -11156,6 +11174,7 @@ async function editClient(clientId) {
   $("#client-maintenance-message").textContent = "";
   $("#client-merge-target").value = "";
   populateClientMergeTargets();
+  renderClientes();
   setClientMessage("Editando cliente existente.");
   setRenspaMessage("");
   await loadRenspas(client.id);
@@ -11213,15 +11232,26 @@ async function applyClientMaintenance() {
 
 async function saveClient(event) {
   event.preventDefault();
-  setClientMessage("Guardando...");
-
   const id = $("#client-id").value;
+  const editingClient = id
+    ? state.clientes.find((client) => String(client.id) === String(id))
+    : null;
   const payload = {
     nombre: $("#client-name").value,
     cuit: $("#client-cuit").value,
     tipo: $("#client-type").value,
     observaciones: $("#client-notes").value
   };
+
+  if (editingClient && normalizeSearch(editingClient.nombre) !== normalizeSearch(payload.nombre)) {
+    const confirmed = window.confirm(`Está por cambiar la razón social de "${editingClient.nombre}" a "${payload.nombre}". Las operaciones y la cuenta corriente asociadas a este cliente conservarán el vínculo con el nuevo nombre.\n\n¿Confirma este cambio?`);
+    if (!confirmed) {
+      setClientMessage("Cambio de razón social cancelado. El cliente no fue modificado.", "error");
+      return;
+    }
+  }
+
+  setClientMessage("Guardando...");
 
   try {
     const saved = await fetchJson(id ? `/api/clientes/${encodeURIComponent(id)}` : "/api/clientes", {
@@ -11230,10 +11260,12 @@ async function saveClient(event) {
     });
     const clientes = await fetchJson("/api/clientes");
     state.clientes = clientes.items || [];
+    const savedName = saved.item.nombre || payload.nombre;
+    $("#client-search").value = savedName;
+    resetClientForm();
     renderMetrics();
     renderClientes();
-    await editClient(saved.item.id);
-    setClientMessage("Cliente guardado correctamente.", "ok");
+    setClientMessage("Cliente guardado correctamente. El formulario quedó listo para una nueva carga.", "ok");
   } catch (error) {
     setClientMessage(error.message, "error");
   }
