@@ -41,6 +41,7 @@ const state = {
   fieldContractLineRows: [],
   fieldLeasePaymentPresetRows: [],
   editingFieldContractLineId: "",
+  editingFieldContractInstallmentId: "",
   activeFieldContract: null,
   fieldDataLoaded: false,
   usuario: null,
@@ -60,7 +61,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20261019-clientes-edicion-v18";
+const APP_BUILD = "20261026-cuotas-editables-v19";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -1566,14 +1567,50 @@ function renderFieldContractInstallmentRows() {
         <td>${row.cantidadFija ? `${plainNumberValue(row.cantidadFija)} ${escapeHtml(row.unidadCantidad || "KG")}` : "-"}</td>
         <td class="amount">${row.importeFijo ? moneyValue(row.importeFijo) : "-"}</td>
         <td>${escapeHtml(row.detalle || "-")}</td>
-        <td><button type="button" class="small-button danger-button" data-field-contract-installment-remove="${escapeHtml(row.id)}">Quitar</button></td>
+        <td><button type="button" class="small-button" data-field-contract-installment-edit="${escapeHtml(row.id)}">Modificar</button> <button type="button" class="small-button danger-button" data-field-contract-installment-remove="${escapeHtml(row.id)}">Quitar</button></td>
       </tr>`).join("")
     : `<tr><td colspan="8">Sin cuotas manuales. El calculo usara la frecuencia base del contrato.</td></tr>`;
   if ($("#field-contract-installment-summary")) {
     $("#field-contract-installment-summary").textContent = rows.length ? `${rows.length} cuota/s manual/es.` : "Sin cuotas manuales.";
   }
+  if ($("#field-contract-installment-add")) {
+    $("#field-contract-installment-add").textContent = state.editingFieldContractInstallmentId ? "Guardar cambio" : "Agregar cuota";
+  }
+  if ($("#field-contract-installment-cancel")) {
+    $("#field-contract-installment-cancel").hidden = !state.editingFieldContractInstallmentId;
+  }
   renderFieldLeaseInstallmentOptions();
   syncFieldContractRuleMode();
+}
+
+function clearFieldContractInstallmentInputs() {
+  if ($("#field-contract-installment-number")) $("#field-contract-installment-number").value = "";
+  if ($("#field-contract-installment-due")) $("#field-contract-installment-due").value = "";
+  if ($("#field-contract-installment-type")) $("#field-contract-installment-type").value = "FACTURADO";
+  if ($("#field-contract-installment-percent")) $("#field-contract-installment-percent").value = "";
+  if ($("#field-contract-installment-quantity")) $("#field-contract-installment-quantity").value = "";
+  if ($("#field-contract-installment-quantity-unit")) $("#field-contract-installment-quantity-unit").value = "KG";
+  if ($("#field-contract-installment-amount")) $("#field-contract-installment-amount").value = "";
+  if ($("#field-contract-installment-notes")) $("#field-contract-installment-notes").value = "";
+  state.editingFieldContractInstallmentId = "";
+  if ($("#field-contract-installment-add")) $("#field-contract-installment-add").textContent = "Agregar cuota";
+  if ($("#field-contract-installment-cancel")) $("#field-contract-installment-cancel").hidden = true;
+}
+
+function editFieldContractInstallmentRow(installmentId) {
+  const row = (state.fieldContractInstallmentRows || []).find((item) => String(item.id) === String(installmentId));
+  if (!row) return;
+  state.editingFieldContractInstallmentId = row.id;
+  $("#field-contract-installment-number").value = row.numero || "";
+  $("#field-contract-installment-due").value = formatDateForInput(row.vencimiento);
+  $("#field-contract-installment-type").value = row.tipo || "FACTURADO";
+  $("#field-contract-installment-percent").value = row.porcentaje ? plainNumberValue(row.porcentaje) : "";
+  $("#field-contract-installment-quantity").value = row.cantidadFija ? plainNumberValue(row.cantidadFija) : "";
+  $("#field-contract-installment-quantity-unit").value = row.unidadCantidad || "KG";
+  $("#field-contract-installment-amount").value = row.importeFijo ? moneyValue(row.importeFijo) : "";
+  $("#field-contract-installment-notes").value = row.detalle || "";
+  renderFieldContractInstallmentRows();
+  setFieldContractMessage("Cuota cargada para modificar. Cambie solamente el detalle necesario y presione Guardar cambio.", "ok");
 }
 
 function fieldContractLineAppliesLabel(value) {
@@ -1724,7 +1761,8 @@ function addFieldContractInstallmentRow() {
     return;
   }
   const fullBlockPercent = !percent && !quantity && !amount && type !== "INFORMATIVA" ? 100 : percent;
-  state.fieldContractInstallmentRows.push(normalizeFieldContractInstallment({
+  const nextInstallment = normalizeFieldContractInstallment({
+    id: state.editingFieldContractInstallmentId || "",
     numero: number,
     vencimiento: due,
     tipo: type,
@@ -1733,16 +1771,19 @@ function addFieldContractInstallmentRow() {
     unidadCantidad: $("#field-contract-installment-quantity-unit")?.value || "KG",
     importeFijo: amount,
     detalle: $("#field-contract-installment-notes")?.value || ""
-  }));
-  if ($("#field-contract-installment-number")) $("#field-contract-installment-number").value = "";
-  if ($("#field-contract-installment-percent")) $("#field-contract-installment-percent").value = "";
-  if ($("#field-contract-installment-quantity")) $("#field-contract-installment-quantity").value = "";
-  if ($("#field-contract-installment-quantity-unit")) $("#field-contract-installment-quantity-unit").value = "KG";
-  if ($("#field-contract-installment-amount")) $("#field-contract-installment-amount").value = "";
-  if ($("#field-contract-installment-notes")) $("#field-contract-installment-notes").value = "";
+  });
+  const wasEditing = !!state.editingFieldContractInstallmentId;
+  if (wasEditing) {
+    state.fieldContractInstallmentRows = (state.fieldContractInstallmentRows || []).map((row) => String(row.id) === String(state.editingFieldContractInstallmentId) ? nextInstallment : row);
+  } else {
+    state.fieldContractInstallmentRows.push(nextInstallment);
+  }
+  clearFieldContractInstallmentInputs();
   renderFieldContractInstallmentRows();
   syncFieldContractFormToActive();
-  setFieldContractMessage("Cuota manual agregada. Si no cargaste porcentaje/cantidad/importe, se tomo el 100% del bloque elegido.", "ok");
+  setFieldContractMessage(wasEditing
+    ? "Cuota modificada. Para conservar el cambio, guarde el contrato."
+    : "Cuota manual agregada. Si no cargaste porcentaje/cantidad/importe, se tomo el 100% del bloque elegido.", "ok");
 }
 
 window.addFieldContractLineRow = addFieldContractLineRow;
@@ -2028,6 +2069,7 @@ function fillFieldContractForm(item) {
   clearFieldContractLineInputs();
   renderFieldContractLineRows();
   state.fieldContractInstallmentRows = Array.isArray(item.cuotas) ? item.cuotas.map(normalizeFieldContractInstallment) : [];
+  clearFieldContractInstallmentInputs();
   renderFieldContractInstallmentRows();
   updateFieldContractPdfSummary(item.id || "");
   syncFieldContractRuleMode();
@@ -2047,6 +2089,7 @@ function resetFieldContractForm() {
   clearFieldContractLineInputs();
   renderFieldContractLineRows();
   state.fieldContractInstallmentRows = [];
+  clearFieldContractInstallmentInputs();
   renderFieldContractInstallmentRows();
   updateFieldContractPdfSummary("");
   setFieldContractMessage("");
@@ -11549,6 +11592,11 @@ async function init() {
   $("#field-contract-party-add").addEventListener("click", addFieldContractPartyRow);
   $("#field-contract-line-add").addEventListener("click", addFieldContractLineRow);
   $("#field-contract-installment-add").addEventListener("click", addFieldContractInstallmentRow);
+  $("#field-contract-installment-cancel").addEventListener("click", () => {
+    clearFieldContractInstallmentInputs();
+    renderFieldContractInstallmentRows();
+    setFieldContractMessage("Edicion de cuota cancelada.");
+  });
   $all("#field-contract-form input, #field-contract-form select, #field-contract-form textarea").forEach((node) => {
     node.addEventListener("input", () => {
       syncFieldContractFormToActive();
@@ -11625,9 +11673,16 @@ async function init() {
     syncFieldContractFormToActive();
   });
   $("#field-contract-installment-body").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-field-contract-installment-remove]");
-    if (!button) return;
-    state.fieldContractInstallmentRows = state.fieldContractInstallmentRows.filter((item) => String(item.id) !== String(button.dataset.fieldContractInstallmentRemove));
+    const editButton = event.target.closest("[data-field-contract-installment-edit]");
+    const removeButton = event.target.closest("[data-field-contract-installment-remove]");
+    if (editButton) {
+      editFieldContractInstallmentRow(editButton.dataset.fieldContractInstallmentEdit);
+      return;
+    }
+    if (!removeButton) return;
+    const removedId = String(removeButton.dataset.fieldContractInstallmentRemove);
+    state.fieldContractInstallmentRows = state.fieldContractInstallmentRows.filter((item) => String(item.id) !== removedId);
+    if (String(state.editingFieldContractInstallmentId) === removedId) clearFieldContractInstallmentInputs();
     renderFieldContractInstallmentRows();
     syncFieldContractFormToActive();
   });
