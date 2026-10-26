@@ -32,6 +32,7 @@ const state = {
   operationSearchRows: [],
   operationSearchPage: 1,
   fieldQuoteRows: [],
+  editingFieldQuoteId: "",
   fieldLeasePaymentRows: [],
   fieldLeaseAdjustmentRows: [],
   fieldLeaseProductQuoteRows: [],
@@ -61,7 +62,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20261026-cuotas-editables-v19";
+const APP_BUILD = "20261026-cotizaciones-editables-v20";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -2838,9 +2839,38 @@ function renderFieldQuoteRows() {
         <td>${escapeHtml(item.mercado || "-")}</td>
         <td>${escapeHtml(item.producto || "-")}</td>
         <td>${escapeHtml(fieldQuoteDisplayValue(item))}</td>
-        <td><button type="button" class="small-button danger-button" data-field-quote-remove="${escapeHtml(item.id)}">Quitar</button></td>
+        <td><button type="button" class="small-button" data-field-quote-edit="${escapeHtml(item.id)}">Modificar</button> <button type="button" class="small-button danger-button" data-field-quote-remove="${escapeHtml(item.id)}">Quitar</button></td>
       </tr>`).join("")
     : `<tr><td colspan="5">Sin cotizaciones cargadas para promedio.</td></tr>`;
+  if ($("#field-quote-add")) {
+    $("#field-quote-add").textContent = state.editingFieldQuoteId ? "Guardar cambio" : "Agregar cotizacion";
+  }
+  if ($("#field-quote-cancel")) {
+    $("#field-quote-cancel").hidden = !state.editingFieldQuoteId;
+  }
+}
+
+function clearFieldQuoteInputs() {
+  state.editingFieldQuoteId = "";
+  if ($("#field-quote-date")) $("#field-quote-date").value = "";
+  if ($("#field-quote-market")) $("#field-quote-market").value = "";
+  if ($("#field-quote-product")) $("#field-quote-product").value = "";
+  if ($("#field-quote-price")) $("#field-quote-price").value = "";
+  if ($("#field-quote-add")) $("#field-quote-add").textContent = "Agregar cotizacion";
+  if ($("#field-quote-cancel")) $("#field-quote-cancel").hidden = true;
+}
+
+function editFieldQuoteRow(quoteId) {
+  const row = (state.fieldQuoteRows || []).find((item) => String(item.id) === String(quoteId));
+  if (!row) return;
+  state.editingFieldQuoteId = row.id;
+  $("#field-quote-date").value = formatDateForInput(row.fecha);
+  $("#field-quote-market").value = row.mercado || "";
+  $("#field-quote-product").value = row.producto || "";
+  if (isFieldQuoteWithoutPrice(row)) $("#field-quote-price").value = "s/cotizacion";
+  else setMoneyInput("#field-quote-price", row.cotizacion || 0);
+  renderFieldQuoteRows();
+  $("#field-quote-date")?.focus();
 }
 
 function addFieldQuoteRow() {
@@ -2848,19 +2878,29 @@ function addFieldQuoteRow() {
   const withoutQuote = !rawQuote || /s\/?\s*cotiz|sin\s+cotiz/i.test(rawQuote);
   const cotizacion = withoutQuote ? 0 : parseMoneyInput(rawQuote);
   if (!cotizacion && !withoutQuote) return;
-  state.fieldQuoteRows.push({
-    id: `COT-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  const nextQuote = {
+    id: state.editingFieldQuoteId || `COT-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     fecha: $("#field-quote-date")?.value || "",
     mercado: $("#field-quote-market")?.value || $("#field-lease-market")?.value || "",
     producto: $("#field-quote-product")?.value || $("#field-lease-cereal")?.value || "",
     cotizacion,
     cotizacionTexto: withoutQuote ? "s/cotizacion" : "",
     sinCotizacion: withoutQuote
-  });
-  $("#field-quote-price").value = "";
+  };
+  const wasEditing = !!state.editingFieldQuoteId;
+  if (wasEditing) {
+    state.fieldQuoteRows = (state.fieldQuoteRows || []).map((item) => String(item.id) === String(state.editingFieldQuoteId) ? nextQuote : item);
+  } else {
+    state.fieldQuoteRows.push(nextQuote);
+  }
+  if (wasEditing) clearFieldQuoteInputs();
+  else $("#field-quote-price").value = "";
   renderFieldQuoteRows();
   syncFieldQuoteAverageToPrice();
   updateFieldLeasePreview();
+  setFieldLeaseMessage(wasEditing
+    ? "Cotizacion modificada. Guarde el calculo para conservar el cambio."
+    : "Cotizacion agregada. Guarde el calculo para conservarla.", "ok");
 }
 
 function fieldLeaseFrequencyDays(frequency) {
@@ -3033,6 +3073,7 @@ function resetFieldLeaseForm() {
   if ($("#field-payment-party-simple")) $("#field-payment-party-simple").value = "ARRENDADOR";
   if ($("#field-payment-concept-simple")) $("#field-payment-concept-simple").value = "PAGO_CUOTA";
   state.fieldQuoteRows = [];
+  state.editingFieldQuoteId = "";
   state.fieldLeasePaymentRows = [];
   state.fieldLeaseAdjustmentRows = [];
   state.fieldLeasePaymentPresetRows = [];
@@ -4141,6 +4182,7 @@ function findFieldContractForLease(item = {}) {
 
 function fillFieldLeaseForm(item) {
   if (!item) return;
+  clearFieldQuoteInputs();
   const relatedContract = findFieldContractForLease(item);
   if (relatedContract) {
     fillFieldContractForm(relatedContract);
@@ -11694,6 +11736,11 @@ async function init() {
   $("#field-receipt-tab-landlord")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDADOR"));
   $("#field-receipt-tab-tenant")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDATARIO"));
   $("#field-quote-add").addEventListener("click", addFieldQuoteRow);
+  $("#field-quote-cancel")?.addEventListener("click", () => {
+    clearFieldQuoteInputs();
+    renderFieldQuoteRows();
+    setFieldLeaseMessage("Edicion de cotizacion cancelada.");
+  });
   $("#field-payment-preset-add")?.addEventListener("click", addSelectedFieldLeasePresetPayments);
   $("#field-payment-preset-body")?.addEventListener("change", (event) => {
     if (event.target.closest("[data-field-payment-preset]")) updateSelectedFieldLeasePresetPaymentAmount();
@@ -11709,9 +11756,16 @@ async function init() {
   $("#field-payment-commission-add")?.addEventListener("change", () => syncFieldPaymentCommissionShortcut("ADD"));
   $("#field-payment-commission-deduct")?.addEventListener("change", () => syncFieldPaymentCommissionShortcut("DEDUCT"));
   $("#field-quote-body").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-field-quote-remove]");
-    if (!button) return;
-    state.fieldQuoteRows = state.fieldQuoteRows.filter((item) => String(item.id) !== String(button.dataset.fieldQuoteRemove));
+    const editButton = event.target.closest("[data-field-quote-edit]");
+    if (editButton) {
+      editFieldQuoteRow(editButton.dataset.fieldQuoteEdit);
+      return;
+    }
+    const removeButton = event.target.closest("[data-field-quote-remove]");
+    if (!removeButton) return;
+    const removedId = String(removeButton.dataset.fieldQuoteRemove);
+    state.fieldQuoteRows = state.fieldQuoteRows.filter((item) => String(item.id) !== removedId);
+    if (String(state.editingFieldQuoteId) === removedId) clearFieldQuoteInputs();
     renderFieldQuoteRows();
     syncFieldQuoteAverageToPrice();
     updateFieldLeasePreview();
