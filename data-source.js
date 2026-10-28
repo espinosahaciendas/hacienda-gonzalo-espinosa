@@ -667,7 +667,24 @@ function buildOperationAccountMovements(operation, options = {}) {
   const frigoEfectivoBase = frigo && frigoNetoFinal
     ? Math.max((frigoBrutoSinIva || frigoNetoFinal / 1.105) - frigoFacturado, 0)
     : 0;
-  const efectivoProdSinIva = normalizeFrigorificoEfectivoSinIva(liq.efectivoProd, frigoEfectivoBase, frigo);
+  const anticipated = Boolean(operation.ventaAnticipada || draft.ventaAnticipada)
+    || normalizeKey(operation.tipo || draft.tipo).includes("ANTICIPADA");
+  const efectivoModo = normalizeKey(liq.efectivoModo || draft.efectivoModo || "MONTO");
+  const efectivoPorc = parseMoney(liq.efectivoPorc !== undefined ? liq.efectivoPorc : draft.efectivoPorc);
+  const brutoBaseProd = frigo
+    ? (frigoBrutoSinIva || (frigoNetoFinal ? frigoNetoFinal / 1.105 : 0))
+    : (parseMoney(liq.brutoVend) || operationTotal(operation));
+  const efectivoProdAutomatico = anticipated
+    ? 0
+    : efectivoModo === "PORCENTAJE"
+    ? Math.max(brutoBaseProd * efectivoPorc / 100, 0)
+    : Math.max(brutoBaseProd - parseMoney(liq.importeFacturado), 0);
+  const efectivoProdGuardado = normalizeFrigorificoEfectivoSinIva(liq.efectivoProd, frigoEfectivoBase, frigo);
+  const efectivoProdEsAutomatico = Object.prototype.hasOwnProperty.call(liq, "efectivoProdManual")
+    && !Boolean(liq.efectivoProdManual);
+  const efectivoProdSinIva = efectivoProdEsAutomatico && efectivoProdGuardado <= 0.01 && efectivoProdAutomatico > 0.01
+    ? efectivoProdAutomatico
+    : efectivoProdGuardado;
   const efectivoProdCuenta = frigo ? efectivoProdSinIva * 1.105 : efectivoProdSinIva;
   const consignada = normalizeKey(operation.tipo || draft.tipo) === "CONSIGNADA";
   const facturadoCuentaProd = consignada
@@ -3451,6 +3468,8 @@ class PostgresJsonDataSource extends BackupDataSource {
     this.pool = null;
     this.queue = Promise.resolve();
     this.insideRemote = false;
+    this.remoteReadCacheExpiresAt = 0;
+    this.remoteReadCacheTtlMs = Math.max(0, Number(process.env.POSTGRES_READ_CACHE_MS || 5000));
   }
 
   mode() {
@@ -3476,6 +3495,15 @@ class PostgresJsonDataSource extends BackupDataSource {
   async withRemoteData(callback, persist = false) {
     if (this.insideRemote) return callback();
     const task = async () => {
+      if (!persist && Date.now() < this.remoteReadCacheExpiresAt) {
+        this.insideRemote = true;
+        try {
+          return await callback();
+        } finally {
+          this.insideRemote = false;
+        }
+      }
+
       const pool = await this.getPool();
       const client = await pool.connect();
       try {
@@ -3493,8 +3521,10 @@ class PostgresJsonDataSource extends BackupDataSource {
           );
         }
         await client.query("COMMIT");
+        this.remoteReadCacheExpiresAt = Date.now() + this.remoteReadCacheTtlMs;
         return value;
       } catch (error) {
+        this.remoteReadCacheExpiresAt = 0;
         await client.query("ROLLBACK");
         throw error;
       } finally {
