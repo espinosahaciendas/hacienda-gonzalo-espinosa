@@ -2083,6 +2083,53 @@ class BackupDataSource {
     return operation;
   }
 
+  async reactivarOperacion(operationId) {
+    const data = this.readData();
+    const operations = asArray(data.operations);
+    const operation = operations.find((item) => String(item.id) === String(operationId));
+    if (!operation) {
+      const error = new Error("No se encontro la operacion.");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (normalizeKey(operation.estado) !== "DERIVADA_EXTERNO") {
+      const error = new Error("Solo se pueden reactivar operaciones derivadas a movimiento externo.");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const hasAccountMovements = buildOperationAccountMovements(operation).length > 0
+      || asArray(data.currentAccountManualMovements).some((item) => String(item.operacion || "") === String(operationId));
+    const operationMovementPrefix = `${operationId}-`;
+    const hasActiveImputations = asArray(data.currentAccountPayments)
+      .filter((payment) => !payment.anulado)
+      .some((payment) => asArray(payment.imputaciones).some((item) => {
+        const movementId = String(item.movementId || item.rowId || "");
+        return movementId === String(operationId) || movementId.startsWith(operationMovementPrefix);
+      }));
+    if (hasAccountMovements || hasActiveImputations) {
+      const error = new Error("La operacion ya tiene movimientos o imputaciones en cuenta corriente y no se puede reactivar.");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const reactivadaEn = new Date().toISOString();
+    operation.estado = "BORRADOR";
+    operation.reactivadaEn = reactivadaEn;
+    delete operation.derivadaExternoEn;
+    delete operation.motivoDerivacion;
+    operation.draftData = {
+      ...(operation.draftData || {}),
+      estado: "BORRADOR",
+      reactivadaEn
+    };
+    delete operation.draftData.derivadaExternoEn;
+    delete operation.draftData.motivoDerivacion;
+    data.operations = operations;
+    this.saveData(data);
+    return operation;
+  }
+
   async anularOperacion(operationId, input = {}) {
     return this.derivarOperacionExterna(operationId, input);
   }
@@ -3611,6 +3658,7 @@ class PostgresJsonDataSource extends BackupDataSource {
   async saveOperacion(input) { return this.withRemoteData(() => super.saveOperacion(input), true); }
   async anularOperacion(operationId, input) { return this.withRemoteData(() => super.anularOperacion(operationId, input), true); }
   async derivarOperacionExterna(operationId, input) { return this.withRemoteData(() => super.derivarOperacionExterna(operationId, input), true); }
+  async reactivarOperacion(operationId) { return this.withRemoteData(() => super.reactivarOperacion(operationId), true); }
   async getCategorias() { return this.withRemoteData(() => super.getCategorias()); }
   async saveCategoria(currentName, input) { return this.withRemoteData(() => super.saveCategoria(currentName, input), true); }
   async deleteCategoria(currentName) { return this.withRemoteData(() => super.deleteCategoria(currentName), true); }

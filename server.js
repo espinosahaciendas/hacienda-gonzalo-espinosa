@@ -168,7 +168,20 @@ function securityHeaders() {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy": [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "font-src 'self' data:",
+      "connect-src 'self'",
+      "frame-src 'self' blob:",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "form-action 'self'",
+      "frame-ancestors 'none'"
+    ].join("; ")
   };
   if (IS_PRODUCTION) {
     headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
@@ -704,6 +717,14 @@ async function handleApi(req, res) {
     const body = await readBody(req);
     sendJson(res, 200, {
       item: await dataSource.derivarOperacionExterna(decodeURIComponent(operacionDerivarExternoMatch[1]), body)
+    });
+    return;
+  }
+
+  const operacionReactivarMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/reactivar$/);
+  if (operacionReactivarMatch && req.method === "POST") {
+    sendJson(res, 200, {
+      item: await dataSource.reactivarOperacion(decodeURIComponent(operacionReactivarMatch[1]))
     });
     return;
   }
