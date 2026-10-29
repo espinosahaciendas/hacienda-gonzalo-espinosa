@@ -5154,7 +5154,7 @@ function renderOperationSearchPage() {
           <td>${plainNumberValue(summary.heads)}</td>
           <td>${plainNumberValue(summary.kilos)} kgs</td>
           <td>${moneyValue(summary.amount)}</td>
-          <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? '<span class="subtle">Registro comercial</span>' : `<button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button>`}</td>
+          <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? `<div class="operation-row-actions"><span class="subtle">Registro comercial</span><button type="button" class="operation-action-button operation-action-reactivate" data-reactivate-operation="${escapeHtml(operation.id)}" title="Reactivar operacion" aria-label="Reactivar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8634;</span></button></div>` : `<button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button>`}</td>
         </tr>`;
       }).join("")
     : `<tr><td colspan="11">No hay operaciones para los filtros aplicados.</td></tr>`;
@@ -8835,7 +8835,7 @@ function renderOperaciones() {
         <td>${escapeHtml(operation.comprador || operation.consignataria || "-")}</td>
         <td>${escapeHtml(operation.total || "-")}</td>
         <td>${escapeHtml(statusInfo.label.toUpperCase())}</td>
-        <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? '<span class="subtle">Registro comercial</span>' : `<div class="operation-row-actions"><button type="button" class="operation-action-button operation-action-open" data-open-sale="${escapeHtml(operation.id)}" title="Continuar operacion" aria-label="Continuar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8594;</span></button>${statusInfo.pending ? `<button type="button" class="operation-action-button operation-action-derive" data-derive-operation="${escapeHtml(operation.id)}" title="Derivar a movimiento externo" aria-label="Derivar operacion ${escapeHtml(operation.id)} a movimiento externo"><span aria-hidden="true">&#8599;</span></button>` : ""}</div>`}</td>
+        <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? `<div class="operation-row-actions"><span class="subtle">Registro comercial</span><button type="button" class="operation-action-button operation-action-reactivate" data-reactivate-operation="${escapeHtml(operation.id)}" title="Reactivar operacion" aria-label="Reactivar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8634;</span></button></div>` : `<div class="operation-row-actions"><button type="button" class="operation-action-button operation-action-open" data-open-sale="${escapeHtml(operation.id)}" title="Continuar operacion" aria-label="Continuar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8594;</span></button>${statusInfo.pending ? `<button type="button" class="operation-action-button operation-action-derive" data-derive-operation="${escapeHtml(operation.id)}" title="Derivar a movimiento externo" aria-label="Derivar operacion ${escapeHtml(operation.id)} a movimiento externo"><span aria-hidden="true">&#8599;</span></button>` : ""}</div>`}</td>
       </tr>
     `;})
     .join("");
@@ -8865,6 +8865,24 @@ async function deriveOperationToExternal(operationId) {
     renderOperaciones();
     renderMetrics();
     setOperationMessage(`Operacion ${operation.id} conservada como registro comercial y derivada a movimiento externo.`, "ok");
+  } catch (error) {
+    setOperationMessage(error.message, "error");
+  }
+}
+
+async function reactivateDerivedOperation(operationId) {
+  const operation = state.operaciones.find((item) => String(item.id) === String(operationId));
+  if (!operation) return;
+  const confirmed = window.confirm(`La operacion ${operation.id} volvera a Pendiente y se podra completar normalmente. ¿Continuar?`);
+  if (!confirmed) return;
+  try {
+    await fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}/reactivar`, { method: "POST" });
+    const response = await fetchJson("/api/operaciones");
+    state.operaciones = response.items || [];
+    renderOperaciones();
+    renderOperationSearch();
+    renderMetrics();
+    setOperationMessage(`Operacion ${operation.id} reactivada. Ya se puede abrir y completar.`, "ok");
   } catch (error) {
     setOperationMessage(error.message, "error");
   }
@@ -12215,6 +12233,11 @@ async function init() {
     editClient(button.dataset.editClient);
   });
   $("#operaciones-body").addEventListener("click", (event) => {
+    const reactivateButton = event.target.closest("[data-reactivate-operation]");
+    if (reactivateButton) {
+      reactivateDerivedOperation(reactivateButton.dataset.reactivateOperation);
+      return;
+    }
     const deriveButton = event.target.closest("[data-derive-operation]");
     if (deriveButton) {
       deriveOperationToExternal(deriveButton.dataset.deriveOperation);
@@ -12225,6 +12248,11 @@ async function init() {
     openSale(button.dataset.openSale);
   });
   $("#operation-search-body").addEventListener("click", (event) => {
+    const reactivateButton = event.target.closest("[data-reactivate-operation]");
+    if (reactivateButton) {
+      reactivateDerivedOperation(reactivateButton.dataset.reactivateOperation);
+      return;
+    }
     const button = event.target.closest("[data-open-operation-search]");
     if (!button) return;
     setView("operaciones");
