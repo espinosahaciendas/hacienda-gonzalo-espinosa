@@ -540,6 +540,8 @@ function pushMovement(list, movement) {
     porcComision: Number(movement.porcComision || 0),
     importeComision: Number(movement.importeComision || 0),
     tipoDesglose: movement.tipoDesglose || "",
+    tipoAjuste: movement.tipoAjuste || "",
+    compensableConComision: Boolean(movement.compensableConComision),
     importe: Math.round(Number(movement.importe || 0) * 100) / 100,
     estado: movement.estado || "PENDIENTE",
     observacion: movement.observacion || ""
@@ -686,6 +688,9 @@ function buildOperationAccountMovements(operation, options = {}) {
     ? efectivoProdAutomatico
     : efectivoProdGuardado;
   const efectivoProdCuenta = frigo ? efectivoProdSinIva * 1.105 : efectivoProdSinIva;
+  const efectivoProdTratamiento = normalizeKey(liq.efectivoProdTratamiento || draft.efectivoProdTratamiento) === "AJUSTE_COMISION"
+    ? "AJUSTE_COMISION"
+    : "EFECTIVO";
   const consignada = normalizeKey(operation.tipo || draft.tipo) === "CONSIGNADA";
   const facturadoCuentaProd = consignada
     ? parseMoney(liq.netoLiquidacionProd)
@@ -728,7 +733,7 @@ function buildOperationAccountMovements(operation, options = {}) {
     return firstPlanDue(draft.planFacturadoProd || liq.planFacturadoProd || "0");
   };
 
-  const addPlan = ({ cliente, role, amount, plan, comprobante, counterpart, conceptSuffix }) => {
+  const addPlan = ({ cliente, role, amount, plan, comprobante, counterpart, conceptSuffix, tipoAjuste = "", compensableConComision = false }) => {
     parsePlanItems(plan, amount, dueBaseDate).forEach((item, index) => {
       const signedAmount = amount < 0 ? -item.importe : item.importe;
       pushMovement(movements, {
@@ -748,6 +753,8 @@ function buildOperationAccountMovements(operation, options = {}) {
         tipoOperacion: operation.tipo || draft.tipo || "",
         destinoOperacion: operation.destino || draft.destino || "",
         consignatariaCuenta: consigneeAppliesToRole(role),
+        tipoAjuste,
+        compensableConComision,
         importe: signedAmount,
         estado: "PENDIENTE"
       });
@@ -773,7 +780,11 @@ function buildOperationAccountMovements(operation, options = {}) {
       plan: draft.planEfectivoProd || liq.planEfectivoProd || "0",
       comprobante: liq.comprobanteProd || draft.comprobanteProd,
       counterpart: counterpartForRole("VENDEDOR-EFEC", operation.comprador || draft.comprador || operationConsignee),
-      conceptSuffix: "efectivo vendedor"
+      conceptSuffix: efectivoProdTratamiento === "AJUSTE_COMISION"
+        ? "ajuste de precio a cargo de la consignataria - a compensar con comision"
+        : "efectivo vendedor",
+      tipoAjuste: efectivoProdTratamiento === "AJUSTE_COMISION" ? "DIFERENCIA_PRECIO_COMISION" : "",
+      compensableConComision: efectivoProdTratamiento === "AJUSTE_COMISION"
     });
   }
   if (!accountByPartialBillingComp && facturadoCuentaComp) {
@@ -1405,6 +1416,9 @@ function calculateLiquidacion(operation, input = {}) {
     : source.efectivoProd !== undefined && source.efectivoProd !== ""
     ? normalizeFrigorificoEfectivoSinIva(source.efectivoProd, efectivoProdBase, frigo)
     : efectivoProdBase;
+  const efectivoProdTratamiento = normalizeKey(source.efectivoProdTratamiento) === "AJUSTE_COMISION"
+    ? "AJUSTE_COMISION"
+    : "EFECTIVO";
   const ivaCompFrigorificoControl = facturado * 0.105;
   const efectivoCompBase = frigo
     ? Math.max(brutoComp - (facturado + ivaCompFrigorificoControl), 0)
@@ -1424,7 +1438,8 @@ function calculateLiquidacion(operation, input = {}) {
   };
   const aplicaComisionFacturadoProd = commissionApplies("aplicaComisionFacturadoProd", "comisionFacturadoProdPct", "comisionProd", "comisionFacturadoProd");
   const aplicaComisionFacturadoComp = commissionApplies("aplicaComisionFacturadoComp", "comisionFacturadoCompPct", "comisionComp", "comisionFacturadoComp");
-  const aplicaComisionEfectivoProd = commissionApplies("aplicaComisionEfectivoProd", "comisionEfectivoProdPct", "", "comisionEfectivoProd");
+  const aplicaComisionEfectivoProd = efectivoProdTratamiento !== "AJUSTE_COMISION"
+    && commissionApplies("aplicaComisionEfectivoProd", "comisionEfectivoProdPct", "", "comisionEfectivoProd");
   const aplicaComisionEfectivoComp = commissionApplies("aplicaComisionEfectivoComp", "comisionEfectivoCompPct", "", "comisionEfectivoComp");
   const comisionFacturadoProdPct = aplicaComisionFacturadoProd
     ? parseMoney(source.comisionFacturadoProdPct !== undefined ? source.comisionFacturadoProdPct : source.comisionProd)
@@ -1480,6 +1495,7 @@ function calculateLiquidacion(operation, input = {}) {
     ivaCompManual: Boolean(source.ivaCompManual),
     efectivoProd,
     efectivoProdManual: Boolean(source.efectivoProdManual),
+    efectivoProdTratamiento,
     efectivoConIvaProd,
     efectivoComp,
     efectivoCompManual: Boolean(source.efectivoCompManual),
@@ -2415,6 +2431,7 @@ class BackupDataSource {
       brutoSinIvaFrigorificoManual: liquidacion.brutoSinIvaFrigorificoManual,
       efectivoModo: liquidacion.efectivoModo,
       efectivoPorc: liquidacion.efectivoPorc,
+      efectivoProdTratamiento: liquidacion.efectivoProdTratamiento,
       planFacturadoProd: liquidacion.planFacturadoProd,
       planFacturadoComp: liquidacion.planFacturadoComp,
       planEfectivoProd: liquidacion.planEfectivoProd,
