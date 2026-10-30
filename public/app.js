@@ -5440,6 +5440,14 @@ function isPriceDifferenceCommissionAdjustment(movement) {
   return String(movement?.tipoAjuste || "").toUpperCase() === "DIFERENCIA_PRECIO_COMISION";
 }
 
+function commissionPriceAdjustmentBreakdownRow(movement, colspan = 9) {
+  if (String(movement?.tipoDesglose || "").toUpperCase() !== "COMISION_VENDEDOR_TOTAL") return "";
+  const total = Number(movement.comisionTotal || movement.importe || 0);
+  const adjustment = Number(movement.ajusteCompensado || 0);
+  const pending = Number(movement.importePendiente ?? movement.diferenciaFacturar ?? Math.max(total - adjustment, 0));
+  return `<tr class="cc-detail-row commission-adjustment-detail"><td colspan="${colspan}"><strong>Detalle de comision:</strong> Total ${moneyValue(total)} | Ajuste de precio compensado ${moneyValue(adjustment)} | <strong>Diferencia a facturar ${moneyValue(pending)}</strong></td></tr>`;
+}
+
 function movementDueKind(movement) {
   if (isPriceDifferenceCommissionAdjustment(movement)) return "Ajuste de precio";
   if (isCashMovement(movement)) return "Efectivo";
@@ -6097,6 +6105,7 @@ function renderCuentaCorriente() {
         </tr>
         ${compensationSummaryTableRow(payment, 9)}
         ${imputationRows}
+        ${commissionPriceAdjustmentBreakdownRow(movement, 9)}
         ${detail ? `<tr class="cc-detail-row"><td colspan="9">${commissionistDetailHtml(detail)}</td></tr>` : ""}
       `;
       }).join("")
@@ -7432,7 +7441,7 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
       <td class="amount">${imputed === null ? "-" : moneyValue(imputed)}</td>
       <td class="amount ${pending !== null && pending < 0 ? "negative" : "positive"}">${pending === null ? "-" : moneyValue(pending)}</td>
       <td class="status">${escapeHtml(currentAccountMovementStatusForDisplay(movement, viewMode))}</td>
-    </tr>${compensationSummaryTableRow(payment, 10)}${commissionistDetailReportRow(detail)}`;
+    </tr>${compensationSummaryTableRow(payment, 10)}${commissionPriceAdjustmentBreakdownRow(movement, 10)}${commissionistDetailReportRow(detail)}`;
   }).join("");
 }
 
@@ -9620,6 +9629,17 @@ function sellerComplementaryAmountLabel() {
     : "Efectivo vendedor";
 }
 
+function sellerCommissionBaseMode() {
+  return String($("#liq-comision-fact-prod-base-mode")?.value || "FACTURADO").toUpperCase();
+}
+
+function sellerCommissionBaseAmount(facturado = numberValue("#liq-facturado")) {
+  const mode = sellerCommissionBaseMode();
+  if (mode === "BRUTO_VENDEDOR") return numberValue("#liq-bruto-vend");
+  if (mode === "MANUAL") return numberValue("#liq-comision-fact-prod-base");
+  return Number(facturado || 0);
+}
+
 function syncSellerCashTreatment() {
   const adjustment = sellerCashIsCommissionAdjustment();
   const checkbox = $("#liq-comision-efect-prod-enabled");
@@ -9637,6 +9657,10 @@ function syncSellerCashTreatment() {
       ? "Importe del ajuste reconocido al vendedor"
       : "Importe efectivo sin IVA si aplica";
   }
+  const summary = $("#liq-commission-adjustment-summary");
+  if (summary) summary.hidden = !adjustment;
+  const baseInput = $("#liq-comision-fact-prod-base");
+  if (baseInput) baseInput.disabled = sellerCommissionBaseMode() !== "MANUAL";
 }
 
 function commissionPercent(enabledSelector, percentSelector) {
@@ -9669,11 +9693,14 @@ function calculateLiquidationPreview() {
   const expenses = getSellerExpenses();
   const buyerExpenses = getBuyerExpenses();
   const consigned = isConsignedOperation();
-  const comFactProd = facturado * commissionPercent("#liq-comision-fact-prod-enabled", "#liq-comision-fact-prod-pct") / 100;
+  const sellerCommissionBase = sellerCommissionBaseAmount(facturado);
+  const comFactProd = sellerCommissionBase * commissionPercent("#liq-comision-fact-prod-enabled", "#liq-comision-fact-prod-pct") / 100;
   const comFactComp = facturado * commissionPercent("#liq-comision-fact-comp-enabled", "#liq-comision-fact-comp-pct") / 100;
   const consigneeCommission = facturado * percentValue("#liq-consignee-commission-pct") / 100;
   const consigneeAdjustment = numberValue("#liq-consignee-adjustment");
   const cashWithIvaProd = efectivoProd + (frigo ? efectivoProd * 0.105 : 0);
+  const sellerAdjustmentApplied = sellerCashIsCommissionAdjustment() ? Math.min(cashWithIvaProd, comFactProd) : 0;
+  const sellerCommissionToInvoice = Math.max(comFactProd - sellerAdjustmentApplied, 0);
   const comEfProd = sellerCashIsCommissionAdjustment()
     ? 0
     : cashWithIvaProd * commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct") / 100;
@@ -9703,6 +9730,9 @@ function calculateLiquidationPreview() {
     efectivoComp,
     cashWithIvaProd,
     cashExpenseProd,
+    sellerCommissionBase,
+    sellerAdjustmentApplied,
+    sellerCommissionToInvoice,
     comFactProd,
     comFactComp,
     consigneeCommission,
@@ -9838,6 +9868,9 @@ function renderLiquidationTotals() {
   if (percentageCashMode) syncLiquidationFacturadoFromCashPercent();
   if (percentageCashMode) syncAutomaticLiquidationIva(true);
   const calc = calculateLiquidationPreview();
+  if (sellerCommissionBaseMode() !== "MANUAL" && document.activeElement !== $("#liq-comision-fact-prod-base")) {
+    setMoneyInput("#liq-comision-fact-prod-base", calc.sellerCommissionBase);
+  }
   if ((percentageCashMode || isFrigorificoIvaOperation()) && document.activeElement !== $("#liq-efectivo-prod")) {
     setMoneyInput("#liq-efectivo-prod", calc.efectivoProd);
   }
@@ -9848,6 +9881,9 @@ function renderLiquidationTotals() {
   setMoneyInput("#liq-comision-fact-comp", calc.comFactComp);
   setMoneyInput("#liq-comision-efect-prod", calc.comEfProd);
   setMoneyInput("#liq-comision-efect-comp", calc.comEfComp);
+  if ($("#liq-adjustment-commission-total")) $("#liq-adjustment-commission-total").textContent = moneyValue(calc.comFactProd);
+  if ($("#liq-adjustment-price-total")) $("#liq-adjustment-price-total").textContent = moneyValue(calc.cashWithIvaProd);
+  if ($("#liq-adjustment-invoice-difference")) $("#liq-adjustment-invoice-difference").textContent = moneyValue(calc.sellerCommissionToInvoice);
   if ($("#liq-cash-iva-prod")) $("#liq-cash-iva-prod").value = moneyValue(calc.cashWithIvaProd - calc.efectivoProd);
   if ($("#liq-cash-with-iva-prod")) $("#liq-cash-with-iva-prod").value = moneyValue(calc.cashWithIvaProd);
   $("#liq-consignee-commission").value = moneyValue(calc.consigneeCommission);
@@ -9886,6 +9922,10 @@ function fillLiquidationForm(liquidacion) {
   $("#liq-cash-mode").value = liquidacion.efectivoModo || draft.efectivoModo || "MONTO";
   $("#liq-cash-percent").value = liquidacion.efectivoPorc || draft.efectivoPorc || "";
   $("#liq-cash-prod-treatment").value = liquidacion.efectivoProdTratamiento || draft.efectivoProdTratamiento || "EFECTIVO";
+  const storedSellerCommissionBaseMode = liquidacion.comisionFacturadoProdBaseModo || draft.comisionFacturadoProdBaseModo;
+  $("#liq-comision-fact-prod-base-mode").value = storedSellerCommissionBaseMode
+    || (sellerCashIsCommissionAdjustment() ? "BRUTO_VENDEDOR" : "FACTURADO");
+  setMoneyInput("#liq-comision-fact-prod-base", liquidacion.comisionFacturadoProdBase || draft.comisionFacturadoProdBase || 0);
   const automaticCash = automaticFixedLiquidationCashValues();
   const storedCashProd = normalizeFrigorificoCashInput(liquidacion.efectivoProd);
   const storedCashComp = isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : Number(liquidacion.efectivoComp || 0);
@@ -10699,6 +10739,8 @@ async function saveLiquidation(event) {
     efectivoCompManual: Boolean(state.liquidationCashCompTouched),
     efectivoManualVersion: 1,
     comisionFacturadoProd: parseMoneyInput($("#liq-comision-fact-prod").value),
+    comisionFacturadoProdBaseModo: sellerCommissionBaseMode(),
+    comisionFacturadoProdBase: sellerCommissionBaseAmount(calc.facturado),
     comisionFacturadoComp: parseMoneyInput($("#liq-comision-fact-comp").value),
     comisionEfectivoProd: parseMoneyInput($("#liq-comision-efect-prod").value),
     comisionEfectivoComp: parseMoneyInput($("#liq-comision-efect-comp").value),
@@ -11131,7 +11173,7 @@ function renderReport() {
       <tr><th>Importe facturado</th><td>${moneyValue(calc.facturado)}</td><th>IVA liquidacion</th><td>${moneyValue(calc.ivaProd)}</td></tr>
     </tbody></table></div>
     ${sellerExpensesReport}
-    ${calc.comFactProd ? `<div class="report-line"><span>Comision sobre facturado</span><strong>${moneyValue(calc.comFactProd)}</strong></div>` : ""}
+    ${calc.comFactProd ? `<div class="report-line"><span>${sellerCashIsCommissionAdjustment() ? "Comision total sobre base seleccionada" : "Comision sobre facturado"}</span><strong>${moneyValue(calc.comFactProd)}</strong></div>` : ""}
     <div class="report-net seller-net"><span>NETO LIQUIDACION</span><strong>${moneyValue(calc.netoLiquidacionProd)}</strong></div>
   `;
   const buyerLiquidationSummary = hasPartialBilling ? `
@@ -11189,6 +11231,8 @@ function renderReport() {
         ${sellerLiquidationSummary}
         ${calc.efectivoProd || calc.cashExpenseProd || calc.comEfProd ? `<div class="report-section"><h3>${escapeHtml(sellerComplementaryAmountLabel())}</h3><table class="report-table"><tbody>
           <tr><th>${sellerCashIsCommissionAdjustment() ? "Diferencia reconocida al vendedor" : frigoCalc ? "Efectivo + IVA" : "Efectivo"}</th><td>${moneyValue(frigoCalc ? calc.cashWithIvaProd : calc.efectivoProd)}</td><th>${sellerCashIsCommissionAdjustment() ? "Tratamiento" : ""}</th><td>${sellerCashIsCommissionAdjustment() ? "A compensar con la comision de la consignataria" : ""}</td></tr>
+          ${sellerCashIsCommissionAdjustment() ? `<tr><th>Base de comision</th><td>${moneyValue(calc.sellerCommissionBase)}</td><th>Comision total</th><td>${moneyValue(calc.comFactProd)}</td></tr>
+          <tr><th>Ajuste aplicado</th><td>${moneyValue(calc.sellerAdjustmentApplied)}</td><th>Diferencia a facturar</th><td>${moneyValue(calc.sellerCommissionToInvoice)}</td></tr>` : ""}
           ${calc.cashExpenseProd ? `<tr><th>Gasto descontado efectivo</th><td>${moneyValue(calc.cashExpenseProd)}</td><th>Concepto</th><td>${escapeHtml($("#liq-cash-exp-concept-prod").value || "-")}</td></tr>` : ""}
         ${calc.comEfProd ? `<tr><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfProd)}</td><th></th><td></td></tr>` : ""}
         </tbody></table></div>` : ""}
@@ -12169,6 +12213,12 @@ async function init() {
   });
   $all("#liquidation-form input").forEach((input) => {
     input.addEventListener("input", renderLiquidationTotals);
+  });
+  $("#liq-cash-prod-treatment")?.addEventListener("change", () => {
+    if (sellerCashIsCommissionAdjustment() && sellerCommissionBaseMode() === "FACTURADO") {
+      $("#liq-comision-fact-prod-base-mode").value = "BRUTO_VENDEDOR";
+    }
+    renderLiquidationTotals();
   });
   ["#liq-cash-mode", "#liq-cash-percent"].forEach((selector) => {
     $(selector)?.addEventListener("input", () => {

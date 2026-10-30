@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20261029-ajuste-precio-v14">
+    <link rel="stylesheet" href="/styles.css?v=20261030-comision-ajuste-v15">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -1831,16 +1831,36 @@
                     </label>
                     <label class="check-line">
                       <input id="liq-comision-fact-prod-enabled" type="checkbox">
-                      Cobrar comision propia al vendedor sobre facturado
+                      Cobrar comision propia al vendedor
                     </label>
                     <label>
-                      % comision propia al vendedor sobre facturado
+                      % comision propia al vendedor
                       <input id="liq-comision-fact-prod-pct" inputmode="decimal" value="0">
                     </label>
                     <label>
-                      Comision propia al vendedor sobre facturado
+                      Base para calcular la comision
+                      <select id="liq-comision-fact-prod-base-mode">
+                        <option value="FACTURADO">Importe liquidado / facturado</option>
+                        <option value="BRUTO_VENDEDOR">Importe bruto total del vendedor</option>
+                        <option value="MANUAL">Importe manual</option>
+                      </select>
+                    </label>
+                    <label>
+                      Importe base de la comision
+                      <input id="liq-comision-fact-prod-base" class="money-input" inputmode="decimal" value="0">
+                    </label>
+                    <label>
+                      Comision total al vendedor
                       <input id="liq-comision-fact-prod" class="money-input" inputmode="decimal" value="0" readonly>
                     </label>
+                    <div class="advanced-subpanel commission-adjustment-summary" id="liq-commission-adjustment-summary" hidden>
+                      <h3>Compensacion de diferencia de precio</h3>
+                      <div class="economic-box compact-economic-box">
+                        <div><span>Comision total</span><strong id="liq-adjustment-commission-total">$ 0,00</strong></div>
+                        <div><span>Ajuste asumido</span><strong id="liq-adjustment-price-total">$ 0,00</strong></div>
+                        <div><span>Diferencia a facturar</span><strong id="liq-adjustment-invoice-difference">$ 0,00</strong></div>
+                      </div>
+                    </div>
                     <div class="advanced-subpanel consigned-only">
                       <h3>Gastos de liquidacion consignada</h3>
                       <div class="form-grid">
@@ -2809,7 +2829,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20261029-ajuste-precio-v22"></script>
+    <script src="/app.js?v=20261030-comision-ajuste-v23"></script>
   </body>
 </html>
 
