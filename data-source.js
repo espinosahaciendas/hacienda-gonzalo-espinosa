@@ -400,6 +400,8 @@ function buildExternalMovementItems(input, baseId) {
     baseComision: parseMoney(input.baseComision),
     porcComision: parseMoney(input.porcComision),
     importeComision: parseMoney(input.importeComision),
+    cuentaAsociada: normalizeText(input.cuentaAsociada),
+    tipoOrigen: normalizeText(input.tipoOrigen),
     observacion: normalizeText(input.observacion)
   };
   if (isVentaMag) {
@@ -540,6 +542,8 @@ function pushMovement(list, movement) {
     porcComision: Number(movement.porcComision || 0),
     importeComision: Number(movement.importeComision || 0),
     tipoDesglose: movement.tipoDesglose || "",
+    cuentaAsociada: movement.cuentaAsociada || "",
+    tipoOrigen: movement.tipoOrigen || "",
     tipoAjuste: movement.tipoAjuste || "",
     compensableConComision: Boolean(movement.compensableConComision),
     comisionTotal: Number(movement.comisionTotal || 0),
@@ -1018,6 +1022,8 @@ function buildAccountData(data) {
       porcComision: item.porcComision,
       importeComision: item.importeComision,
       tipoDesglose: item.tipoDesglose,
+      cuentaAsociada: item.cuentaAsociada,
+      tipoOrigen: item.tipoOrigen,
       importe: signedExternalMovement(item),
       estado: "PENDIENTE",
       observacion: item.observacion
@@ -1048,6 +1054,10 @@ function buildAccountData(data) {
     const resolvedId = resolveMovementId(movementId);
     if (!resolvedId || !Number(amount)) return;
     const movement = movements.find((row) => String(row.id) === resolvedId);
+    if (movement && payment) {
+      if (!movement.cuentaAsociada && payment.cuentaAsociada) movement.cuentaAsociada = normalizeText(payment.cuentaAsociada);
+      if (!movement.tipoOrigen && payment.tipoOrigen) movement.tipoOrigen = normalizeText(payment.tipoOrigen);
+    }
     const previous = allocations.get(resolvedId) || 0;
     const available = movement ? Math.max(Math.abs(movement.importe) - previous, 0) : Math.abs(Number(amount));
     const applied = Math.min(Math.abs(Number(amount)), available);
@@ -1135,9 +1145,11 @@ function buildAccountData(data) {
       origen: item.tipo || "PAGO/COBRO",
       concepto: item.tipo === "COMPENSACION"
         ? "COMPENSACION / aplicacion de saldo cobrado por fuera"
-        : `${`${item.tipo || "Movimiento"} - ${item.medio || ""}`.trim()}${Number(item.saldoFavor || 0) > 0.01 ? ` | Saldo a favor / anticipo: ${formatMoney(item.saldoFavor)}` : ""}`,
+        : `${`${item.tipo || "Movimiento"} - ${item.medio || ""}`.trim()}${Number(item.saldoFavor || 0) > 0.01 ? ` | ${normalizeKey(item.tipo) === "PAGO" ? "Adelanto a recuperar" : "Saldo a favor / anticipo"}: ${formatMoney(item.saldoFavor)}` : ""}`,
       comprobante: item.referencia,
       paymentId: item.id,
+      cuentaAsociada: item.cuentaAsociada,
+      tipoOrigen: item.tipoOrigen,
       importe: item.anulado ? 0 : signedPayment(item),
       estado: item.anulado ? "ANULADO" : "IMPUTADO",
       observacion: item.observacion
@@ -3509,6 +3521,8 @@ class BackupDataSource {
       importe: importeFinal,
       importeFirmado: importeFirmadoFinal,
       saldoFavor: Math.abs(parseMoney(input.saldoFavor)),
+      cuentaAsociada: normalizeText(input.cuentaAsociada),
+      tipoOrigen: normalizeText(input.tipoOrigen),
       medio: normalizeText(input.medio || "Transferencia"),
       referencia: normalizeText(input.referencia),
       observacion: normalizeText(input.observacion),
