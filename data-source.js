@@ -542,6 +542,9 @@ function pushMovement(list, movement) {
     tipoDesglose: movement.tipoDesglose || "",
     tipoAjuste: movement.tipoAjuste || "",
     compensableConComision: Boolean(movement.compensableConComision),
+    comisionTotal: Number(movement.comisionTotal || 0),
+    ajusteCompensado: Number(movement.ajusteCompensado || 0),
+    diferenciaFacturar: Number(movement.diferenciaFacturar || 0),
     importe: Math.round(Number(movement.importe || 0) * 100) / 100,
     estado: movement.estado || "PENDIENTE",
     observacion: movement.observacion || ""
@@ -810,7 +813,7 @@ function buildOperationAccountMovements(operation, options = {}) {
     });
   }
 
-  const addCommission = ({ cliente, role, amount, comprobante, counterpart, conceptSuffix }) => {
+  const addCommission = ({ cliente, role, amount, comprobante, counterpart, conceptSuffix, baseComision = 0, porcComision = 0, tipoDesglose = "", comisionTotal = 0, ajusteCompensado = 0, diferenciaFacturar = 0 }) => {
     if (!Number(amount)) return;
     if (operationConsignee) {
       if (settledByConsignee === "VENDEDOR" && !String(role || "").startsWith("VENDEDOR")) return;
@@ -834,6 +837,13 @@ function buildOperationAccountMovements(operation, options = {}) {
       tipoOperacion: operation.tipo || draft.tipo || "",
       destinoOperacion: operation.destino || draft.destino || "",
       consignatariaCuenta: false,
+      baseComision,
+      porcComision,
+      importeComision: amount,
+      tipoDesglose,
+      comisionTotal,
+      ajusteCompensado,
+      diferenciaFacturar,
       importe: Math.abs(Number(amount || 0)),
       estado: "PENDIENTE"
     });
@@ -844,7 +854,15 @@ function buildOperationAccountMovements(operation, options = {}) {
     amount: liq.comisionFacturadoProd,
     comprobante: liq.comprobanteProd || draft.comprobanteProd,
     counterpart: counterpartForRole("VENDEDOR-COM-FACT", operation.comprador || draft.comprador || operationConsignee),
-    conceptSuffix: "comision sobre facturado vendedor"
+    conceptSuffix: efectivoProdTratamiento === "AJUSTE_COMISION"
+      ? `comision total vendedor - base ${formatMoney(liq.comisionFacturadoProdBase || liq.importeFacturado)} - ajuste ${formatMoney(Math.min(efectivoProdCuenta, parseMoney(liq.comisionFacturadoProd)))} - diferencia a facturar ${formatMoney(Math.max(parseMoney(liq.comisionFacturadoProd) - efectivoProdCuenta, 0))}`
+      : "comision sobre facturado vendedor",
+    baseComision: parseMoney(liq.comisionFacturadoProdBase || liq.importeFacturado),
+    porcComision: parseMoney(liq.comisionFacturadoProdPct),
+    tipoDesglose: efectivoProdTratamiento === "AJUSTE_COMISION" ? "COMISION_VENDEDOR_TOTAL" : "",
+    comisionTotal: parseMoney(liq.comisionFacturadoProd),
+    ajusteCompensado: efectivoProdTratamiento === "AJUSTE_COMISION" ? Math.min(efectivoProdCuenta, parseMoney(liq.comisionFacturadoProd)) : 0,
+    diferenciaFacturar: efectivoProdTratamiento === "AJUSTE_COMISION" ? Math.max(parseMoney(liq.comisionFacturadoProd) - efectivoProdCuenta, 0) : parseMoney(liq.comisionFacturadoProd)
   });
   addCommission({
     cliente: operation.vendedor || draft.vendedor,
@@ -1062,6 +1080,36 @@ function buildAccountData(data) {
         remaining -= amount;
       });
   });
+  movements
+    .filter((movement) => movement.tipoDesglose === "COMISION_VENDEDOR_TOTAL" && movement.operacion)
+    .forEach((commissionMovement) => {
+      const commissionAvailable = Math.max(
+        Math.abs(parseMoney(commissionMovement.importe)) - (allocations.get(String(commissionMovement.id)) || 0),
+        0
+      );
+      if (commissionAvailable <= 0.01) return;
+      const adjustmentMovements = movements.filter((movement) => movement.operacion === commissionMovement.operacion
+        && normalizeKey(movement.cliente) === normalizeKey(commissionMovement.cliente)
+        && movement.tipoAjuste === "DIFERENCIA_PRECIO_COMISION");
+      const adjustmentAvailable = adjustmentMovements.reduce((sum, movement) => sum + Math.max(
+        Math.abs(parseMoney(movement.importe)) - (allocations.get(String(movement.id)) || 0),
+        0
+      ), 0);
+      let remaining = Math.min(commissionAvailable, adjustmentAvailable);
+      if (remaining <= 0.01) return;
+      const automaticCompensation = { id: `AUTO-COMP-${commissionMovement.operacion}`, tipo: "COMPENSACION" };
+      addAllocation(automaticCompensation, commissionMovement.id, remaining);
+      adjustmentMovements.forEach((movement) => {
+        if (remaining <= 0.01) return;
+        const available = Math.max(
+          Math.abs(parseMoney(movement.importe)) - (allocations.get(String(movement.id)) || 0),
+          0
+        );
+        const amount = Math.min(available, remaining);
+        addAllocation(automaticCompensation, movement.id, amount);
+        remaining -= amount;
+      });
+    });
   movements.forEach((movement) => {
     const imputed = Math.min(Math.abs(movement.importe), allocations.get(String(movement.id)) || 0);
     movement.importeImputado = imputed;
@@ -1449,8 +1497,17 @@ function calculateLiquidacion(operation, input = {}) {
     : 0;
   const comisionEfectivoProdPct = aplicaComisionEfectivoProd ? parseMoney(source.comisionEfectivoProdPct) : 0;
   const comisionEfectivoCompPct = aplicaComisionEfectivoComp ? parseMoney(source.comisionEfectivoCompPct) : 0;
+  const comisionFacturadoProdBaseModoInput = normalizeKey(source.comisionFacturadoProdBaseModo);
+  const comisionFacturadoProdBaseModo = ["FACTURADO", "BRUTO_VENDEDOR", "MANUAL"].includes(comisionFacturadoProdBaseModoInput)
+    ? comisionFacturadoProdBaseModoInput
+    : efectivoProdTratamiento === "AJUSTE_COMISION" ? "BRUTO_VENDEDOR" : "FACTURADO";
+  const comisionFacturadoProdBase = comisionFacturadoProdBaseModo === "BRUTO_VENDEDOR"
+    ? brutoVend
+    : comisionFacturadoProdBaseModo === "MANUAL"
+      ? parseMoney(source.comisionFacturadoProdBase)
+      : facturado;
   const comisionFacturadoProd = aplicaComisionFacturadoProd
-    ? (hasInput("comisionFacturadoProd") ? parseMoney(input.comisionFacturadoProd) : facturado * comisionFacturadoProdPct / 100)
+    ? (hasInput("comisionFacturadoProd") ? parseMoney(input.comisionFacturadoProd) : comisionFacturadoProdBase * comisionFacturadoProdPct / 100)
     : 0;
   const comisionFacturadoComp = aplicaComisionFacturadoComp
     ? (hasInput("comisionFacturadoComp") ? parseMoney(input.comisionFacturadoComp) : facturado * comisionFacturadoCompPct / 100)
@@ -1501,6 +1558,8 @@ function calculateLiquidacion(operation, input = {}) {
     efectivoCompManual: Boolean(source.efectivoCompManual),
     efectivoManualVersion: Number(source.efectivoManualVersion || 0),
     comisionFacturadoProd,
+    comisionFacturadoProdBaseModo,
+    comisionFacturadoProdBase,
     comisionFacturadoComp,
     comisionEfectivoProd,
     comisionEfectivoComp,
@@ -2432,6 +2491,8 @@ class BackupDataSource {
       efectivoModo: liquidacion.efectivoModo,
       efectivoPorc: liquidacion.efectivoPorc,
       efectivoProdTratamiento: liquidacion.efectivoProdTratamiento,
+      comisionFacturadoProdBaseModo: liquidacion.comisionFacturadoProdBaseModo,
+      comisionFacturadoProdBase: liquidacion.comisionFacturadoProdBase,
       planFacturadoProd: liquidacion.planFacturadoProd,
       planFacturadoComp: liquidacion.planFacturadoComp,
       planEfectivoProd: liquidacion.planEfectivoProd,
