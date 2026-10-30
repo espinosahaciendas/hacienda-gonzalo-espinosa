@@ -1906,6 +1906,17 @@ label textarea {
   font-style: italic;
 }
 
+.movement-adjustment td {
+  background: #edf7f1;
+}
+
+.movement-adjustment td:nth-child(4)::before {
+  color: #1f5f50;
+  content: "AJUSTE · ";
+  font-size: 0.78em;
+  font-weight: 700;
+}
+
 .movement-cash .amount-positive,
 .movement-cash .amount-negative,
 .movement-cash .positive,

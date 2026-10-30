@@ -5436,7 +5436,12 @@ function isCashMovement(movement) {
   return detailHasCash || normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.origen || ""}`).includes("efectivo");
 }
 
+function isPriceDifferenceCommissionAdjustment(movement) {
+  return String(movement?.tipoAjuste || "").toUpperCase() === "DIFERENCIA_PRECIO_COMISION";
+}
+
 function movementDueKind(movement) {
+  if (isPriceDifferenceCommissionAdjustment(movement)) return "Ajuste de precio";
   if (isCashMovement(movement)) return "Efectivo";
   if (String(movement?.origen || "").toUpperCase() === "FACTURACION_PARCIAL") return "Facturacion parcial";
   if (String(movement?.origen || "").toUpperCase() === "COMISION") return "Comision";
@@ -6079,7 +6084,7 @@ function renderCuentaCorriente() {
         const amountDisplay = currentAccountMovementAmountForDisplay(movement, payment);
         const imputationRows = currentAccountImputationRowsHtml(movement, imputationsByMovement.get(String(movement.id)) || [], 9);
         return `
-        <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
+        <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${isPriceDifferenceCommissionAdjustment(movement) ? "movement-adjustment" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
           <td>${escapeHtml(movement.fecha || "-")}</td>
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
@@ -6124,7 +6129,7 @@ function renderCuentaCorriente() {
     ? due.slice(0, 80).map((movement) => {
       const amountDisplay = currentAccountMovementAmountForDisplay(movement, null);
       return `
-        <tr class="${isCashMovement(movement) ? "movement-cash" : ""}">
+        <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${isPriceDifferenceCommissionAdjustment(movement) ? "movement-adjustment" : ""}">
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
           <td>${escapeHtml(currentAccountConceptText(movement, viewMode))}</td>
@@ -7412,8 +7417,11 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
     const conceptDisplay = payment?.tipo === "COMPENSACION"
       ? currentAccountMovementConceptForDisplay(movement, payment)
       : currentAccountConceptText(movement, viewMode);
-    const cashClass = isCashMovement(movement) ? "movement-cash" : "";
-    return `<tr class="${cashClass}">
+    const rowClass = [
+      isCashMovement(movement) ? "movement-cash" : "",
+      isPriceDifferenceCommissionAdjustment(movement) ? "movement-adjustment" : ""
+    ].filter(Boolean).join(" ");
+    return `<tr class="${rowClass}">
       <td>${escapeHtml(movement.fecha || "-")}</td>
       <td>${escapeHtml(movement.vencimiento || "-")}</td>
       <td>${escapeHtml(movement.cliente || "-")}</td>
@@ -9490,7 +9498,7 @@ function renderDueGrid(calc) {
   const groups = [
     { title: "Facturado vendedor", plan: $("#liq-plan-fact-prod").value, base: calc.netoLiquidacionProd },
     { title: "Facturado comprador", plan: $("#liq-plan-fact-comp").value, base: calc.netoLiquidacionComp },
-    { title: "Efectivo vendedor", plan: $("#liq-plan-cash-prod").value, base: calc.cashWithIvaProd - calc.cashExpenseProd },
+    { title: sellerComplementaryAmountLabel(), plan: $("#liq-plan-cash-prod").value, base: calc.cashWithIvaProd - calc.cashExpenseProd },
     { title: "Efectivo comprador", plan: $("#liq-plan-cash-comp").value, base: calc.efectivoComp }
   ];
   $("#liq-operation-date").value = date || "";
@@ -9526,6 +9534,7 @@ function syncLiquidationPanels() {
   [
     "#liq-cash-mode",
     "#liq-cash-percent",
+    "#liq-cash-prod-treatment",
     "#liq-plan-cash-prod",
     "#liq-plan-cash-comp",
     "#liq-efectivo-prod",
@@ -9601,6 +9610,35 @@ function isCommissionEnabled(selector) {
   return Boolean(input && input.checked);
 }
 
+function sellerCashIsCommissionAdjustment() {
+  return String($("#liq-cash-prod-treatment")?.value || "EFECTIVO").toUpperCase() === "AJUSTE_COMISION";
+}
+
+function sellerComplementaryAmountLabel() {
+  return sellerCashIsCommissionAdjustment()
+    ? "Ajuste de precio a cargo de la consignataria"
+    : "Efectivo vendedor";
+}
+
+function syncSellerCashTreatment() {
+  const adjustment = sellerCashIsCommissionAdjustment();
+  const checkbox = $("#liq-comision-efect-prod-enabled");
+  if (checkbox) {
+    if (adjustment) checkbox.checked = false;
+    checkbox.disabled = adjustment;
+  }
+  if ($("#liq-cash-prod-title")) {
+    $("#liq-cash-prod-title").textContent = adjustment
+      ? "Diferencia de precio asumida por la consignataria"
+      : "Importe complementario vendedor";
+  }
+  if ($("#liq-cash-prod-amount-label")) {
+    $("#liq-cash-prod-amount-label").textContent = adjustment
+      ? "Importe del ajuste reconocido al vendedor"
+      : "Importe efectivo sin IVA si aplica";
+  }
+}
+
 function commissionPercent(enabledSelector, percentSelector) {
   return isCommissionEnabled(enabledSelector) ? percentValue(percentSelector) : 0;
 }
@@ -9636,7 +9674,9 @@ function calculateLiquidationPreview() {
   const consigneeCommission = facturado * percentValue("#liq-consignee-commission-pct") / 100;
   const consigneeAdjustment = numberValue("#liq-consignee-adjustment");
   const cashWithIvaProd = efectivoProd + (frigo ? efectivoProd * 0.105 : 0);
-  const comEfProd = cashWithIvaProd * commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct") / 100;
+  const comEfProd = sellerCashIsCommissionAdjustment()
+    ? 0
+    : cashWithIvaProd * commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct") / 100;
   const comEfComp = efectivoComp * commissionPercent("#liq-comision-efect-comp-enabled", "#liq-comision-efect-comp-pct") / 100;
   const expenseBase = expenses.comision + expenses.fondoGarantia + expenses.controlEntrega + expenses.fondoCompGastos + expenses.otrosGastos;
   const netoGravadoProd = consigned ? Math.max(facturado - expenseBase, 0) : facturado;
@@ -9792,6 +9832,7 @@ function normalizeFrigorificoCashInput(value, operation = state.currentOperation
 }
 
 function renderLiquidationTotals() {
+  syncSellerCashTreatment();
   syncCommissionToggles();
   const percentageCashMode = String($("#liq-cash-mode")?.value || "").toUpperCase() === "PORCENTAJE";
   if (percentageCashMode) syncLiquidationFacturadoFromCashPercent();
@@ -9844,6 +9885,7 @@ function fillLiquidationForm(liquidacion) {
   setMoneyInput("#frigo-bruto-sin-iva", storedBrutoSinIvaFrigo || (netoFinalFrigo ? netoFinalFrigo / 1.105 : 0));
   $("#liq-cash-mode").value = liquidacion.efectivoModo || draft.efectivoModo || "MONTO";
   $("#liq-cash-percent").value = liquidacion.efectivoPorc || draft.efectivoPorc || "";
+  $("#liq-cash-prod-treatment").value = liquidacion.efectivoProdTratamiento || draft.efectivoProdTratamiento || "EFECTIVO";
   const automaticCash = automaticFixedLiquidationCashValues();
   const storedCashProd = normalizeFrigorificoCashInput(liquidacion.efectivoProd);
   const storedCashComp = isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : Number(liquidacion.efectivoComp || 0);
@@ -10653,6 +10695,7 @@ async function saveLiquidation(event) {
     efectivoProd: isAnticipatedOperation() ? 0 : calc.efectivoProd,
     efectivoComp: isAnticipatedOperation() ? 0 : calc.efectivoComp,
     efectivoProdManual: Boolean(state.liquidationCashProdTouched),
+    efectivoProdTratamiento: $("#liq-cash-prod-treatment").value,
     efectivoCompManual: Boolean(state.liquidationCashCompTouched),
     efectivoManualVersion: 1,
     comisionFacturadoProd: parseMoneyInput($("#liq-comision-fact-prod").value),
@@ -10661,11 +10704,11 @@ async function saveLiquidation(event) {
     comisionEfectivoComp: parseMoneyInput($("#liq-comision-efect-comp").value),
     aplicaComisionFacturadoProd: isCommissionEnabled("#liq-comision-fact-prod-enabled"),
     aplicaComisionFacturadoComp: isCommissionEnabled("#liq-comision-fact-comp-enabled"),
-    aplicaComisionEfectivoProd: isCommissionEnabled("#liq-comision-efect-prod-enabled"),
+    aplicaComisionEfectivoProd: !sellerCashIsCommissionAdjustment() && isCommissionEnabled("#liq-comision-efect-prod-enabled"),
     aplicaComisionEfectivoComp: isCommissionEnabled("#liq-comision-efect-comp-enabled"),
     comisionFacturadoProdPct: commissionPercent("#liq-comision-fact-prod-enabled", "#liq-comision-fact-prod-pct"),
     comisionFacturadoCompPct: commissionPercent("#liq-comision-fact-comp-enabled", "#liq-comision-fact-comp-pct"),
-    comisionEfectivoProdPct: commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct"),
+    comisionEfectivoProdPct: sellerCashIsCommissionAdjustment() ? 0 : commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct"),
     comisionEfectivoCompPct: commissionPercent("#liq-comision-efect-comp-enabled", "#liq-comision-efect-comp-pct"),
     liquidacionConsignatariaA: $("#liq-consignee-settled-party").value,
     efectivoModo: $("#liq-cash-mode").value,
@@ -10953,7 +10996,7 @@ function renderReport() {
 
   const sellerDueRows = dueRows([
     { title: "Liquidacion / facturado", plan: $("#liq-plan-fact-prod").value, base: calc.netoLiquidacionProd },
-    { title: "Efectivo", plan: $("#liq-plan-cash-prod").value, base: calc.cashWithIvaProd - calc.cashExpenseProd }
+    { title: sellerComplementaryAmountLabel(), plan: $("#liq-plan-cash-prod").value, base: calc.cashWithIvaProd - calc.cashExpenseProd }
   ]);
   const buyerDueRows = dueRows([
     { title: "Liquidacion / facturado", plan: $("#liq-plan-fact-comp").value, base: calc.netoLiquidacionComp },
@@ -11144,8 +11187,8 @@ function renderReport() {
         ${frigoReport}
         ${hasPartialBilling ? "" : dueReport(sellerDueRows)}
         ${sellerLiquidationSummary}
-        ${calc.efectivoProd || calc.cashExpenseProd || calc.comEfProd ? `<div class="report-section"><h3>Efectivo</h3><table class="report-table"><tbody>
-          <tr><th>${frigoCalc ? "Efectivo + IVA" : "Efectivo"}</th><td>${moneyValue(frigoCalc ? calc.cashWithIvaProd : calc.efectivoProd)}</td><th></th><td></td></tr>
+        ${calc.efectivoProd || calc.cashExpenseProd || calc.comEfProd ? `<div class="report-section"><h3>${escapeHtml(sellerComplementaryAmountLabel())}</h3><table class="report-table"><tbody>
+          <tr><th>${sellerCashIsCommissionAdjustment() ? "Diferencia reconocida al vendedor" : frigoCalc ? "Efectivo + IVA" : "Efectivo"}</th><td>${moneyValue(frigoCalc ? calc.cashWithIvaProd : calc.efectivoProd)}</td><th>${sellerCashIsCommissionAdjustment() ? "Tratamiento" : ""}</th><td>${sellerCashIsCommissionAdjustment() ? "A compensar con la comision de la consignataria" : ""}</td></tr>
           ${calc.cashExpenseProd ? `<tr><th>Gasto descontado efectivo</th><td>${moneyValue(calc.cashExpenseProd)}</td><th>Concepto</th><td>${escapeHtml($("#liq-cash-exp-concept-prod").value || "-")}</td></tr>` : ""}
         ${calc.comEfProd ? `<tr><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfProd)}</td><th></th><td></td></tr>` : ""}
         </tbody></table></div>` : ""}

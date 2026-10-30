@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20261029-reactivar-operacion-v13">
+    <link rel="stylesheet" href="/styles.css?v=20261029-ajuste-precio-v14">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -1750,6 +1750,13 @@
                     <input id="liq-cash-percent" inputmode="decimal" placeholder="0">
                   </label>
                   <label>
+                    Tratamiento diferencia vendedor
+                    <select id="liq-cash-prod-treatment">
+                      <option value="EFECTIVO">Efectivo a pagar</option>
+                      <option value="AJUSTE_COMISION">Ajuste de precio a cargo de la consignataria / compensar con comision</option>
+                    </select>
+                  </label>
+                  <label>
                     Vencimiento facturado vendedor
                     <input id="liq-plan-fact-prod" placeholder="30-60 o 54,75@35-45,25@65">
                   </label>
@@ -1758,7 +1765,7 @@
                     <input id="liq-plan-fact-comp" placeholder="30-60 o $ 63.462.570,04@35">
                   </label>
                   <label>
-                    Vencimiento efectivo vendedor
+                    Vencimiento importe complementario vendedor
                     <input id="liq-plan-cash-prod" placeholder="0-30">
                   </label>
                   <label>
@@ -1853,8 +1860,8 @@
                       <strong id="liq-neto-liq-prod">$ 0,00</strong>
                     </div>
                     <div class="advanced-subpanel cash-block">
-                      <h3>Efectivo</h3>
-                      <label>Importe efectivo sin IVA si aplica<input id="liq-efectivo-prod" class="money-input" inputmode="decimal"></label>
+                      <h3 id="liq-cash-prod-title">Importe complementario vendedor</h3>
+                      <label><span id="liq-cash-prod-amount-label">Importe efectivo sin IVA si aplica</span><input id="liq-efectivo-prod" class="money-input" inputmode="decimal"></label>
                       <label>Concepto gasto efectivo<input id="liq-cash-exp-concept-prod" placeholder="Ej.: flete o descuento"></label>
                       <label>Gasto descontado del efectivo<input id="liq-cash-exp-prod" class="money-input" inputmode="decimal"></label>
                       <label class="check-line"><input id="liq-comision-efect-prod-enabled" type="checkbox"> Cobrar comision propia al vendedor sobre efectivo</label>
@@ -2802,7 +2809,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20261029-reactivar-operacion-v21"></script>
+    <script src="/app.js?v=20261029-ajuste-precio-v22"></script>
   </body>
 </html>
 
