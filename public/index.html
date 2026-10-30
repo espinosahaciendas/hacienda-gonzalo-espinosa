@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20261030-comision-ajuste-v15">
+  <link rel="stylesheet" href="/styles.css?v=20261030-cuentas-asociadas-v16">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -2090,8 +2090,12 @@
             <label>Vencimiento<select id="cc-due-filter"><option value="TODOS">Todos</option><option value="VENCIDOS">Vencidos</option><option value="7">Proximos 7 dias</option><option value="15">Proximos 15 dias</option><option value="30">Proximos 30 dias</option></select></label>
             <label>Fecha desde<input id="cc-date-from" type="date"></label>
             <label>Fecha hasta<input id="cc-date-to" type="date"></label>
+            <label>Cuenta asociada<input id="cc-associated-account-filter" list="cc-associated-account-list" autocomplete="off" placeholder="Ej.: Pedro Alonso"></label>
+            <label>Tipo de origen<input id="cc-origin-type-filter" list="cc-origin-type-list" autocomplete="off" placeholder="Ej.: Remate, venta, adelanto"></label>
           </div>
           <datalist id="cc-client-list"></datalist>
+          <datalist id="cc-associated-account-list"></datalist>
+          <datalist id="cc-origin-type-list"></datalist>
           <div class="cc-entry-panel" id="cc-external-panel" hidden>
             <div class="panel-head"><h3 id="cc-external-title">Movimiento externo</h3><button type="button" class="ghost-button" id="cc-close-external">Cerrar</button></div>
             <div class="form-grid">
@@ -2113,6 +2117,8 @@
               <label>Vencimiento<input id="cc-external-due" type="date"></label>
               <label id="cc-external-amount-wrap">Importe<input id="cc-external-amount" class="money-input" inputmode="decimal"></label>
               <label>Observacion<input id="cc-external-notes"></label>
+              <label>Cuenta asociada<input id="cc-external-associated-account" list="cc-associated-account-list" placeholder="Ej.: Pedro Alonso"></label>
+              <label>Tipo de origen<input id="cc-external-origin-type" list="cc-origin-type-list" placeholder="Ej.: Remate, venta, adelanto"></label>
             </div>
             <div class="cc-subpanel">
               <label class="check-field"><input type="checkbox" id="cc-external-multiple-due"> Cargar varios vencimientos para esta liquidacion</label>
@@ -2165,6 +2171,8 @@
               <label>Medio<select id="cc-payment-method"><option>Transferencia</option><option>E-cheq</option><option>Cheque</option><option>Efectivo</option><option>Dolares</option><option>Otro</option></select></label>
               <label>Referencia<input id="cc-payment-reference" placeholder="Comprobante, recibo o detalle"></label>
               <label>Observacion<input id="cc-payment-notes"></label>
+              <label>Cuenta asociada<input id="cc-payment-associated-account" list="cc-associated-account-list" placeholder="Ej.: Pedro Alonso"></label>
+              <label>Tipo de origen<input id="cc-payment-origin-type" list="cc-origin-type-list" placeholder="Ej.: Remate, adelanto, flete"></label>
             </div>
             <div class="cc-subpanel" id="cc-instrument-panel">
               <div class="panel-head"><h3>Detalle de instrumentos</h3><span class="subtle" id="cc-instrument-summary">Sin instrumentos cargados</span></div>
@@ -2829,7 +2837,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20261030-comision-ajuste-v23"></script>
+  <script src="/app.js?v=20261030-cuentas-asociadas-v24"></script>
   </body>
 </html>
 

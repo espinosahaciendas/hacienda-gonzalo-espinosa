@@ -5473,7 +5473,11 @@ function currentAccountDueDetailText(movement) {
   const kind = movementDueKind(movement);
   const business = operationBusinessText(movement);
   const receipt = movement?.comprobante ? ` - ${movement.comprobante}` : "";
-  return `${kind}${business ? ` - ${business}` : movement?.concepto ? ` - ${movement.concepto}` : ""}${receipt}`;
+  const classification = [
+    movement?.cuentaAsociada ? `Cuenta: ${movement.cuentaAsociada}` : "",
+    movement?.tipoOrigen ? `Origen: ${movement.tipoOrigen}` : ""
+  ].filter(Boolean).join(" | ");
+  return `${kind}${business ? ` - ${business}` : movement?.concepto ? ` - ${movement.concepto}` : ""}${receipt}${classification ? ` | ${classification}` : ""}`;
 }
 
 function movementAccountEntities(movement) {
@@ -5823,6 +5827,8 @@ function currentAccountKeywordText(movement) {
     movement.comprobante,
     movement.facturaComision,
     movement.observacion,
+    movement.cuentaAsociada,
+    movement.tipoOrigen,
     detailText
   ].filter(Boolean).join(" "));
 }
@@ -5991,8 +5997,33 @@ function currentAccountQuickPaymentButton(movement) {
   return `<button type="button" class="small-button" data-cc-quick-payment="${escapeHtml(movement.id)}">${label}</button>`;
 }
 
+function renderCurrentAccountClassificationOptions() {
+  const movements = state.cuenta?.movimientos || [];
+  const accounts = new Set();
+  const origins = new Set(["Remate", "Venta a feria", "Venta directa", "Adelanto", "Flete"]);
+  movements.forEach((movement) => {
+    if (String(movement.cuentaAsociada || "").trim()) accounts.add(String(movement.cuentaAsociada).trim());
+    if (String(movement.tipoOrigen || "").trim()) origins.add(String(movement.tipoOrigen).trim());
+  });
+  (state.cuenta?.pagos || []).forEach((payment) => {
+    if (String(payment.cuentaAsociada || "").trim()) accounts.add(String(payment.cuentaAsociada).trim());
+    if (String(payment.tipoOrigen || "").trim()) origins.add(String(payment.tipoOrigen).trim());
+  });
+  const render = (selector, values) => {
+    const node = $(selector);
+    if (!node) return;
+    node.innerHTML = Array.from(values)
+      .sort((a, b) => a.localeCompare(b, "es"))
+      .map((value) => `<option value="${escapeHtml(value)}"></option>`)
+      .join("");
+  };
+  render("#cc-associated-account-list", accounts);
+  render("#cc-origin-type-list", origins);
+}
+
 function renderCuentaCorriente() {
   if (!state.cuenta) return;
+  renderCurrentAccountClassificationOptions();
   const query = normalizeSearch($("#cc-client-search").value);
   const keywordWords = normalizeSearch($("#cc-keyword-filter")?.value || "").split(" ").filter(Boolean);
   const viewMode = $("#cc-view-mode").value;
@@ -6002,6 +6033,8 @@ function renderCuentaCorriente() {
   const dueFilter = $("#cc-due-filter").value;
   const dateFrom = parseInputDate($("#cc-date-from").value);
   const dateTo = parseInputDate($("#cc-date-to").value);
+  const associatedAccountFilter = normalizeSearch($("#cc-associated-account-filter")?.value || "");
+  const originTypeFilter = normalizeSearch($("#cc-origin-type-filter")?.value || "");
   const duePanelRange = getCurrentAccountDuePanelRange();
   const words = query.split(" ").filter(Boolean);
   const exactClient = viewMode === "CLIENTE" ? getExactCurrentAccountClient(query) : "";
@@ -6022,6 +6055,8 @@ function renderCuentaCorriente() {
     }
     if (!matchesCurrentAccountOperationType(movement, operationTypeFilter)) return false;
     if (!matchesCurrentAccountKeyword(movement, keywordWords)) return false;
+    if (associatedAccountFilter && !normalizeSearch(movement.cuentaAsociada || "").includes(associatedAccountFilter)) return false;
+    if (originTypeFilter && !normalizeSearch(movement.tipoOrigen || "").includes(originTypeFilter)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
@@ -6130,6 +6165,8 @@ function renderCuentaCorriente() {
     if (conceptFilter === "COMISION" && !isCommissionPendingMovement(movement, viewMode)) return false;
     if (!matchesCurrentAccountOperationType(movement, operationTypeFilter)) return false;
     if (!matchesCurrentAccountKeyword(movement, keywordWords)) return false;
+    if (associatedAccountFilter && !normalizeSearch(movement.cuentaAsociada || "").includes(associatedAccountFilter)) return false;
+    if (originTypeFilter && !normalizeSearch(movement.tipoOrigen || "").includes(originTypeFilter)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     if (!dueDateInRange(movement, duePanelRange.from, duePanelRange.to)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
@@ -6255,6 +6292,8 @@ function openCurrentAccountPanel(panelId) {
     setMoneyInput("#cc-external-commission-base", 0);
     $("#cc-external-commission-percent").value = "";
     setMoneyInput("#cc-external-commission-amount", 0);
+    $("#cc-external-associated-account").value = $("#cc-associated-account-filter")?.value || "";
+    $("#cc-external-origin-type").value = $("#cc-origin-type-filter")?.value || "";
     syncExternalConceptFields();
     renderExternalDueRows();
   } else {
@@ -6262,6 +6301,10 @@ function openCurrentAccountPanel(panelId) {
     $("#cc-payment-type").value = openCurrentAccountSuggestedPaymentType($("#cc-payment-client").value);
     $("#cc-payment-date").value = today;
     setMoneyInput("#cc-payment-amount", 0);
+    $("#cc-payment-reference").value = "";
+    $("#cc-payment-notes").value = "";
+    $("#cc-payment-associated-account").value = $("#cc-associated-account-filter")?.value || "";
+    $("#cc-payment-origin-type").value = $("#cc-origin-type-filter")?.value || "";
     currentPaymentInstruments = [];
     $("#cc-instrument-date").value = today;
     setMoneyInput("#cc-instrument-amount", 0);
@@ -6329,6 +6372,8 @@ function openCurrentAccountQuickPayment(movementId) {
   setMoneyInput("#cc-payment-amount", Math.abs(signed));
   $("#cc-payment-reference").value = movement.comprobante || movement.operacion || "";
   $("#cc-payment-notes").value = movement.operacion ? `Movimiento ${movement.operacion}` : "";
+  $("#cc-payment-associated-account").value = movement.cuentaAsociada || movement.consignataria || "";
+  $("#cc-payment-origin-type").value = movement.tipoOrigen || movement.destinoOperacion || "";
   syncCurrentAccountPaymentMode();
   renderCurrentAccountImputations();
   renderCurrentAccountCounterpartyImputations();
@@ -6752,6 +6797,8 @@ function openExternalMovementEdit(movementId) {
   setMoneyInput("#cc-external-mag-net", accountTotal + Math.abs(Number(ivaRow?.importe || 0)));
   setMoneyInput("#cc-external-mag-iva", Math.abs(Number(ivaRow?.importe || 0)));
   $("#cc-external-notes").value = signSource.observacion || "";
+  $("#cc-external-associated-account").value = signSource.cuentaAsociada || "";
+  $("#cc-external-origin-type").value = signSource.tipoOrigen || "";
   const commissionRow = accountRows.find((item) => item.comisionista || Number(item.baseComision || 0) || Number(item.importeComision || 0)) || netRow;
   $("#cc-external-commissionist").value = commissionRow?.comisionista || "";
   setMoneyInput("#cc-external-commission-base", Number(commissionRow?.baseComision || 0));
@@ -7125,6 +7172,8 @@ async function saveExternalCurrentAccountMovement() {
         baseComision: numberValue("#cc-external-commission-base"),
         porcComision: percentValue("#cc-external-commission-percent"),
         importeComision: numberValue("#cc-external-commission-amount"),
+        cuentaAsociada: $("#cc-external-associated-account").value,
+        tipoOrigen: $("#cc-external-origin-type").value,
         observacion: $("#cc-external-notes").value
       })
     });
@@ -7245,11 +7294,12 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${isFund ? "Comprobante de fondos disponibles del cliente" : payment.tipo === "COMPENSACION" ? "Comprobante de aplicacion de saldo disponible" : payment.tipo === "PAGO" ? "Comprobante de pago" : "Comprobante de cobro"}</h1><p><strong>${escapeHtml(payment.id)}</strong></p><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p></div></header>
   ${payment.anulado ? `<p><strong>COMPROBANTE ANULADO</strong></p>` : ""}
   <p><strong>Cliente:</strong> ${escapeHtml(payment.cliente)}</p><p><strong>Fecha:</strong> ${escapeHtml(payment.fecha)}</p><p><strong>Importe:</strong> ${moneyValue(payment.importe)}</p><p><strong>${payment.tipo === "COMPENSACION" ? "Medio utilizado" : isFund ? "Origen / referencia" : "Referencia"}:</strong> ${escapeHtml(payment.tipo === "COMPENSACION" ? `${payment.medio || "-"}${payment.referencia ? ` - ${payment.referencia}` : ""}` : payment.referencia || "-")}</p>
+  ${payment.cuentaAsociada || payment.tipoOrigen ? `<p><strong>Cuenta asociada:</strong> ${escapeHtml(payment.cuentaAsociada || "-")} &nbsp; <strong>Tipo de origen:</strong> ${escapeHtml(payment.tipoOrigen || "-")}</p>` : ""}
   <div class="summary">
     <div><span>${isFund ? "Fondos recibidos directamente" : payment.tipo === "COMPENSACION" ? "Saldo disponible aplicado" : payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
     <div><span>${isFund ? "Aplicado en este comprobante" : payment.tipo === "COMPENSACION" ? "Liquidacion aplicada" : "Vencimientos aplicados"}</span><strong>${moneyValue(paidTotal)}</strong></div>
     <div><span>Descuentos / gastos / comisiones</span><strong>${moneyValue(discountTotal)}</strong></div>
-    ${balanceCredit ? `<div><span>Saldo a favor / anticipo</span><strong>${moneyValue(balanceCredit)}</strong></div>` : ""}
+    ${balanceCredit ? `<div><span>${payment.tipo === "PAGO" ? "Adelanto a recuperar" : "Saldo a favor / anticipo"}</span><strong>${moneyValue(balanceCredit)}</strong></div>` : ""}
     <div><span>${isFund ? "Saldo disponible de este origen" : payment.tipo === "COMPENSACION" ? compensation?.label || "Saldo resultante informado" : "Control neto"}</span><strong>${moneyValue(isFund ? compensationRunningBalance(payment) : payment.tipo === "COMPENSACION" ? Math.abs(compensation?.runningBalance ?? compensation?.saldo ?? controlNet) : controlNet)}</strong></div>
   </div>
   ${payment.tipo === "COMPENSACION" ? `<p><strong>Nota:</strong> Este comprobante deja constancia de que los gastos se pagan con fondos disponibles del cliente; no representa un pago realizado por Gonzalo Espinosa ni plata personal adicional del cliente.</p>` : isFund ? `<p><strong>Nota:</strong> Este importe ya formaba parte del pago ${escapeHtml(payment.sourcePaymentId || "registrado")}. Se controla como dinero depositado directamente al cliente y no duplica el cobro ni modifica nuevamente su cuenta corriente.</p><h2>Instrumento recibido por el cliente</h2><table><thead>${instrumentHeader}</thead><tbody>${instrumentRows}</tbody></table>` : `<h2>Detalle de instrumentos</h2><table><thead>${instrumentHeader}</thead><tbody>${instrumentRows}</tbody></table>`}
@@ -7265,6 +7315,8 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
 function getCurrentAccountReportFilters() {
   const query = normalizeSearch($("#cc-client-search").value);
   const keyword = normalizeSearch($("#cc-keyword-filter")?.value || "");
+  const associatedAccount = normalizeSearch($("#cc-associated-account-filter")?.value || "");
+  const originType = normalizeSearch($("#cc-origin-type-filter")?.value || "");
   const viewMode = $("#cc-view-mode").value;
   return {
     viewMode,
@@ -7272,6 +7324,8 @@ function getCurrentAccountReportFilters() {
     words: query.split(" ").filter(Boolean),
     keyword,
     keywordWords: keyword.split(" ").filter(Boolean),
+    associatedAccount,
+    originType,
     exactClient: viewMode === "CLIENTE" ? getExactCurrentAccountClient(query) : "",
     exactConsignee: viewMode === "CONSIGNATARIA" ? getExactCurrentAccountConsignee(query) : "",
     exactCommissionist: viewMode === "COMISIONISTA" ? getExactCurrentAccountCommissionist(query) : "",
@@ -7296,6 +7350,8 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
     && (filters.conceptFilter !== "COMISION" || isCommissionPendingMovement(movement, filters.viewMode))
     && matchesCurrentAccountOperationType(movement, filters.operationTypeFilter)
     && matchesCurrentAccountKeyword(movement, filters.keywordWords || [])
+    && (!filters.associatedAccount || normalizeSearch(movement.cuentaAsociada || "").includes(filters.associatedAccount))
+    && (!filters.originType || normalizeSearch(movement.tipoOrigen || "").includes(filters.originType))
     && (!includeStatusFilter || filters.statusFilter === "TODOS" || currentAccountMovementStatusFilterValue(movement, filters.viewMode) === filters.statusFilter)
     && matchesCurrentAccountDateRange(movement, filters.dateFrom, filters.dateTo)
     && (!includeDueFilter || matchesCurrentAccountDueFilter(movement, filters.dueFilter));
@@ -7532,8 +7588,12 @@ function printCurrentAccountReport(forcedType = "") {
   const expensesTable = type === "SALDOS" && filters.viewMode === "CLIENTE" && expenseRows.length ? `<h2>Gastos / descuentos incluidos</h2><table class="compact"><thead><tr><th>Concepto</th><th>Cantidad</th><th>Total descontado</th></tr></thead><tbody>${expenseRows.map((item) => `<tr><td>${escapeHtml(item.concept)}</td><td>${item.count}</td><td class="amount negative">-${moneyValue(item.total)}</td></tr>`).join("")}<tr><th colspan="2">Total gastos / descuentos</th><th class="amount negative">-${moneyValue(clientNetSummary.discounts)}</th></tr></tbody></table>` : "";
 
   const baseFilterLabel = $("#cc-client-search").value.trim() || (filters.viewMode === "COMISIONISTA" ? "Todos los comisionistas" : filters.viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos los clientes");
-  const keywordLabel = $("#cc-keyword-filter")?.value.trim();
-  const filterLabel = keywordLabel ? `${baseFilterLabel} / ${keywordLabel}` : baseFilterLabel;
+  const filterDetails = [
+    $("#cc-keyword-filter")?.value.trim(),
+    $("#cc-associated-account-filter")?.value.trim() ? `Cuenta: ${$("#cc-associated-account-filter").value.trim()}` : "",
+    $("#cc-origin-type-filter")?.value.trim() ? `Origen: ${$("#cc-origin-type-filter").value.trim()}` : ""
+  ].filter(Boolean);
+  const filterLabel = filterDetails.length ? `${baseFilterLabel} / ${filterDetails.join(" / ")}` : baseFilterLabel;
   const periodLabel = `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`;
   const issuedAt = new Date();
   const issuedFileDate = `${issuedAt.getFullYear()}-${String(issuedAt.getMonth() + 1).padStart(2, "0")}-${String(issuedAt.getDate()).padStart(2, "0")}`;
@@ -7643,6 +7703,8 @@ function printCurrentAccountDueReport(options = {}) {
         words: [],
         keyword: "",
         keywordWords: [],
+        associatedAccount: "",
+        originType: "",
         exactClient: "",
         exactConsignee: "",
         exactCommissionist: "",
@@ -8088,6 +8150,8 @@ async function saveCurrentAccountPayment(printReceipt = false) {
         referencia: $("#cc-payment-reference").value,
         observacion: $("#cc-payment-notes").value,
         saldoFavor: balanceCredit,
+        cuentaAsociada: $("#cc-payment-associated-account").value,
+        tipoOrigen: $("#cc-payment-origin-type").value,
         compensationOriginId: compensationOrigin?.id,
         compensationOriginLabel: compensationOrigin?.label,
         sourcePaymentId: fundSource?.paymentId,
@@ -8759,7 +8823,8 @@ function currentAccountPaymentDifference(amount, rows, paymentType = "") {
 function confirmCurrentAccountPaymentDifference(amount, rows, paymentType = "") {
   const difference = currentAccountPaymentDifference(amount, rows, paymentType);
   if (difference <= 0.01) return 0;
-  const confirmed = window.confirm(`El importe cargado (${moneyValue(amount)}) supera lo seleccionado para imputar por ${moneyValue(difference)}.\n\nSi continua, esa diferencia quedara marcada como saldo a favor / anticipo en la cuenta. ¿Guardar de todos modos?`);
+  const label = String(paymentType || "").toUpperCase() === "PAGO" ? "adelanto a recuperar" : "saldo a favor / anticipo";
+  const confirmed = window.confirm(`El importe cargado (${moneyValue(amount)}) supera lo seleccionado para imputar por ${moneyValue(difference)}.\n\nSi continua, esa diferencia quedara marcada como ${label}. Para identificarla por negocio, complete Cuenta asociada y Tipo de origen. ¿Guardar de todos modos?`);
   if (!confirmed) return null;
   return difference;
 }
@@ -11589,6 +11654,8 @@ async function init() {
   $("#cc-due-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-date-from").addEventListener("change", renderCuentaCorriente);
   $("#cc-date-to").addEventListener("change", renderCuentaCorriente);
+  $("#cc-associated-account-filter")?.addEventListener("input", renderCuentaCorriente);
+  $("#cc-origin-type-filter")?.addEventListener("input", renderCuentaCorriente);
   $("#cc-due-date-from").addEventListener("change", renderCuentaCorriente);
   $("#cc-due-date-to").addEventListener("change", renderCuentaCorriente);
   $("#cc-commission-invoice-save")?.addEventListener("click", generateClientCommissionInvoice);
