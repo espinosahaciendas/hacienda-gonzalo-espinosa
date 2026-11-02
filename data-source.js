@@ -3533,6 +3533,7 @@ class BackupDataSource {
       instrumentos: asArray(input.instrumentos).map((item) => ({
         id: normalizeText(item.id) || `INST-${Date.now()}`,
         medio: normalizeText(item.medio),
+        aplicacion: normalizeKey(item.aplicacion) === "GASTO" ? "GASTO" : "CLIENTE",
         fecha: formatDateForDisplay(item.fecha),
         referencia: normalizeText(item.referencia),
         importe: Math.abs(parseMoney(item.importe)),
