@@ -7005,6 +7005,7 @@ function toggleCurrentAccountDollarInstrumentFields() {
 
 function addCurrentAccountInstrument() {
   const medio = $("#cc-instrument-method").value;
+  const aplicacion = $("#cc-instrument-application")?.value || "CLIENTE";
   const dolarCantidad = parseMoneyInput($("#cc-instrument-dollars")?.value || 0);
   const dolarCotizacion = parseMoneyInput($("#cc-instrument-dollar-rate")?.value || 0);
   let importe = numberValue("#cc-instrument-amount");
@@ -7016,6 +7017,7 @@ function addCurrentAccountInstrument() {
   currentPaymentInstruments.push({
     id: `INST-${Date.now()}`,
     medio,
+    aplicacion,
     fecha: $("#cc-instrument-date").value,
     referencia: $("#cc-instrument-reference").value,
     importe,
@@ -7031,11 +7033,17 @@ function addCurrentAccountInstrument() {
 
 function renderCurrentAccountInstruments() {
   const total = currentPaymentInstruments.reduce((sum, item) => sum + Number(item.importe || 0), 0);
-  $("#cc-instrument-summary").textContent = currentPaymentInstruments.length ? `${currentPaymentInstruments.length} instrumento/s - ${moneyValue(total)}` : "Sin instrumentos cargados";
+  const expenseTotal = currentPaymentInstruments
+    .filter((item) => item.aplicacion === "GASTO")
+    .reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const clientTotal = total - expenseTotal;
+  $("#cc-instrument-summary").textContent = currentPaymentInstruments.length
+    ? `${currentPaymentInstruments.length} instrumento/s - total ${moneyValue(total)}${expenseTotal ? ` - entrega ${moneyValue(clientTotal)} - gastos ${moneyValue(expenseTotal)}` : ""}`
+    : "Sin instrumentos cargados";
   if (total) setMoneyInput("#cc-payment-amount", total);
   $("#cc-instrument-body").innerHTML = currentPaymentInstruments.length
-    ? currentPaymentInstruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td>${item.dolarCantidad ? `USD ${plainNumberValue(item.dolarCantidad)}` : "-"}</td><td>${item.dolarCotizacion ? moneyValue(item.dolarCotizacion) : "-"}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button danger-button" data-cc-remove-instrument="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
-    : `<tr><td colspan="7">Sin instrumentos cargados.</td></tr>`;
+    ? currentPaymentInstruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${item.aplicacion === "GASTO" ? "Pago de gasto / tercero" : "Entrega al cliente"}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td>${item.dolarCantidad ? `USD ${plainNumberValue(item.dolarCantidad)}` : "-"}</td><td>${item.dolarCotizacion ? moneyValue(item.dolarCotizacion) : "-"}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button danger-button" data-cc-remove-instrument="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
+    : `<tr><td colspan="8">Sin instrumentos cargados.</td></tr>`;
 }
 
 function compensationSummary(payment) {
@@ -7225,6 +7233,10 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   const paidTotal = paidImputations.reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const discountTotal = discountImputations.reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const instrumentTotal = instruments.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const instrumentExpenseTotal = instruments
+    .filter((item) => item.aplicacion === "GASTO")
+    .reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const instrumentClientTotal = instrumentTotal - instrumentExpenseTotal;
   const controlNet = paidTotal - discountTotal;
   const balanceCredit = Math.abs(Number(payment.saldoFavor || 0));
   const compensation = compensationSummary(payment);
@@ -7283,11 +7295,11 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   const paidDeliveryHistory = deliveryHistoryRows(paidImputations);
   const hasDollarInstrument = instruments.some((item) => Number(item.dolarCantidad || 0) || Number(item.dolarCotizacion || 0) || isDollarInstrumentMethod(item.medio));
   const instrumentHeader = hasDollarInstrument
-    ? `<tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Dolares</th><th>Cotizacion</th><th>Importe</th></tr>`
-    : `<tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr>`;
+    ? `<tr><th>Medio</th><th>Aplicacion</th><th>Fecha</th><th>Referencia</th><th>Dolares</th><th>Cotizacion</th><th>Importe</th></tr>`
+    : `<tr><th>Medio</th><th>Aplicacion</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr>`;
   const instrumentRows = instruments.map((item) => hasDollarInstrument
-    ? `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td>${item.dolarCantidad ? `USD ${plainNumberValue(item.dolarCantidad)}` : "-"}</td><td>${item.dolarCotizacion ? moneyValue(item.dolarCotizacion) : "-"}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`
-    : `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("");
+    ? `<tr><td>${escapeHtml(item.medio)}</td><td>${item.aplicacion === "GASTO" ? "Pago de gasto / tercero" : "Entrega al cliente"}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td>${item.dolarCantidad ? `USD ${plainNumberValue(item.dolarCantidad)}` : "-"}</td><td>${item.dolarCotizacion ? moneyValue(item.dolarCotizacion) : "-"}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`
+    : `<tr><td>${escapeHtml(item.medio)}</td><td>${item.aplicacion === "GASTO" ? "Pago de gasto / tercero" : "Entrega al cliente"}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("");
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(receiptTitle)}</title><style>
     body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px} img{width:76px;height:76px;object-fit:contain;background:#173632;padding:6px} h1{font-size:18px;margin:0} h2{font-size:13px;margin-top:14px} p{margin:3px 0;font-size:11px} table{width:100%;border-collapse:collapse;font-size:10px} th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top} th{background:#edf3f1} .amount{text-align:right;font-weight:700;white-space:nowrap}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}.discount th{background:#f8ebe5}.discount-total{background:#fff3e8;font-weight:700}.net-total{background:#eaf2ff;font-weight:700}.history-title td{background:#edf3f1;font-weight:700}.history-total{background:#f8fbfa;font-weight:700}.current-delivery{background:#fff8ed} button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}button{display:none}body{margin:0}}
   </style></head><body>
@@ -7296,7 +7308,8 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   <p><strong>Cliente:</strong> ${escapeHtml(payment.cliente)}</p><p><strong>Fecha:</strong> ${escapeHtml(payment.fecha)}</p><p><strong>Importe:</strong> ${moneyValue(payment.importe)}</p><p><strong>${payment.tipo === "COMPENSACION" ? "Medio utilizado" : isFund ? "Origen / referencia" : "Referencia"}:</strong> ${escapeHtml(payment.tipo === "COMPENSACION" ? `${payment.medio || "-"}${payment.referencia ? ` - ${payment.referencia}` : ""}` : payment.referencia || "-")}</p>
   ${payment.cuentaAsociada || payment.tipoOrigen ? `<p><strong>Cuenta asociada:</strong> ${escapeHtml(payment.cuentaAsociada || "-")} &nbsp; <strong>Tipo de origen:</strong> ${escapeHtml(payment.tipoOrigen || "-")}</p>` : ""}
   <div class="summary">
-    <div><span>${isFund ? "Fondos recibidos directamente" : payment.tipo === "COMPENSACION" ? "Saldo disponible aplicado" : payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
+    <div><span>${isFund ? "Fondos recibidos directamente" : payment.tipo === "COMPENSACION" ? "Saldo disponible aplicado" : payment.tipo === "PAGO" && instrumentExpenseTotal ? "Total instrumentos emitidos" : payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
+    ${payment.tipo === "PAGO" && instrumentExpenseTotal ? `<div><span>Entrega al cliente</span><strong>${moneyValue(instrumentClientTotal)}</strong></div>` : ""}
     <div><span>${isFund ? "Aplicado en este comprobante" : payment.tipo === "COMPENSACION" ? "Liquidacion aplicada" : "Vencimientos aplicados"}</span><strong>${moneyValue(paidTotal)}</strong></div>
     <div><span>Descuentos / gastos / comisiones</span><strong>${moneyValue(discountTotal)}</strong></div>
     ${balanceCredit ? `<div><span>${payment.tipo === "PAGO" ? "Adelanto a recuperar" : "Saldo a favor / anticipo"}</span><strong>${moneyValue(balanceCredit)}</strong></div>` : ""}
@@ -7307,7 +7320,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   <table><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe original</th><th>Importe aplicado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(paidImputations, "Sin vencimientos liquidados en este comprobante.")}</tbody></table>
   ${paidDeliveryHistory ? `<h2>Entregas realizadas a cuenta</h2><table><thead><tr><th>Fecha</th><th>Recibo</th><th>Medio / referencia</th><th>Importe</th><th>Estado</th></tr></thead><tbody>${paidDeliveryHistory}</tbody></table>` : ""}
   <h2>Descuentos aplicados</h2>
-  <table class="discount"><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe original</th><th>Importe descontado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(discountImputations, "Sin descuentos aplicados.")}<tr class="discount-total"><td colspan="4">Total descuentos / comisiones</td><td class="amount">${moneyValue(discountTotal)}</td><td></td></tr><tr class="net-total"><td colspan="4">Neto del comprobante</td><td class="amount">${moneyValue(instrumentTotal || payment.importe)}</td><td></td></tr></tbody></table>
+  <table class="discount"><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe original</th><th>Importe descontado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(discountImputations, "Sin descuentos aplicados.")}<tr class="discount-total"><td colspan="4">Total descuentos / comisiones</td><td class="amount">${moneyValue(discountTotal)}</td><td></td></tr><tr class="net-total"><td colspan="4">${instrumentExpenseTotal ? "Total instrumentos emitidos" : "Neto del comprobante"}</td><td class="amount">${moneyValue(instrumentTotal || payment.importe)}</td><td></td></tr></tbody></table>
   <button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
   finishPrintPopup(popup, autoPrint);
 }
@@ -8115,6 +8128,17 @@ async function saveCurrentAccountPayment(printReceipt = false) {
     const amount = numberValue("#cc-payment-amount");
     const paymentType = $("#cc-payment-type").value;
     const selectedRows = selectedCurrentAccountImputationRows("[data-cc-impute]:checked, [data-cc-impute-group]:checked");
+    const expenseInstrumentTotal = paymentType === "PAGO"
+      ? currentPaymentInstruments.filter((item) => item.aplicacion === "GASTO").reduce((sum, item) => sum + Number(item.importe || 0), 0)
+      : 0;
+    const selectedExpenseTotal = selectedRows
+      .filter((item) => Number(item.signedPending || 0) > 0)
+      .reduce((sum, item) => sum + Number(item.pending || 0), 0);
+    if (expenseInstrumentTotal && Math.abs(expenseInstrumentTotal - selectedExpenseTotal) > 0.01) {
+      throw new Error(`Los instrumentos aplicados a gastos suman ${moneyValue(expenseInstrumentTotal)}, pero los gastos seleccionados suman ${moneyValue(selectedExpenseTotal)}.`);
+    }
+    const accountImpactAmount = paymentType === "PAGO" ? amount - expenseInstrumentTotal : amount;
+    if (accountImpactAmount < -0.01) throw new Error("Los instrumentos aplicados a gastos no pueden superar el total del pago.");
     const selectedSignedTotal = paymentType === "COMPENSACION"
       ? compensationAppliedSignedTotal(selectedRows)
       : selectedRows.reduce((sum, row) => sum + Number(row.signedPending || 0), 0);
@@ -8130,7 +8154,7 @@ async function saveCurrentAccountPayment(printReceipt = false) {
             label: $("#cc-fund-origin-label").value.trim() || `${fundSource.label} - ${fundSource.method}`
           }
         : null;
-    const balanceCredit = confirmCurrentAccountPaymentDifference(amount, selectedRows, paymentType);
+    const balanceCredit = confirmCurrentAccountPaymentDifference(accountImpactAmount, selectedRows, paymentType);
     if (balanceCredit === null) return;
     let counterpartyBalanceCredit = 0;
     if ($("#cc-counterparty-enabled").checked) {
@@ -8145,7 +8169,7 @@ async function saveCurrentAccountPayment(printReceipt = false) {
         cliente: $("#cc-payment-client").value,
         fecha: $("#cc-payment-date").value,
         importe: amount,
-        importeFirmado: paymentType === "COMPENSACION" ? -selectedSignedTotal : undefined,
+        importeFirmado: paymentType === "COMPENSACION" ? -selectedSignedTotal : paymentType === "PAGO" && expenseInstrumentTotal ? accountImpactAmount : undefined,
         medio: $("#cc-payment-method").value,
         referencia: $("#cc-payment-reference").value,
         observacion: $("#cc-payment-notes").value,
