@@ -1,4 +1,4 @@
-﻿const state = {
+const state = {
   clientes: [],
   operaciones: [],
   cuenta: null,
@@ -9,6 +9,7 @@
   fieldLeases: [],
   vista: "tablero",
   selectedClientId: "",
+  editingRenspa: "",
   showAllClients: false,
   selectedOperationId: "",
   categorias: [],
@@ -19,12 +20,29 @@
   editingSaleLineId: "",
   editingExternalMovementId: "",
   liquidationFacturadoTouched: false,
+  liquidationCashProdTouched: false,
+  liquidationCashCompTouched: false,
   liquidationIvaProdTouched: false,
   liquidationIvaCompTouched: false,
   frigoBrutoSinIvaTouched: false,
   externalDueRows: [],
+  editingExternalDueRowId: "",
   commissionistRows: [],
+  commissionistPage: 1,
+  operationSearchRows: [],
+  operationSearchPage: 1,
   fieldQuoteRows: [],
+  editingFieldQuoteId: "",
+  fieldLeasePaymentRows: [],
+  fieldLeaseAdjustmentRows: [],
+  fieldLeaseProductQuoteRows: [],
+  fieldLeaseLineQuoteRows: [],
+  fieldContractPartyRows: [],
+  fieldContractInstallmentRows: [],
+  fieldContractLineRows: [],
+  fieldLeasePaymentPresetRows: [],
+  editingFieldContractLineId: "",
+  editingFieldContractInstallmentId: "",
   activeFieldContract: null,
   fieldDataLoaded: false,
   usuario: null,
@@ -36,7 +54,15 @@ let documentFilterIds = [];
 let selectedDocumentId = "";
 let cashReconciliationBreakdown = [];
 let cashReconciliationApplications = [];
-const APP_BUILD = "20260707-campos-arrendamientos-base";
+let editingCashReconciliationBreakdownId = "";
+let editingCashReconciliationApplicationId = "";
+let fieldLeaseManualProductQuoteKeys = new Set();
+let periodStatsRequestId = 0;
+let operationSearchRequestId = 0;
+let periodStatsTimer = null;
+let operationSearchTimer = null;
+const TABLE_PAGE_SIZE = 25;
+const APP_BUILD = "20261026-cotizaciones-editables-v20";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -50,6 +76,13 @@ function $(selector) {
 
 function $all(selector) {
   return Array.from(document.querySelectorAll(selector));
+}
+
+function finishPrintPopup(popup, autoPrint = false) {
+  popup.document.close();
+  const printButton = popup.document.querySelector("[data-print-popup]");
+  if (printButton) printButton.addEventListener("click", () => popup.print());
+  if (autoPrint) setTimeout(() => popup.print(), 250);
 }
 
 async function fetchJson(path, options = {}) {
@@ -128,6 +161,19 @@ function normalizeAccountName(value) {
     .trim();
 }
 
+function clientLookupText(client) {
+  const cuit = String(client?.cuit || "");
+  const cuitDigits = cuit.replace(/\D/g, "");
+  return normalizeAccountName(`${client?.nombre || ""} ${cuit} ${cuitDigits} ${client?.tipo || ""}`);
+}
+
+function matchesClientLookup(client, query) {
+  const words = normalizeAccountName(query).split(" ").filter(Boolean);
+  if (!words.length) return true;
+  const haystack = clientLookupText(client);
+  return words.every((word) => haystack.includes(word));
+}
+
 function setView(view) {
   const previousView = state.vista;
   state.vista = view;
@@ -154,6 +200,25 @@ function setView(view) {
   }
 }
 
+function showFieldsTab(tab = "contratos") {
+  const target = tab || "contratos";
+  if (target === "vencimientos") syncFieldContractFormToActive();
+  $all("[data-fields-tab]").forEach((button) => {
+    button.classList.toggle("active", String(button.dataset.fieldsTab) === String(target));
+  });
+  $all("[data-fields-tab-panel]").forEach((panel) => {
+    panel.classList.toggle("active", String(panel.dataset.fieldsTabPanel) === String(target));
+  });
+  if (target === "vencimientos") {
+    loadFieldModuleData(true).catch((error) => {
+      const node = $("#field-due-message");
+      if (!node) return;
+      node.textContent = error.message;
+      node.className = "form-message error";
+    });
+  }
+}
+
 function preferredInitialView() {
   return "inicio";
 }
@@ -161,11 +226,13 @@ function preferredInitialView() {
 function applyUserRole(user) {
   state.usuario = user;
   const readonly = user && user.rol === "CONSULTA";
+  document.body.classList.toggle("readonly-mode", Boolean(readonly));
   const restricted = [
     "#client-form",
     "#operation-start-new",
     "#operation-new",
     "#sale-form",
+    "#sale-line-save-top",
     "#liquidation-form",
     "#cc-open-payment",
     "#cc-open-external",
@@ -178,13 +245,32 @@ function applyUserRole(user) {
     "#cash-rec-clear",
     "#document-form",
     "#commissionist-load",
-    "#commissionist-generate"
+    "#commissionist-generate",
+    "#field-contract-clear",
+    "#field-contract-party-add",
+    "#field-contract-line-add",
+    "#field-contract-installment-add",
+    "#field-contract-pdf-upload",
+    "#field-lease-clear",
+    "#field-payment-preset-add",
+    "#field-payment-commission-register",
+    "#field-payment-add",
+    "#field-adjustment-add",
+    "#field-lease-form button[type='submit']",
+    "#field-contract-form button[type='submit']"
   ];
   restricted.forEach((selector) => {
     const node = $(selector);
     if (node) node.hidden = Boolean(readonly);
   });
   $("#logout-button").hidden = !user || user.nombre === "Modo local";
+}
+
+function setSaleLineSaveText(text) {
+  ["#sale-line-save", "#sale-line-save-top"].forEach((selector) => {
+    const button = $(selector);
+    if (button) button.textContent = text;
+  });
 }
 
 async function login(event) {
@@ -258,10 +344,63 @@ async function loadFieldModuleData(force = false) {
   state.fieldDataLoaded = true;
   renderFieldContracts();
   renderFieldLeases();
+  renderFieldDueAgenda();
 }
 
-function downloadBackup() {
-  window.location.href = "/api/backup/download";
+function filenameFromDisposition(disposition, fallback) {
+  const text = String(disposition || "");
+  const utfMatch = text.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utfMatch) return decodeURIComponent(utfMatch[1].replace(/"/g, ""));
+  const match = text.match(/filename="?([^";]+)"?/i);
+  return match ? match[1] : fallback;
+}
+
+async function downloadBackup() {
+  const button = $("#download-backup");
+  const message = $("#backup-message");
+  const originalText = button?.textContent || "Descargar backup de datos";
+  if (button) {
+    button.disabled = true;
+    button.classList.add("is-loading");
+    button.textContent = "Preparando backup...";
+  }
+  if (message) {
+    message.textContent = "Generando y descargando backup. Espere unos segundos...";
+    message.className = "form-message";
+  }
+  try {
+    const response = await fetch("/api/backup/download");
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || "No se pudo descargar el backup.");
+    }
+    if (button) button.textContent = "Descargando archivo...";
+    const blob = await response.blob();
+    const filename = filenameFromDisposition(response.headers.get("Content-Disposition"), `backup-hacienda-campos-${new Date().toISOString().slice(0, 10)}.json`);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    if (message) {
+      message.textContent = `Backup descargado: ${filename}`;
+      message.className = "form-message ok";
+    }
+  } catch (error) {
+    if (message) {
+      message.textContent = error.message;
+      message.className = "form-message error";
+    }
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("is-loading");
+      button.textContent = originalText;
+    }
+  }
 }
 
 function setDocumentMessage(message, type = "") {
@@ -402,7 +541,7 @@ function showDocumentPreview(documentId) {
   const url = documentDownloadUrl(documento.id);
   $("#document-preview-panel").hidden = false;
   $("#document-preview-title").textContent = documento.titulo || documento.nombreOriginal || "Vista del comprobante";
-  $("#document-preview-subtitle").textContent = `${documento.cliente || "-"} Â· ${documentReferenceText(documento)}`;
+  $("#document-preview-subtitle").textContent = `${documento.cliente || "-"} · ${documentReferenceText(documento)}`;
   $("#document-preview-open").href = url;
   $("#document-preview-frame").src = url;
   renderDocumentos();
@@ -483,7 +622,7 @@ async function saveDocument(event) {
 }
 
 async function deleteDocument(documentId) {
-  if (!window.confirm("Se eliminara la referencia y el PDF original. Â¿Continuar?")) return;
+  if (!window.confirm("Se eliminará la referencia y el PDF original. ¿Continuar?")) return;
   await fetchJson(`/api/documentos/${encodeURIComponent(documentId)}`, { method: "DELETE" });
   await reloadAppData();
   setView("archivo");
@@ -557,6 +696,8 @@ function resetCashReconciliationForm() {
   $("#cash-rec-app-concept").value = "";
   $("#cash-rec-app-to").value = "";
   $("#cash-rec-app-amount").value = "";
+  editingCashReconciliationApplicationId = "";
+  if ($("#cash-rec-app-add")) $("#cash-rec-app-add").textContent = "Agregar aplicacion";
   if ($("#cash-rec-pay-date")) $("#cash-rec-pay-date").value = today;
   if ($("#cash-rec-pay-concept")) $("#cash-rec-pay-concept").value = "";
   if ($("#cash-rec-pay-to")) $("#cash-rec-pay-to").value = "";
@@ -564,6 +705,8 @@ function resetCashReconciliationForm() {
   $("#cash-rec-break-concept").value = "";
   $("#cash-rec-break-detail").value = "";
   $("#cash-rec-break-amount").value = "";
+  editingCashReconciliationBreakdownId = "";
+  if ($("#cash-rec-break-add")) $("#cash-rec-break-add").textContent = "Agregar detalle";
   cashReconciliationBreakdown = [];
   cashReconciliationApplications = [];
   setCashReconciliationMessage("");
@@ -572,14 +715,94 @@ function resetCashReconciliationForm() {
   renderCashReconciliationApplications();
 }
 
+function uniqueSortedValues(values) {
+  return Array.from(new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, "es"));
+}
+
+function populateCashFilterOptions(items) {
+  const sourceList = $("#cash-source-list");
+  const paidByList = $("#cash-paid-by-list");
+  const categorySelect = $("#cash-filter-category");
+  if (sourceList) {
+    sourceList.innerHTML = uniqueSortedValues(items.map((item) => item.origenEfectivo))
+      .map((value) => `<option value="${escapeHtml(value)}"></option>`)
+      .join("");
+  }
+  if (paidByList) {
+    paidByList.innerHTML = uniqueSortedValues(items.map((item) => item.pagadoPor))
+      .map((value) => `<option value="${escapeHtml(value)}"></option>`)
+      .join("");
+  }
+  if (categorySelect) {
+    const current = categorySelect.value;
+    const categories = uniqueSortedValues([
+      ...items.map((item) => item.categoria),
+      "Gasto oficina",
+      "Libreria",
+      "Combustible",
+      "Comida / viaticos",
+      "Correo / cadeteria",
+      "Impuestos / sellados",
+      "Servicios",
+      "Otro"
+    ]);
+    categorySelect.innerHTML = `<option value="">Todas</option>${categories.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+    categorySelect.value = categories.includes(current) ? current : "";
+  }
+}
+
+function getFilteredCashItems() {
+  const items = state.caja?.items || [];
+  const status = $("#cash-filter-status")?.value || "TODOS";
+  const source = normalizeSearch($("#cash-filter-source")?.value || "");
+  const paidBy = normalizeSearch($("#cash-filter-paid-by")?.value || "");
+  const category = normalizeSearch($("#cash-filter-category")?.value || "");
+  return items.filter((item) => {
+    if (status === "PENDIENTE" && item.recuperado) return false;
+    if (status === "RECUPERADO" && !item.recuperado) return false;
+    if (source && !normalizeSearch(item.origenEfectivo).includes(source)) return false;
+    if (paidBy && !normalizeSearch(item.pagadoPor).includes(paidBy)) return false;
+    if (category && normalizeSearch(item.categoria) !== category) return false;
+    return true;
+  });
+}
+
+function updateCashFilterSummary(items, totalItems) {
+  const node = $("#cash-filter-summary");
+  if (!node) return;
+  const total = items.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const pending = items
+    .filter((item) => !item.recuperado)
+    .reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const hasFilters = ($("#cash-filter-status")?.value || "TODOS") !== "TODOS"
+    || Boolean($("#cash-filter-source")?.value)
+    || Boolean($("#cash-filter-paid-by")?.value)
+    || Boolean($("#cash-filter-category")?.value);
+  node.textContent = hasFilters
+    ? `${items.length} de ${totalItems} movimiento/s - Total ${moneyValue(total)} - Pendiente ${moneyValue(pending)}`
+    : `${totalItems} movimiento/s registrados - sin filtros aplicados`;
+}
+
+function clearCashFilters() {
+  if ($("#cash-filter-status")) $("#cash-filter-status").value = "TODOS";
+  if ($("#cash-filter-source")) $("#cash-filter-source").value = "";
+  if ($("#cash-filter-paid-by")) $("#cash-filter-paid-by").value = "";
+  if ($("#cash-filter-category")) $("#cash-filter-category").value = "";
+  renderCajaDiaria();
+}
+
 function renderCajaDiaria() {
   if (!$("#cash-body")) return;
   const caja = state.caja || {};
-  const items = caja.items || [];
+  const allItems = caja.items || [];
+  populateCashFilterOptions(allItems);
+  const items = getFilteredCashItems();
   $("#cash-total-today").textContent = moneyValue(caja.totalHoy);
   $("#cash-total-month").textContent = moneyValue(caja.totalMes);
   $("#cash-pending-recover").textContent = moneyValue(caja.pendienteRecuperar);
   $("#cash-total-all").textContent = moneyValue(caja.total);
+  updateCashFilterSummary(items, allItems.length);
   $("#cash-body").innerHTML = items.length
     ? items.map((item) => `
         <tr class="${item.recuperado ? "cash-recovered-row" : ""}">
@@ -596,7 +819,7 @@ function renderCajaDiaria() {
           </td>
         </tr>
       `).join("")
-    : `<tr><td colspan="8">Sin movimientos de caja cargados.</td></tr>`;
+    : `<tr><td colspan="8">Sin movimientos de caja para los filtros seleccionados.</td></tr>`;
 }
 
 function renderCashReconciliationApplications() {
@@ -608,12 +831,12 @@ function renderCashReconciliationApplications() {
     : recibido ? `Sin aplicaciones - saldo ${moneyValue(recibido)}` : "Sin aplicaciones cargadas";
   $("#cash-rec-app-body").innerHTML = cashReconciliationApplications.length
     ? cashReconciliationApplications.map((item) => `
-        <tr>
-          <td>${escapeHtml(formatDate(item.fecha))}</td>
+        <tr class="${String(item.id) === String(editingCashReconciliationApplicationId) ? "selected-row" : ""}">
+          <td>${escapeHtml(item.fecha || "-")}</td>
           <td>${escapeHtml(item.concepto || "-")}</td>
           <td>${escapeHtml(item.destino || "-")}</td>
           <td class="amount negative">${moneyValue(item.importe)}</td>
-          <td><button type="button" class="small-button danger-button" data-cash-rec-app-remove="${escapeHtml(item.id)}">Quitar</button></td>
+          <td><button type="button" class="small-button" data-cash-rec-app-edit="${escapeHtml(item.id)}">Editar</button> <button type="button" class="small-button danger-button" data-cash-rec-app-remove="${escapeHtml(item.id)}">Quitar</button></td>
         </tr>
       `).join("")
     : `<tr><td colspan="5">Sin aplicaciones cargadas.</td></tr>`;
@@ -628,11 +851,11 @@ function renderCashReconciliationBreakdown() {
     : recibido ? `Sin detalle - recibido ${moneyValue(recibido)}` : "Sin detalle cargado";
   $("#cash-rec-break-body").innerHTML = cashReconciliationBreakdown.length
     ? cashReconciliationBreakdown.map((item) => `
-        <tr>
+        <tr class="${String(item.id) === String(editingCashReconciliationBreakdownId) ? "selected-row" : ""}">
           <td>${escapeHtml(item.concepto || "-")}</td>
           <td>${escapeHtml(item.detalle || "-")}</td>
           <td class="amount positive">${moneyValue(item.importe)}</td>
-          <td><button type="button" class="small-button danger-button" data-cash-rec-break-remove="${escapeHtml(item.id)}">Quitar</button></td>
+          <td><button type="button" class="small-button" data-cash-rec-break-edit="${escapeHtml(item.id)}">Editar</button> <button type="button" class="small-button danger-button" data-cash-rec-break-remove="${escapeHtml(item.id)}">Quitar</button></td>
         </tr>
       `).join("")
     : `<tr><td colspan="4">Sin detalle cargado.</td></tr>`;
@@ -644,6 +867,25 @@ function addCashReconciliationBreakdown() {
   if (!concepto || importe <= 0) {
     setCashReconciliationMessage("Para agregar el detalle carga concepto e importe mayor a cero.", "error");
     return;
+  }
+  if (editingCashReconciliationBreakdownId) {
+    const index = cashReconciliationBreakdown.findIndex((item) => String(item.id) === String(editingCashReconciliationBreakdownId));
+    if (index >= 0) {
+      cashReconciliationBreakdown[index] = {
+        ...cashReconciliationBreakdown[index],
+        concepto,
+        detalle: $("#cash-rec-break-detail").value,
+        importe
+      };
+      editingCashReconciliationBreakdownId = "";
+      $("#cash-rec-break-add").textContent = "Agregar detalle";
+      $("#cash-rec-break-concept").value = "";
+      $("#cash-rec-break-detail").value = "";
+      $("#cash-rec-break-amount").value = "";
+      setCashReconciliationMessage("Detalle actualizado. Guarde la conciliacion para confirmar el cambio.", "ok");
+      renderCashReconciliationBreakdown();
+      return;
+    }
   }
   cashReconciliationBreakdown.push({
     id: `DET-${Date.now()}-${cashReconciliationBreakdown.length}`,
@@ -658,12 +900,44 @@ function addCashReconciliationBreakdown() {
   renderCashReconciliationBreakdown();
 }
 
+function editCashReconciliationBreakdown(detailId) {
+  const item = cashReconciliationBreakdown.find((row) => String(row.id) === String(detailId));
+  if (!item) return;
+  editingCashReconciliationBreakdownId = String(item.id);
+  $("#cash-rec-break-concept").value = item.concepto || "";
+  $("#cash-rec-break-detail").value = item.detalle || "";
+  $("#cash-rec-break-amount").value = moneyValue(item.importe);
+  $("#cash-rec-break-add").textContent = "Guardar detalle";
+  setCashReconciliationMessage("Modifique el detalle y presione Guardar detalle. Luego guarde la conciliacion.", "ok");
+  renderCashReconciliationBreakdown();
+}
+
 function addCashReconciliationApplication() {
   const importe = parseMoneyInput($("#cash-rec-app-amount").value);
   const concepto = $("#cash-rec-app-concept").value.trim();
   if (!concepto || importe <= 0) {
     setCashReconciliationMessage("Para agregar una aplicacion carga concepto e importe mayor a cero.", "error");
     return;
+  }
+  if (editingCashReconciliationApplicationId) {
+    const index = cashReconciliationApplications.findIndex((item) => String(item.id) === String(editingCashReconciliationApplicationId));
+    if (index >= 0) {
+      cashReconciliationApplications[index] = {
+        ...cashReconciliationApplications[index],
+        fecha: $("#cash-rec-app-date").value || $("#cash-rec-date").value,
+        concepto,
+        destino: $("#cash-rec-app-to").value,
+        importe
+      };
+      editingCashReconciliationApplicationId = "";
+      $("#cash-rec-app-add").textContent = "Agregar aplicacion";
+      $("#cash-rec-app-concept").value = "";
+      $("#cash-rec-app-to").value = "";
+      $("#cash-rec-app-amount").value = "";
+      setCashReconciliationMessage("Aplicacion actualizada. Guarde la conciliacion para confirmar el cambio.", "ok");
+      renderCashReconciliationApplications();
+      return;
+    }
   }
   cashReconciliationApplications.push({
     id: `APP-${Date.now()}-${cashReconciliationApplications.length}`,
@@ -677,6 +951,53 @@ function addCashReconciliationApplication() {
   $("#cash-rec-app-amount").value = "";
   setCashReconciliationMessage("");
   renderCashReconciliationApplications();
+}
+
+function editCashReconciliationApplication(applicationId) {
+  const item = cashReconciliationApplications.find((row) => String(row.id) === String(applicationId));
+  if (!item) return;
+  editingCashReconciliationApplicationId = String(item.id);
+  $("#cash-rec-app-date").value = dateToInput(item.fecha) || $("#cash-rec-date").value;
+  $("#cash-rec-app-concept").value = item.concepto || "";
+  $("#cash-rec-app-to").value = item.destino || "";
+  $("#cash-rec-app-amount").value = moneyValue(item.importe);
+  $("#cash-rec-app-add").textContent = "Guardar aplicacion";
+  setCashReconciliationMessage("Modifique la aplicacion y presione Guardar aplicacion. Luego guarde la conciliacion.", "ok");
+  renderCashReconciliationApplications();
+}
+
+function openCashReconciliationApplicationEdit(conciliationId, applicationId) {
+  const item = (state.cajaConciliaciones.items || []).find((row) => String(row.id) === String(conciliationId));
+  if (!item) {
+    setCashReconciliationMessage("No se encontro la conciliacion para editar.", "error");
+    return;
+  }
+  fillCashReconciliationForm(item);
+  if (applicationId) {
+    const app = cashReconciliationApplications.find((row) => String(row.id) === String(applicationId));
+    if (app) editCashReconciliationApplication(app.id);
+    else setCashReconciliationMessage("Se abrio la conciliacion, pero no se encontro esa aplicacion puntual. Puede editarla desde el listado de aplicaciones.", "error");
+  }
+  setCashTab("conciliaciones");
+  $("#cash-rec-app-concept")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  $("#cash-rec-app-concept")?.focus();
+}
+
+function cashReconciliationApplicationsDetailHtml(item) {
+  const applications = item.aplicaciones || [];
+  if (!applications.length && Math.abs(Number(item.totalAplicado || 0)) <= 0.01) return "";
+  const body = applications.length
+    ? applications.map((app) => `
+        <tr>
+          <td>${escapeHtml(app.fecha || "-")}</td>
+          <td>${escapeHtml(app.concepto || "-")}</td>
+          <td>${escapeHtml(app.destino || "-")}</td>
+          <td class="amount negative">${moneyValue(app.importe)}</td>
+          <td>${state.usuario?.rol === "CONSULTA" ? "-" : `<button type="button" class="small-button" data-cash-rec-edit-app="${escapeHtml(item.id)}" data-cash-rec-app-id="${escapeHtml(app.id)}">Editar aplicacion</button>`}</td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="5">Este efectivo tiene importe aplicado (${moneyValue(item.totalAplicado)}), pero no tiene detalle de aplicaciones guardado.</td></tr>`;
+  return `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones / imputaciones:</strong><table class="nested-table"><thead><tr><th>Fecha</th><th>Concepto</th><th>Destino</th><th>Importe</th><th></th></tr></thead><tbody>${body}</tbody></table></td></tr>`;
 }
 
 function renderCashReconciliations() {
@@ -700,11 +1021,12 @@ function renderCashReconciliations() {
           <td>
             <button type="button" class="small-button" data-cash-rec-print="${escapeHtml(item.id)}">PDF</button>
             ${state.usuario?.rol === "CONSULTA" ? "" : `<button type="button" class="small-button" data-cash-rec-edit="${escapeHtml(item.id)}">Editar</button>
+            <button type="button" class="small-button" data-cash-rec-edit-apps="${escapeHtml(item.id)}">Editar aplicaciones</button>
             <button type="button" class="small-button danger-button" data-cash-rec-delete="${escapeHtml(item.id)}">Eliminar</button>`}
           </td>
         </tr>
-        ${item.detalleRecibido?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Detalle recibido:</strong> ${item.detalleRecibido.map((det) => `${escapeHtml(det.concepto || "-")} Â· ${escapeHtml(det.detalle || "-")} Â· ${moneyValue(det.importe)}`).join(" | ")}</td></tr>` : ""}
-        ${item.aplicaciones?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Aplicaciones:</strong> ${item.aplicaciones.map((app) => `${escapeHtml(app.fecha || "-")} Â· ${escapeHtml(app.concepto || "-")} Â· ${moneyValue(app.importe)}`).join(" | ")}</td></tr>` : ""}
+        ${item.detalleRecibido?.length ? `<tr class="cc-detail-row"><td colspan="8"><strong>Detalle recibido:</strong> ${item.detalleRecibido.map((det) => `${escapeHtml(det.concepto || "-")} · ${escapeHtml(det.detalle || "-")} · ${moneyValue(det.importe)}`).join(" | ")}</td></tr>` : ""}
+        ${cashReconciliationApplicationsDetailHtml(item)}
       `).join("")
     : `<tr><td colspan="8">Sin conciliaciones de efectivo cargadas.</td></tr>`;
   renderCashReconciliationOpenBalances(items);
@@ -743,6 +1065,10 @@ function fillCashForm(item) {
 }
 
 function fillCashReconciliationForm(item) {
+  editingCashReconciliationBreakdownId = "";
+  if ($("#cash-rec-break-add")) $("#cash-rec-break-add").textContent = "Agregar detalle";
+  editingCashReconciliationApplicationId = "";
+  if ($("#cash-rec-app-add")) $("#cash-rec-app-add").textContent = "Agregar aplicacion";
   $("#cash-rec-id").value = item.id || "";
   $("#cash-rec-date").value = dateToInput(item.fecha);
   $("#cash-rec-client").value = item.recibidoDe || "";
@@ -851,14 +1177,14 @@ async function applyCashReconciliationPayment() {
 }
 
 async function deleteCashMovement(id) {
-  if (!window.confirm("Se eliminara este movimiento de caja. Â¿Continuar?")) return;
+  if (!window.confirm("Se eliminará este movimiento de caja. ¿Continuar?")) return;
   await fetchJson(`/api/caja-diaria/${encodeURIComponent(id)}`, { method: "DELETE" });
   await reloadAppData();
   setView("caja");
 }
 
 async function deleteCashReconciliation(id) {
-  if (!window.confirm("Se eliminara esta conciliacion de efectivo. Â¿Continuar?")) return;
+  if (!window.confirm("Se eliminará esta conciliación de efectivo. ¿Continuar?")) return;
   await fetchJson(`/api/caja-conciliaciones/${encodeURIComponent(id)}`, { method: "DELETE" });
   await reloadAppData();
   setView("caja");
@@ -867,7 +1193,11 @@ async function deleteCashReconciliation(id) {
 
 function printCashReport() {
   const caja = state.caja || {};
-  const rows = caja.items || [];
+  const rows = getFilteredCashItems();
+  const filteredTotal = rows.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const filteredPending = rows
+    .filter((item) => !item.recuperado)
+    .reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const popup = window.open("", "_blank", "width=1000,height=800");
   if (!popup) return;
   popup.document.write(`<!doctype html><html><head><title>Caja diaria</title><style>
@@ -884,13 +1214,15 @@ function printCashReport() {
       <div><span>Mes actual</span><strong>${moneyValue(caja.totalMes)}</strong></div>
       <div><span>Pendiente recuperar</span><strong>${moneyValue(caja.pendienteRecuperar)}</strong></div>
       <div><span>Total registrado</span><strong>${moneyValue(caja.total)}</strong></div>
+      <div><span>Total filtrado</span><strong>${moneyValue(filteredTotal)}</strong></div>
+      <div><span>Pendiente filtrado</span><strong>${moneyValue(filteredPending)}</strong></div>
     </div>
     <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoria</th><th>Importe</th><th>Salio de</th><th>Pagado por</th><th>Comprobante</th><th>Estado</th><th>Observacion</th></tr></thead><tbody>
       ${rows.map((item) => `<tr><td>${escapeHtml(item.fecha || "-")}</td><td>${escapeHtml(item.concepto || "-")}${item.proveedor ? `<br>${escapeHtml(item.proveedor)}` : ""}</td><td>${escapeHtml(item.categoria || "-")}</td><td class="amount">${moneyValue(item.importe)}</td><td>${escapeHtml(item.origenEfectivo || "-")}</td><td>${escapeHtml(item.pagadoPor || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td class="${item.recuperado ? "" : "pending"}">${item.recuperado ? "Recuperado" : "Pendiente"}</td><td>${escapeHtml(item.observacion || "-")}</td></tr>`).join("")}
     </tbody></table>
-    <button onclick="window.print()">Imprimir / guardar PDF</button>
+    <button type="button" data-print-popup>Imprimir / guardar PDF</button>
   </body></html>`);
-  popup.document.close();
+  finishPrintPopup(popup);
 }
 
 function cashReconciliationReportItems(itemId = "") {
@@ -966,9 +1298,9 @@ function printCashReconciliationReport(itemId = "") {
       <div><span>Movimientos</span><strong>${items.length}</strong></div>
     </div>
     <table><thead><tr><th>Fecha</th><th>Recibido de</th><th>Referencia</th><th>Ingreso</th><th>Egreso</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>${cashReconciliationRowsHtml(items)}</tbody></table>
-    <button onclick="window.print()">Imprimir / guardar PDF</button>
+    <button type="button" data-print-popup>Imprimir / guardar PDF</button>
   </body></html>`);
-  popup.document.close();
+  finishPrintPopup(popup);
 }
 
 function cashReconciliationSummaryEntries(items) {
@@ -1044,9 +1376,9 @@ function printCashReconciliationSummaryReport() {
         <table><thead><tr class="out-title"><th>Fecha</th><th>Concepto</th><th>Destino</th><th>Importe</th></tr></thead><tbody>${summaryColumnRows(outcomes, "out")}</tbody><tfoot><tr><td colspan="3">Total egresos</td><td class="amount negative">${moneyValue(totalOut)}</td></tr><tr><td colspan="3" class="balance">Saldo del periodo</td><td class="amount balance">${moneyValue(balance)}</td></tr></tfoot></table>
       </section>
     </div>
-    <button onclick="window.print()">Imprimir / guardar PDF</button>
+    <button type="button" data-print-popup>Imprimir / guardar PDF</button>
   </body></html>`);
-  popup.document.close();
+  finishPrintPopup(popup);
 }
 
 function setFieldLeaseMessage(message, type = "") {
@@ -1077,7 +1409,434 @@ function updateFieldContractPdfSummary(contractId = $("#field-contract-id")?.val
   summary.textContent = docs.length ? `${docs.length} PDF asociado/s.` : "Sin PDF asociado.";
 }
 
+function fieldContractPartyTypeLabel(value) {
+  const key = String(value || "").toUpperCase();
+  return key === "ARRENDATARIO" ? "Arrendatario / paga" : "Arrendador / cobra";
+}
+
+function normalizeFieldContractParty(row = {}) {
+  return {
+    id: row.id || `PARTE-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    tipo: String(row.tipo || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR",
+    nombre: String(row.nombre || "").trim(),
+    cuit: String(row.cuit || "").trim(),
+    porcentaje: parseMoneyInput(row.porcentaje || 0),
+    observaciones: String(row.observaciones || "").trim()
+  };
+}
+
+function fieldContractPartyRowsFromContract(contract = {}) {
+  const rows = Array.isArray(contract.partes)
+    ? contract.partes.map(normalizeFieldContractParty).filter((row) => row.nombre || row.porcentaje)
+    : [];
+  if (rows.length) return rows;
+  const fallback = [];
+  if (contract.arrendador) {
+    fallback.push(normalizeFieldContractParty({
+      tipo: "ARRENDADOR",
+      nombre: contract.arrendador,
+      porcentaje: 100
+    }));
+  }
+  if (contract.arrendatario) {
+    fallback.push(normalizeFieldContractParty({
+      tipo: "ARRENDATARIO",
+      nombre: contract.arrendatario,
+      porcentaje: 100
+    }));
+  }
+  return fallback;
+}
+
+function fieldContractPartyTotals(rows = state.fieldContractPartyRows || []) {
+  return rows.reduce((acc, row) => {
+    const type = String(row.tipo || "").toUpperCase();
+    const percent = parseMoneyInput(row.porcentaje || 0);
+    if (type === "ARRENDATARIO") acc.arrendatarios += percent;
+    else acc.arrendadores += percent;
+    return acc;
+  }, { arrendadores: 0, arrendatarios: 0 });
+}
+
+function setFieldContractPanelDisabled(panel, disabled, message = "") {
+  if (!panel) return;
+  panel.classList.toggle("locked-panel", !!disabled);
+  panel.dataset.lockMessage = disabled ? message : "";
+  panel.querySelectorAll("input, select, textarea, button").forEach((node) => {
+    node.disabled = !!disabled;
+  });
+}
+
+function fieldContractRuleModeFromForm() {
+  const explicit = $("#field-contract-rule-type")?.value || "";
+  if (explicit) return explicit;
+  return (state.fieldContractLineRows || []).length ? "MIXTA" : "SIMPLE";
+}
+
+function syncFieldContractRuleMode() {
+  const ruleMode = fieldContractRuleModeFromForm();
+  const isMixed = ruleMode === "MIXTA";
+  const ruleTitle = $("#field-contract-rule-title");
+  const ruleHelp = $("#field-contract-rule-help");
+  if (ruleTitle) ruleTitle.textContent = isMixed ? "Lineas mixtas" : "Regla simple";
+  if (ruleHelp) {
+    ruleHelp.textContent = isMixed
+      ? "Use solo el bloque de lineas mixtas. Las reglas simples quedan apagadas para evitar duplicar criterios."
+      : "Use los bloques de parte facturada y parte efectivo. Las lineas mixtas quedan apagadas.";
+  }
+  setFieldContractPanelDisabled(
+    $("#field-contract-mixed-panel"),
+    !isMixed,
+    "Bloque deshabilitado: active 'Lineas mixtas de calculo' en Tipo de regla para cargarlo."
+  );
+  setFieldContractPanelDisabled(
+    $("#field-contract-simple-panel"),
+    isMixed,
+    "Bloque deshabilitado: este contrato usa lineas mixtas de calculo."
+  );
+
+  const frequency = String($("#field-contract-frequency")?.value || "").toUpperCase();
+  const manual = frequency === "MANUAL";
+  const installmentHelp = $("#field-contract-installment-help");
+  if (installmentHelp) {
+    installmentHelp.textContent = manual
+      ? "Plan manual habilitado: cargue cuotas con vencimientos fijos o condiciones especiales."
+      : "Plan manual deshabilitado: se usa la frecuencia base del contrato. Para cargar vencimientos fijos, seleccione 'Manual / sin vencimiento fijo'.";
+  }
+  setFieldContractPanelDisabled(
+    $("#field-contract-installment-panel"),
+    !manual,
+    "Bloque deshabilitado: solo se usa con frecuencia Manual / sin vencimiento fijo."
+  );
+}
+
+function renderFieldContractPartyRows() {
+  const body = $("#field-contract-party-body");
+  if (!body) return;
+  const rows = state.fieldContractPartyRows || [];
+  body.innerHTML = rows.length
+    ? rows.map((row) => `<tr>
+        <td>${escapeHtml(fieldContractPartyTypeLabel(row.tipo))}</td>
+        <td>${escapeHtml(row.nombre || "-")}</td>
+        <td>${escapeHtml(row.cuit || "-")}</td>
+        <td>${plainNumberValue(row.porcentaje || 0)}%</td>
+        <td>${escapeHtml(row.observaciones || "-")}</td>
+        <td><button type="button" class="small-button danger-button" data-field-contract-party-remove="${escapeHtml(row.id)}">Quitar</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="6">Sin partes cargadas. Se usaran arrendador y arrendatario principal al 100%.</td></tr>`;
+  const totals = fieldContractPartyTotals(rows);
+  if ($("#field-contract-landlord-percent")) $("#field-contract-landlord-percent").textContent = `${plainNumberValue(totals.arrendadores)}%`;
+  if ($("#field-contract-tenant-percent")) $("#field-contract-tenant-percent").textContent = `${plainNumberValue(totals.arrendatarios)}%`;
+}
+
+function fieldContractInstallmentTypeLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "EFECTIVO") return "Efectivo";
+  if (key === "MIXTA") return "Mixta";
+  if (key === "INFORMATIVA") return "Informativa";
+  return "Facturada / contrato";
+}
+
+function normalizeFieldContractInstallment(row = {}) {
+  return {
+    id: row.id || `CUOTA-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    numero: Math.max(Number(parseMoneyInput(row.numero || 0)) || 0, 0),
+    vencimiento: row.vencimiento || "",
+    tipo: ["EFECTIVO", "MIXTA", "INFORMATIVA"].includes(String(row.tipo || "").toUpperCase())
+      ? String(row.tipo || "").toUpperCase()
+      : "FACTURADO",
+    porcentaje: parseMoneyInput(row.porcentaje || 0),
+    cantidadFija: parseFieldDecimalInput(row.cantidadFija || row.cantidad || 0),
+    unidadCantidad: ["TN"].includes(String(row.unidadCantidad || "").toUpperCase()) ? "TN" : "KG",
+    importeFijo: parseMoneyInput(row.importeFijo || 0),
+    detalle: String(row.detalle || "").trim()
+  };
+}
+
+function renderFieldContractInstallmentRows() {
+  const body = $("#field-contract-installment-body");
+  if (!body) return;
+  const rows = (state.fieldContractInstallmentRows || [])
+    .slice()
+    .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
+  body.innerHTML = rows.length
+    ? rows.map((row) => `<tr>
+        <td>${plainNumberValue(row.numero || 0)}</td>
+        <td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(row.vencimiento)) || row.vencimiento || "-")}</td>
+        <td>${escapeHtml(fieldContractInstallmentTypeLabel(row.tipo))}</td>
+        <td>${row.porcentaje ? `${plainNumberValue(row.porcentaje)}%` : "-"}</td>
+        <td>${row.cantidadFija ? `${plainNumberValue(row.cantidadFija)} ${escapeHtml(row.unidadCantidad || "KG")}` : "-"}</td>
+        <td class="amount">${row.importeFijo ? moneyValue(row.importeFijo) : "-"}</td>
+        <td>${escapeHtml(row.detalle || "-")}</td>
+        <td><button type="button" class="small-button" data-field-contract-installment-edit="${escapeHtml(row.id)}">Modificar</button> <button type="button" class="small-button danger-button" data-field-contract-installment-remove="${escapeHtml(row.id)}">Quitar</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="8">Sin cuotas manuales. El calculo usara la frecuencia base del contrato.</td></tr>`;
+  if ($("#field-contract-installment-summary")) {
+    $("#field-contract-installment-summary").textContent = rows.length ? `${rows.length} cuota/s manual/es.` : "Sin cuotas manuales.";
+  }
+  if ($("#field-contract-installment-add")) {
+    $("#field-contract-installment-add").textContent = state.editingFieldContractInstallmentId ? "Guardar cambio" : "Agregar cuota";
+  }
+  if ($("#field-contract-installment-cancel")) {
+    $("#field-contract-installment-cancel").hidden = !state.editingFieldContractInstallmentId;
+  }
+  renderFieldLeaseInstallmentOptions();
+  syncFieldContractRuleMode();
+}
+
+function clearFieldContractInstallmentInputs() {
+  if ($("#field-contract-installment-number")) $("#field-contract-installment-number").value = "";
+  if ($("#field-contract-installment-due")) $("#field-contract-installment-due").value = "";
+  if ($("#field-contract-installment-type")) $("#field-contract-installment-type").value = "FACTURADO";
+  if ($("#field-contract-installment-percent")) $("#field-contract-installment-percent").value = "";
+  if ($("#field-contract-installment-quantity")) $("#field-contract-installment-quantity").value = "";
+  if ($("#field-contract-installment-quantity-unit")) $("#field-contract-installment-quantity-unit").value = "KG";
+  if ($("#field-contract-installment-amount")) $("#field-contract-installment-amount").value = "";
+  if ($("#field-contract-installment-notes")) $("#field-contract-installment-notes").value = "";
+  state.editingFieldContractInstallmentId = "";
+  if ($("#field-contract-installment-add")) $("#field-contract-installment-add").textContent = "Agregar cuota";
+  if ($("#field-contract-installment-cancel")) $("#field-contract-installment-cancel").hidden = true;
+}
+
+function editFieldContractInstallmentRow(installmentId) {
+  const row = (state.fieldContractInstallmentRows || []).find((item) => String(item.id) === String(installmentId));
+  if (!row) return;
+  state.editingFieldContractInstallmentId = row.id;
+  $("#field-contract-installment-number").value = row.numero || "";
+  $("#field-contract-installment-due").value = formatDateForInput(row.vencimiento);
+  $("#field-contract-installment-type").value = row.tipo || "FACTURADO";
+  $("#field-contract-installment-percent").value = row.porcentaje ? plainNumberValue(row.porcentaje) : "";
+  $("#field-contract-installment-quantity").value = row.cantidadFija ? plainNumberValue(row.cantidadFija) : "";
+  $("#field-contract-installment-quantity-unit").value = row.unidadCantidad || "KG";
+  $("#field-contract-installment-amount").value = row.importeFijo ? moneyValue(row.importeFijo) : "";
+  $("#field-contract-installment-notes").value = row.detalle || "";
+  renderFieldContractInstallmentRows();
+  setFieldContractMessage("Cuota cargada para modificar. Cambie solamente el detalle necesario y presione Guardar cambio.", "ok");
+}
+
+function fieldContractLineAppliesLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "EFECTIVO") return "Efectivo";
+  if (key === "AMBAS") return "Ambas";
+  return "Facturado / contrato";
+}
+
+function fieldContractBaseLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "KG_CARNE") return "Kg carne/ha";
+  if (key === "KG_SOJA") return "Kg soja/ha";
+  if (key === "KG_TRIGO") return "Kg trigo/ha";
+  if (key === "KG_CEREAL") return "Kg cereal/ha";
+  if (key === "PESOS_HA") return "Pesos por ha";
+  if (key === "DOLARES_HA") return "Dolares por ha";
+  if (key === "IMPORTE_FIJO") return "Importe fijo";
+  return key || "-";
+}
+
+function parseFieldDecimalInput(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+  const normalized = raw.toLowerCase().replace(/\u00d7|\u00c3\u2014/g, "x");
+  if (/[x*]/.test(normalized)) {
+    const factors = normalized
+      .split(/[x*]/)
+      .map((part) => parseFieldDecimalInput(part))
+      .filter((number) => Number.isFinite(number));
+    return factors.length ? factors.reduce((total, number) => total * number, 1) : 0;
+  }
+  const cleaned = normalized.replace(/[^0-9,.\-]/g, "");
+  return parseMoneyInput(cleaned || normalized);
+}
+
+function normalizeFieldContractLine(row = {}) {
+  const applies = String(row.aplicaA || row.aplica || "FACTURADO").toUpperCase();
+  const base = String(row.base || "KG_CARNE").toUpperCase();
+  return {
+    id: row.id || `LINEA-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    aplicaA: ["EFECTIVO", "AMBAS"].includes(applies) ? applies : "FACTURADO",
+    detalle: String(row.detalle || "").trim(),
+    hectareas: parseFieldDecimalInput(row.hectareas || 0),
+    base: ["KG_CARNE", "KG_SOJA", "KG_TRIGO", "KG_CEREAL", "PESOS_HA", "DOLARES_HA", "IMPORTE_FIJO"].includes(base) ? base : "KG_CARNE",
+    tasa: parseFieldDecimalInput(row.tasa || 0),
+    cotizacion: parseFieldDecimalInput(row.cotizacion || 0),
+    observaciones: String(row.observaciones || "").trim()
+  };
+}
+
+function renderFieldContractLineRows() {
+  const body = $("#field-contract-line-body");
+  if (!body) return;
+  const rows = state.fieldContractLineRows || [];
+  body.innerHTML = rows.length
+    ? rows.map((row) => `<tr>
+        <td>${escapeHtml(fieldContractLineAppliesLabel(row.aplicaA))}</td>
+        <td>${escapeHtml(row.detalle || "-")}</td>
+        <td>${plainNumberValue(row.hectareas || 0)}</td>
+        <td>${escapeHtml(fieldContractBaseLabel(row.base))}</td>
+        <td>${plainNumberValue(row.tasa || 0)}</td>
+        <td class="amount">${row.cotizacion ? moneyValue(row.cotizacion) : "-"}</td>
+        <td>${escapeHtml(row.observaciones || "-")}</td>
+        <td><button type="button" class="small-button" data-field-contract-line-edit="${escapeHtml(row.id)}">Modificar</button> <button type="button" class="small-button danger-button" data-field-contract-line-remove="${escapeHtml(row.id)}">Quitar</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="8">Sin lineas mixtas. Se usaran las reglas simples de facturado/efectivo.</td></tr>`;
+  if ($("#field-contract-line-summary")) {
+    $("#field-contract-line-summary").textContent = rows.length ? `${rows.length} linea/s mixta/s.` : "Sin lineas mixtas.";
+  }
+  if ($("#field-contract-line-add")) {
+    $("#field-contract-line-add").textContent = state.editingFieldContractLineId ? "Guardar cambio" : "Agregar linea";
+  }
+  syncFieldContractRuleMode();
+}
+
+function clearFieldContractLineInputs() {
+  if ($("#field-contract-line-label")) $("#field-contract-line-label").value = "";
+  if ($("#field-contract-line-hectares")) $("#field-contract-line-hectares").value = "";
+  if ($("#field-contract-line-rate")) $("#field-contract-line-rate").value = "";
+  if ($("#field-contract-line-price")) $("#field-contract-line-price").value = "";
+  if ($("#field-contract-line-notes")) $("#field-contract-line-notes").value = "";
+  state.editingFieldContractLineId = "";
+  if ($("#field-contract-line-add")) $("#field-contract-line-add").textContent = "Agregar linea";
+}
+
+function editFieldContractLineRow(lineId) {
+  const row = (state.fieldContractLineRows || []).find((item) => String(item.id) === String(lineId));
+  if (!row) return;
+  state.editingFieldContractLineId = row.id;
+  if ($("#field-contract-line-applies")) $("#field-contract-line-applies").value = row.aplicaA || "FACTURADO";
+  if ($("#field-contract-line-label")) $("#field-contract-line-label").value = row.detalle || "";
+  if ($("#field-contract-line-hectares")) $("#field-contract-line-hectares").value = plainNumberValue(row.hectareas || 0);
+  if ($("#field-contract-line-base")) $("#field-contract-line-base").value = row.base || "KG_CARNE";
+  if ($("#field-contract-line-rate")) $("#field-contract-line-rate").value = plainNumberValue(row.tasa || 0);
+  if ($("#field-contract-line-price")) $("#field-contract-line-price").value = row.cotizacion ? moneyValue(row.cotizacion) : "";
+  if ($("#field-contract-line-notes")) $("#field-contract-line-notes").value = row.observaciones || "";
+  renderFieldContractLineRows();
+  setFieldContractMessage("Linea cargada para modificar. Cambie los datos y presione Guardar cambio.", "ok");
+}
+
+function addFieldContractLineRow() {
+  const hectares = parseFieldDecimalInput($("#field-contract-line-hectares")?.value || 0);
+  const rate = parseFieldDecimalInput($("#field-contract-line-rate")?.value || 0);
+  const base = $("#field-contract-line-base")?.value || "KG_CARNE";
+  const detail = String($("#field-contract-line-label")?.value || "").trim();
+  if (!hectares && base !== "IMPORTE_FIJO") {
+    setFieldContractMessage("Cargue hectareas para agregar la linea mixta.", "error");
+    return;
+  }
+  if (!rate) {
+    setFieldContractMessage("Cargue kg/ha o importe base para agregar la linea mixta.", "error");
+    return;
+  }
+  const nextLine = normalizeFieldContractLine({
+    id: state.editingFieldContractLineId || "",
+    aplicaA: $("#field-contract-line-applies")?.value || "FACTURADO",
+    detalle: detail || fieldContractBaseLabel(base),
+    hectareas: hectares,
+    base,
+    tasa: rate,
+    cotizacion: parseFieldDecimalInput($("#field-contract-line-price")?.value || 0),
+    observaciones: $("#field-contract-line-notes")?.value || ""
+  });
+  if (state.editingFieldContractLineId) {
+    state.fieldContractLineRows = (state.fieldContractLineRows || []).map((row) => String(row.id) === String(state.editingFieldContractLineId) ? nextLine : row);
+  } else {
+    state.fieldContractLineRows.push(nextLine);
+  }
+  const wasEditing = !!state.editingFieldContractLineId;
+  clearFieldContractLineInputs();
+  renderFieldContractLineRows();
+  syncFieldContractFormToActive();
+  updateFieldLeasePreview();
+  setFieldContractMessage(wasEditing ? "Linea mixta modificada. Para conservar el cambio, guarde el contrato." : "Linea mixta agregada al contrato. Para conservarla, guarde el contrato.", "ok");
+}
+
+function addFieldContractInstallmentRow() {
+  const number = parseMoneyInput($("#field-contract-installment-number")?.value || 0);
+  const due = $("#field-contract-installment-due")?.value || "";
+  const percent = parseMoneyInput($("#field-contract-installment-percent")?.value || 0);
+  const quantity = parseFieldDecimalInput($("#field-contract-installment-quantity")?.value || 0);
+  const amount = parseMoneyInput($("#field-contract-installment-amount")?.value || 0);
+  const type = $("#field-contract-installment-type")?.value || "FACTURADO";
+  if (!number || !due) {
+    setFieldContractMessage("Cargue numero y vencimiento para agregar una cuota manual.", "error");
+    return;
+  }
+  const fullBlockPercent = !percent && !quantity && !amount && type !== "INFORMATIVA" ? 100 : percent;
+  const nextInstallment = normalizeFieldContractInstallment({
+    id: state.editingFieldContractInstallmentId || "",
+    numero: number,
+    vencimiento: due,
+    tipo: type,
+    porcentaje: fullBlockPercent,
+    cantidadFija: quantity,
+    unidadCantidad: $("#field-contract-installment-quantity-unit")?.value || "KG",
+    importeFijo: amount,
+    detalle: $("#field-contract-installment-notes")?.value || ""
+  });
+  const wasEditing = !!state.editingFieldContractInstallmentId;
+  if (wasEditing) {
+    state.fieldContractInstallmentRows = (state.fieldContractInstallmentRows || []).map((row) => String(row.id) === String(state.editingFieldContractInstallmentId) ? nextInstallment : row);
+  } else {
+    state.fieldContractInstallmentRows.push(nextInstallment);
+  }
+  clearFieldContractInstallmentInputs();
+  renderFieldContractInstallmentRows();
+  syncFieldContractFormToActive();
+  setFieldContractMessage(wasEditing
+    ? "Cuota modificada. Para conservar el cambio, guarde el contrato."
+    : "Cuota manual agregada. Si no cargaste porcentaje/cantidad/importe, se tomo el 100% del bloque elegido.", "ok");
+}
+
+window.addFieldContractLineRow = addFieldContractLineRow;
+window.addFieldContractInstallmentRow = addFieldContractInstallmentRow;
+
+function renderFieldLeaseInstallmentOptions(selectedId = $("#field-lease-installment")?.value || "") {
+  const select = $("#field-lease-installment");
+  if (!select) return;
+  const rawContract = currentFieldContractForCalculation() || {};
+  const lineQuotes = fieldLeaseLineQuoteOverridesFromInputs(rawContract);
+  const contract = applyFieldLeaseLineQuoteOverrides(rawContract, lineQuotes);
+  const rows = (Array.isArray(contract.cuotas) && contract.cuotas.length ? contract.cuotas : state.fieldContractInstallmentRows || [])
+    .map(normalizeFieldContractInstallment)
+    .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
+  select.innerHTML = `<option value="">Sin cuota manual / calculo normal</option>` + rows.map((row) => {
+    const quantityText = row.cantidadFija ? ` - ${plainNumberValue(row.cantidadFija)} ${row.unidadCantidad || "KG"}` : "";
+    const percentText = row.porcentaje ? ` - ${plainNumberValue(row.porcentaje)}%` : "";
+    const amountText = row.importeFijo ? ` - ${moneyValue(row.importeFijo)}` : "";
+    const label = `Cuota ${plainNumberValue(row.numero || 0)} - ${formatDisplayDate(parseAnyLocalDate(row.vencimiento)) || row.vencimiento || "-"} - ${fieldContractInstallmentTypeLabel(row.tipo)}${quantityText || percentText || amountText}`;
+    return `<option value="${escapeHtml(row.id)}">${escapeHtml(label)}</option>`;
+  }).join("");
+  if (selectedId && rows.some((row) => String(row.id) === String(selectedId))) select.value = selectedId;
+}
+
+function addFieldContractPartyRow() {
+  const name = $("#field-contract-party-name")?.value || "";
+  const percent = parseMoneyInput($("#field-contract-party-percent")?.value || 0);
+  if (!name || !percent) {
+    setFieldContractMessage("Cargue nombre y porcentaje para agregar una parte del contrato.", "error");
+    return;
+  }
+  state.fieldContractPartyRows.push(normalizeFieldContractParty({
+    tipo: $("#field-contract-party-type")?.value || "ARRENDADOR",
+    nombre: name,
+    cuit: $("#field-contract-party-cuit")?.value || "",
+    porcentaje: percent,
+    observaciones: $("#field-contract-party-notes")?.value || ""
+  }));
+  $("#field-contract-party-name").value = "";
+  $("#field-contract-party-cuit").value = "";
+  $("#field-contract-party-percent").value = "";
+  $("#field-contract-party-notes").value = "";
+  renderFieldContractPartyRows();
+  syncFieldContractFormToActive();
+  setFieldContractMessage("");
+}
+
 function fieldContractPayload() {
+  const reglaCalculo = fieldContractRuleModeFromForm();
+  const usesMixedLines = reglaCalculo === "MIXTA";
+  const frecuencia = $("#field-contract-frequency")?.value || "MENSUAL";
+  const usesManualInstallments = String(frecuencia || "").toUpperCase() === "MANUAL";
   return {
     id: $("#field-contract-id")?.value || "",
     nombre: $("#field-contract-name")?.value || "",
@@ -1087,19 +1846,23 @@ function fieldContractPayload() {
     hectareas: parseMoneyInput($("#field-contract-hectares")?.value || 0),
     inicio: $("#field-contract-start")?.value || "",
     fin: $("#field-contract-end")?.value || "",
-    frecuencia: $("#field-contract-frequency")?.value || "MENSUAL",
+    frecuencia,
     vencimientoHabitual: $("#field-contract-due-text")?.value || "",
     proximoVencimiento: "",
     criterioCotizacion: $("#field-contract-quote-criteria")?.value || "",
-    facturadoModo: $("#field-contract-billed-mode")?.value || "HECTAREAS",
-    facturadoValor: parseMoneyInput($("#field-contract-billed-value")?.value || 0),
-    facturadoBase: $("#field-contract-billed-base")?.value || "KG_SOJA",
-    facturadoTasa: parseMoneyInput($("#field-contract-billed-rate")?.value || 0),
-    efectivoModo: $("#field-contract-cash-mode")?.value || "NINGUNO",
-    efectivoValor: parseMoneyInput($("#field-contract-cash-value")?.value || 0),
-    efectivoBase: $("#field-contract-cash-base")?.value || "MISMA_FACTURADA",
-    efectivoTasa: parseMoneyInput($("#field-contract-cash-rate")?.value || 0),
-    condiciones: $("#field-contract-notes")?.value || ""
+    reglaCalculo,
+    facturadoModo: usesMixedLines ? "HECTAREAS" : ($("#field-contract-billed-mode")?.value || "HECTAREAS"),
+    facturadoValor: usesMixedLines ? 0 : parseMoneyInput($("#field-contract-billed-value")?.value || 0),
+    facturadoBase: usesMixedLines ? "KG_SOJA" : ($("#field-contract-billed-base")?.value || "KG_SOJA"),
+    facturadoTasa: usesMixedLines ? 0 : parseMoneyInput($("#field-contract-billed-rate")?.value || 0),
+    efectivoModo: usesMixedLines ? "NINGUNO" : ($("#field-contract-cash-mode")?.value || "NINGUNO"),
+    efectivoValor: usesMixedLines ? 0 : parseMoneyInput($("#field-contract-cash-value")?.value || 0),
+    efectivoBase: usesMixedLines ? "MISMA_FACTURADA" : ($("#field-contract-cash-base")?.value || "MISMA_FACTURADA"),
+    efectivoTasa: usesMixedLines ? 0 : parseMoneyInput($("#field-contract-cash-rate")?.value || 0),
+    condiciones: $("#field-contract-notes")?.value || "",
+    partes: state.fieldContractPartyRows || [],
+    lineas: usesMixedLines ? (state.fieldContractLineRows || []) : [],
+    cuotas: usesManualInstallments ? (state.fieldContractInstallmentRows || []) : []
   };
 }
 
@@ -1139,10 +1902,15 @@ function fieldContractSearchLabel(item) {
   return [item.nombre, item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" - ");
 }
 
+function fieldContractSearchHaystack(item) {
+  const partyNames = fieldContractPartyRowsFromContract(item).map((row) => row.nombre).filter(Boolean).join(" ");
+  return [item.nombre, item.arrendador, item.arrendatario, item.campo, partyNames].filter(Boolean).join(" ");
+}
+
 function fieldContractMatchesQuery(item, query) {
   const words = normalizeSearch(query).split(" ").filter(Boolean);
   if (!words.length) return false;
-  const haystack = normalizeSearch(fieldContractSearchLabel(item));
+  const haystack = normalizeSearch(fieldContractSearchHaystack(item));
   return words.every((word) => haystack.includes(word));
 }
 
@@ -1164,7 +1932,7 @@ function renderFieldContractSuggestions() {
         <div class="suggestion-row">
           <div>
             <strong>${escapeHtml(item.nombre || item.campo || "Contrato sin referencia")}</strong>
-            <span>${escapeHtml([item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" / ") || "Sin partes cargadas")} · ${plainNumberValue(item.hectareas)} has.</span>
+            <span>${escapeHtml([item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" / ") || "Sin partes cargadas")} · ${plainNumberValue(item.hectareas)} has. · ${fieldContractPartyRowsFromContract(item).length} parte/s</span>
           </div>
           <button type="button" class="small-button" data-field-contract-pick="${escapeHtml(item.id)}">Elegir</button>
         </div>
@@ -1176,7 +1944,7 @@ function findFieldContractBySearch() {
   const query = normalizeSearch($("#field-contract-search")?.value || "");
   if (!query) return null;
   return (state.fieldContracts || []).find((item) => {
-    const label = normalizeSearch([item.nombre, item.arrendador, item.arrendatario, item.campo].filter(Boolean).join(" "));
+    const label = normalizeSearch(fieldContractSearchHaystack(item));
     const compactLabel = normalizeSearch([item.nombre, item.arrendador, item.campo].filter(Boolean).join(" - "));
     return label === query || compactLabel === query || label.includes(query) || compactLabel.includes(query);
   }) || null;
@@ -1207,6 +1975,9 @@ function currentFieldContractForCalculation() {
   if (
     payload.nombre || payload.arrendador || payload.campo || payload.hectareas
     || payload.facturadoValor || payload.facturadoTasa || payload.efectivoValor || payload.efectivoTasa
+    || (Array.isArray(payload.partes) && payload.partes.length)
+    || (Array.isArray(payload.lineas) && payload.lineas.length)
+    || (Array.isArray(payload.cuotas) && payload.cuotas.length)
   ) {
     state.activeFieldContract = payload;
     return payload;
@@ -1228,11 +1999,16 @@ function fieldContractPayloadForCalculation() {
   const hasVisibleRule = Boolean(
     visible.nombre || visible.arrendador || visible.campo || visible.hectareas
     || visible.facturadoValor || visible.facturadoTasa || visible.efectivoValor || visible.efectivoTasa
+    || (Array.isArray(visible.partes) && visible.partes.length)
+    || (Array.isArray(visible.lineas) && visible.lineas.length)
+    || (Array.isArray(visible.cuotas) && visible.cuotas.length)
   );
   if (!hasVisibleRule) return active;
+  const visibleRule = visible.reglaCalculo || active.reglaCalculo || "SIMPLE";
   return {
     ...active,
     ...visible,
+    reglaCalculo: visibleRule,
     hectareas: visible.hectareas || active.hectareas || 0,
     facturadoValor: visible.facturadoValor || active.facturadoValor || 0,
     facturadoTasa: visible.facturadoTasa || active.facturadoTasa || 0,
@@ -1241,7 +2017,10 @@ function fieldContractPayloadForCalculation() {
     facturadoBase: visible.facturadoBase || active.facturadoBase || "KG_SOJA",
     efectivoBase: visible.efectivoBase || active.efectivoBase || "MISMA_FACTURADA",
     facturadoModo: visible.facturadoModo || active.facturadoModo || "HECTAREAS",
-    efectivoModo: visible.efectivoModo || active.efectivoModo || "NINGUNO"
+    efectivoModo: visible.efectivoModo || active.efectivoModo || "NINGUNO",
+    partes: Array.isArray(visible.partes) && visible.partes.length ? visible.partes : (active.partes || []),
+    lineas: visibleRule === "SIMPLE" ? [] : (Array.isArray(visible.lineas) && visible.lineas.length ? visible.lineas : (active.lineas || [])),
+    cuotas: Array.isArray(visible.cuotas) && visible.cuotas.length ? visible.cuotas : (active.cuotas || [])
   };
 }
 
@@ -1250,6 +2029,9 @@ function syncFieldContractFormToActive() {
   if (
     payload.nombre || payload.arrendador || payload.campo || payload.hectareas
     || payload.facturadoValor || payload.facturadoTasa || payload.efectivoValor || payload.efectivoTasa
+    || (Array.isArray(payload.partes) && payload.partes.length)
+    || (Array.isArray(payload.lineas) && payload.lineas.length)
+    || (Array.isArray(payload.cuotas) && payload.cuotas.length)
   ) {
     state.activeFieldContract = payload;
   }
@@ -1271,6 +2053,8 @@ function fillFieldContractForm(item) {
   $("#field-contract-frequency").value = item.frecuencia || "MENSUAL";
   $("#field-contract-due-text").value = item.vencimientoHabitual || "";
   $("#field-contract-quote-criteria").value = item.criterioCotizacion || "";
+  const itemLineRows = Array.isArray(item.lineas) ? item.lineas.map(normalizeFieldContractLine) : [];
+  $("#field-contract-rule-type").value = item.reglaCalculo || (itemLineRows.length ? "MIXTA" : "SIMPLE");
   $("#field-contract-billed-mode").value = item.facturadoModo || "HECTAREAS";
   $("#field-contract-billed-value").value = item.facturadoValor || "";
   $("#field-contract-billed-base").value = item.facturadoBase || "KG_SOJA";
@@ -1280,18 +2064,37 @@ function fillFieldContractForm(item) {
   $("#field-contract-cash-base").value = item.efectivoBase || "MISMA_FACTURADA";
   $("#field-contract-cash-rate").value = item.efectivoTasa || "";
   $("#field-contract-notes").value = item.condiciones || "";
+  state.fieldContractPartyRows = Array.isArray(item.partes) ? item.partes.map(normalizeFieldContractParty) : [];
+  renderFieldContractPartyRows();
+  state.fieldContractLineRows = itemLineRows;
+  clearFieldContractLineInputs();
+  renderFieldContractLineRows();
+  state.fieldContractInstallmentRows = Array.isArray(item.cuotas) ? item.cuotas.map(normalizeFieldContractInstallment) : [];
+  clearFieldContractInstallmentInputs();
+  renderFieldContractInstallmentRows();
   updateFieldContractPdfSummary(item.id || "");
+  syncFieldContractRuleMode();
 }
 
 function resetFieldContractForm() {
   $("#field-contract-form")?.reset();
   state.activeFieldContract = null;
   $("#field-contract-id").value = "";
+  if ($("#field-contract-rule-type")) $("#field-contract-rule-type").value = "SIMPLE";
   $("#field-contract-pdf").value = "";
   $("#field-contract-suggestions").hidden = true;
   $("#field-contract-suggestions").innerHTML = "";
+  state.fieldContractPartyRows = [];
+  renderFieldContractPartyRows();
+  state.fieldContractLineRows = [];
+  clearFieldContractLineInputs();
+  renderFieldContractLineRows();
+  state.fieldContractInstallmentRows = [];
+  clearFieldContractInstallmentInputs();
+  renderFieldContractInstallmentRows();
   updateFieldContractPdfSummary("");
   setFieldContractMessage("");
+  syncFieldContractRuleMode();
 }
 
 function useFieldContractInCalculation(item = currentFieldContractForCalculation()) {
@@ -1307,13 +2110,15 @@ function useFieldContractInCalculation(item = currentFieldContractForCalculation
   $("#field-lease-farm").value = item.campo || "";
   const calculationDate = $("#field-lease-date")?.value || new Date().toISOString().slice(0, 10);
   $("#field-lease-date").value = calculationDate;
-  $("#field-lease-from").value = formatDateForInput(item.inicio);
-  $("#field-lease-to").value = formatDateForInput(item.fin);
+  $("#field-lease-from").value = formatDateForInput(fieldContractStartValue(item));
+  $("#field-lease-to").value = formatDateForInput(fieldContractEndValue(item));
   $("#field-lease-due-date").value = calculationDate;
   $("#field-lease-next-due").value = formatDateForInput(item.proximoVencimiento);
-  $("#field-lease-cereal").value = fieldContractProductLabel(item.facturadoBase) || "";
+  renderFieldLeaseInstallmentOptions("");
+  const firstLineBase = Array.isArray(item.lineas) && item.lineas.length ? item.lineas[0].base : "";
+  $("#field-lease-cereal").value = fieldContractProductLabel(firstLineBase || item.facturadoBase) || "";
   $("#field-lease-market").value = item.criterioCotizacion || "";
-  $("#field-lease-unit").value = item.facturadoBase === "IMPORTE_FIJO" || item.facturadoBase === "PESOS_HA" || item.facturadoBase === "DOLARES_HA" ? "FIJO" : "KG";
+  $("#field-lease-unit").value = fieldContractDefaultQuoteUnit(item.facturadoBase);
   $("#field-lease-notes").value = item.condiciones || "";
   updateFieldLeasePreview();
   const calc = fieldLeaseCurrentInput();
@@ -1329,10 +2134,19 @@ function useFieldContractInCalculation(item = currentFieldContractForCalculation
 function fieldContractProductLabel(base) {
   const key = String(base || "").toUpperCase();
   if (key.includes("SOJA")) return "Soja";
+  if (key.includes("TRIGO")) return "Trigo";
+  if (key.includes("CEREAL")) return "Cereal";
   if (key.includes("CARNE")) return "Carne";
   if (key.includes("DOLAR")) return "Dolar";
   if (key.includes("PESO")) return "Pesos";
   return "";
+}
+
+function fieldContractDefaultQuoteUnit(base) {
+  const key = String(base || "").toUpperCase();
+  if (key === "IMPORTE_FIJO" || key === "PESOS_HA" || key === "DOLARES_HA") return "FIJO";
+  if (key.includes("SOJA") || key.includes("CEREAL") || key.includes("MAIZ") || key.includes("TRIGO")) return "TN";
+  return "KG";
 }
 
 async function saveFieldContract(event) {
@@ -1364,7 +2178,7 @@ async function deleteFieldContract(id) {
   const item = (state.fieldContracts || []).find((row) => String(row.id) === String(id));
   if (!item) return;
   const label = item.nombre || item.campo || "este contrato";
-  if (!window.confirm(`Se eliminara ${label}. Los PDF asociados quedaran en Archivo documental. ¿Continuar?`)) return;
+  if (!window.confirm(`Se eliminará ${label}. Los PDF asociados quedarán en Archivo documental. ¿Continuar?`)) return;
   const saved = await fetchJson(`/api/campos/contratos/${encodeURIComponent(id)}`, { method: "DELETE" });
   state.fieldContracts = saved.items || [];
   if (String($("#field-contract-id")?.value || "") === String(id)) resetFieldContractForm();
@@ -1417,6 +2231,8 @@ function openFieldContractPdf(contractId = $("#field-contract-id")?.value || "")
 }
 
 function fieldLeaseCurrentInput() {
+  const leaseId = $("#field-lease-id")?.value || "";
+  const savedLease = leaseId ? (state.fieldLeases || []).find((item) => String(item.id) === String(leaseId)) || {} : {};
   const quoteAverage = fieldQuoteAverage();
   const manualPrice = parseMoneyInput($("#field-lease-price")?.value || 0);
   const price = quoteAverage || manualPrice;
@@ -1424,20 +2240,41 @@ function fieldLeaseCurrentInput() {
   const currencyType = $("#field-lease-currency")?.value || "ARS";
   const unit = $("#field-lease-unit")?.value || "KG";
   const priceInPesos = currencyType === "USD" ? price * exchange : price;
-  const contract = currentFieldContractForCalculation() || {};
-  const billed = calculateFieldContractComponent(contract, "FACTURADO", priceInPesos, unit);
-  const cash = calculateFieldContractComponent(contract, "EFECTIVO", priceInPesos, unit);
+  const rawContract = currentFieldContractForCalculation() || {};
+  const productQuotes = fieldLeaseProductQuoteOverridesFromInputs(rawContract);
+  state.fieldLeaseProductQuoteRows = productQuotes;
+  const lineQuotes = fieldLeaseLineQuoteOverridesFromInputs(rawContract);
+  const contract = applyFieldLeaseLineQuoteOverrides(rawContract, lineQuotes);
+  const frequency = contract.frecuencia || "MENSUAL";
+  const selectedInstallment = selectedFieldLeaseInstallment(contract);
+  const frequencyDivisor = selectedInstallment ? 1 : fieldLeaseFrequencyDivisor(frequency);
+  const billedAnnual = calculateFieldContractComponent(contract, "FACTURADO", priceInPesos, unit);
+  const cashAnnual = calculateFieldContractComponent(contract, "EFECTIVO", priceInPesos, unit);
+  const manualComponents = selectedInstallment
+    ? applyFieldLeaseManualInstallment(selectedInstallment, billedAnnual, cashAnnual)
+    : null;
+  const billed = manualComponents ? manualComponents.facturado : fieldLeaseComponentForInstallment(billedAnnual, frequencyDivisor);
+  const cash = manualComponents ? manualComponents.efectivo : fieldLeaseComponentForInstallment(cashAnnual, frequencyDivisor);
   const totalPesos = billed.total + cash.total;
   const commission = calculateFieldLeaseCommission(totalPesos, billed.total, cash.total);
+  const partes = fieldContractPartyRowsFromContract(contract);
+  const distribucionPartes = calculateFieldLeasePartyDistribution(partes, billed.total, cash.total, commission);
   return {
+    id: leaseId,
+    contratoId: rawContract.id || "",
     contrato: $("#field-lease-contract")?.value || "",
     cliente: $("#field-lease-client")?.value || "",
+    arrendatario: contract.arrendatario || savedLease.arrendatario || "",
     campo: $("#field-lease-farm")?.value || "",
     fecha: $("#field-lease-date")?.value || new Date().toISOString().slice(0, 10),
+    contratoDesde: contract.inicio || "",
+    contratoHasta: contract.fin || "",
     periodoDesde: $("#field-lease-from")?.value || "",
     periodoHasta: $("#field-lease-to")?.value || "",
-    vencimiento: $("#field-lease-due-date")?.value || "",
+    vencimiento: selectedInstallment?.vencimiento || $("#field-lease-due-date")?.value || "",
     proximoVencimiento: $("#field-lease-next-due")?.value || "",
+    cuotaManualId: selectedInstallment?.id || "",
+    cuotaManual: selectedInstallment || null,
     hectareas: parseMoneyInput(contract.hectareas || 0),
     cereal: $("#field-lease-cereal")?.value || "",
     mercado: $("#field-lease-market")?.value || "",
@@ -1445,18 +2282,36 @@ function fieldLeaseCurrentInput() {
     moneda: currencyType,
     cotizacion: price,
     tipoCambio: exchange,
-    frecuencia: contract.frecuencia || "",
+    frecuencia: frequency,
+    frecuenciaDivisor: frequencyDivisor,
     vencimientoHabitual: contract.vencimientoHabitual || "",
     criterioCotizacion: contract.criterioCotizacion || "",
     observaciones: $("#field-lease-notes")?.value || "",
     cotizaciones: state.fieldQuoteRows || [],
+    productQuotes,
+    lineQuotes,
+    pagos: state.fieldLeasePaymentRows || [],
+    ajustes: state.fieldLeaseAdjustmentRows || [],
+    partes,
+    distribucionPartes,
     cotizacionPesos: priceInPesos,
     facturadoDetalle: billed,
     efectivoDetalle: cash,
+    facturadoAnualDetalle: billedAnnual,
+    efectivoAnualDetalle: cashAnnual,
     facturadoTotal: billed.total,
     efectivoTotal: cash.total,
+    facturadoAnualTotal: billedAnnual.total,
+    efectivoAnualTotal: cashAnnual.total,
+    totalAnual: billedAnnual.total + cashAnnual.total,
     comisionBase: commission.base,
     comisionPorcentaje: commission.rate,
+    comisionBaseImporte: commission.baseAmount,
+    comisionGeneralImporte: commission.generalTotal,
+    comisionFacturadoPorcentaje: commission.billedRate,
+    comisionFacturadoImporte: commission.billedTotal,
+    comisionEfectivoPorcentaje: commission.cashRate,
+    comisionEfectivoImporte: commission.cashTotal,
     comisionImporte: commission.total,
     totalPesos,
     totalConComision: totalPesos + commission.total,
@@ -1464,18 +2319,204 @@ function fieldLeaseCurrentInput() {
   };
 }
 
+function selectedFieldLeaseInstallment(contract = currentFieldContractForCalculation() || {}) {
+  const selectedId = $("#field-lease-installment")?.value || "";
+  if (!selectedId) return null;
+  const rows = (Array.isArray(contract.cuotas) && contract.cuotas.length ? contract.cuotas : state.fieldContractInstallmentRows || [])
+    .map(normalizeFieldContractInstallment);
+  return rows.find((row) => String(row.id) === String(selectedId)) || null;
+}
+
+function scaleFieldLeaseComponent(component = {}, factor = 0, totalOverride = null) {
+  const baseTotal = Number(component.total || 0);
+  const total = totalOverride !== null ? Number(totalOverride || 0) : baseTotal * factor;
+  const lineScale = totalOverride !== null && baseTotal ? total / baseTotal : factor;
+  const quantityScale = totalOverride !== null && baseTotal ? lineScale : factor;
+  return {
+    ...component,
+    totalAnual: baseTotal,
+    total,
+    cantidad: Number(component.cantidad || 0) * quantityScale,
+    toneladas: Number(component.toneladas || 0) * quantityScale,
+    hectareas: Number(component.hectareas || 0) * quantityScale,
+    lineas: Array.isArray(component.lineas)
+      ? component.lineas.map((line) => ({
+          ...line,
+          totalAnual: Number(line.total || 0),
+          total: Number(line.total || 0) * lineScale,
+          cantidad: Number(line.cantidad || 0) * quantityScale,
+          toneladas: Number(line.toneladas || 0) * quantityScale,
+          hectareas: Number(line.hectareas || 0) * quantityScale
+        }))
+      : []
+  };
+}
+
+function fieldLeaseInstallmentQuantityAmount(installment = {}, component = {}) {
+  const quantity = parseMoneyInput(installment.cantidadFija || 0);
+  if (!quantity) return null;
+  const unit = String(installment.unidadCantidad || "KG").toUpperCase();
+  const total = Number(component.total || 0);
+  const kilograms = Number(component.cantidad || 0);
+  const tons = Number(component.toneladas || 0) || kilograms / 1000;
+  if (unit === "TN") {
+    const pricePerTon = tons ? total / tons : 0;
+    return pricePerTon ? quantity * pricePerTon : 0;
+  }
+  const pricePerKg = kilograms ? total / kilograms : (tons ? total / (tons * 1000) : 0);
+  return pricePerKg ? quantity * pricePerKg : 0;
+}
+
+function fieldLeaseInstallmentQuantityAmountForMixed(installment = {}, billedAnnual = {}, cashAnnual = {}) {
+  const quantity = parseMoneyInput(installment.cantidadFija || 0);
+  if (!quantity) return null;
+  const billedAmount = fieldLeaseInstallmentQuantityAmount(installment, billedAnnual);
+  if (billedAmount) return billedAmount;
+  const cashAmount = fieldLeaseInstallmentQuantityAmount(installment, cashAnnual);
+  return cashAmount || 0;
+}
+
+function applyFieldLeaseManualInstallment(installment, billedAnnual, cashAnnual) {
+  const type = String(installment?.tipo || "FACTURADO").toUpperCase();
+  const percent = parseMoneyInput(installment?.porcentaje || 0);
+  const fixedAmount = parseMoneyInput(installment?.importeFijo || 0);
+  const hasQuantity = !!parseMoneyInput(installment?.cantidadFija || 0);
+  const factor = percent ? percent / 100 : (!fixedAmount && !hasQuantity ? 1 : 0);
+  const emptyBilled = scaleFieldLeaseComponent(billedAnnual, 0, 0);
+  const emptyCash = scaleFieldLeaseComponent(cashAnnual, 0, 0);
+  if (type === "INFORMATIVA") return { facturado: emptyBilled, efectivo: emptyCash };
+  if (type === "EFECTIVO") {
+    const quantityAmount = fieldLeaseInstallmentQuantityAmount(installment, cashAnnual);
+    return {
+      facturado: emptyBilled,
+      efectivo: scaleFieldLeaseComponent(cashAnnual, factor, fixedAmount || quantityAmount || null)
+    };
+  }
+  if (type === "MIXTA") {
+    const quantityAmount = fieldLeaseInstallmentQuantityAmountForMixed(installment, billedAnnual, cashAnnual);
+    const manualAmount = fixedAmount || quantityAmount || 0;
+    if (manualAmount) {
+      const billedBase = Number(billedAnnual.total || 0);
+      const cashBase = Number(cashAnnual.total || 0);
+      const totalBase = billedBase + cashBase;
+      const billedShare = totalBase ? billedBase / totalBase : 0.5;
+      return {
+        facturado: scaleFieldLeaseComponent(billedAnnual, factor, manualAmount * billedShare),
+        efectivo: scaleFieldLeaseComponent(cashAnnual, factor, manualAmount * (1 - billedShare))
+      };
+    }
+    return {
+      facturado: scaleFieldLeaseComponent(billedAnnual, factor),
+      efectivo: scaleFieldLeaseComponent(cashAnnual, factor)
+    };
+  }
+  const quantityAmount = fieldLeaseInstallmentQuantityAmount(installment, billedAnnual);
+  return {
+    facturado: scaleFieldLeaseComponent(billedAnnual, factor, fixedAmount || quantityAmount || null),
+    efectivo: emptyCash
+  };
+}
+
+function fieldLeaseFrequencyDivisor(frequency) {
+  const key = String(frequency || "").toUpperCase();
+  if (key === "MENSUAL") return 12;
+  if (key === "TRIMESTRAL") return 4;
+  if (key === "CUATRIMESTRAL") return 3;
+  if (key === "SEMESTRAL") return 2;
+  return 1;
+}
+
+function fieldLeaseComponentForInstallment(component, divisor) {
+  const safeDivisor = Math.max(Number(divisor || 1), 1);
+  const factor = 1 / safeDivisor;
+  return {
+    ...component,
+    totalAnual: Number(component?.total || 0),
+    total: Number(component?.total || 0) * factor,
+    cantidad: Number(component?.cantidad || 0) * factor,
+    toneladas: Number(component?.toneladas || 0) * factor,
+    hectareas: Number(component?.hectareas || 0),
+    lineas: Array.isArray(component?.lineas)
+      ? component.lineas.map((line) => ({
+          ...line,
+          totalAnual: Number(line.total || 0),
+          total: Number(line.total || 0) * factor,
+          cantidad: Number(line.cantidad || 0) * factor,
+          toneladas: Number(line.toneladas || 0) * factor
+        }))
+      : []
+  };
+}
+
 function calculateFieldLeaseCommission(total, billed, cash) {
   const base = $("#field-lease-commission-base")?.value || "NINGUNA";
   const rate = parseMoneyInput($("#field-lease-commission-rate")?.value || 0);
+  const billedRate = parseMoneyInput($("#field-lease-commission-billed-rate")?.value || 0);
+  const cashRate = parseMoneyInput($("#field-lease-commission-cash-rate")?.value || 0);
   let baseAmount = 0;
   if (base === "TOTAL") baseAmount = Number(total || 0);
   if (base === "FACTURADO") baseAmount = Number(billed || 0);
   if (base === "EFECTIVO") baseAmount = Number(cash || 0);
-  const commissionTotal = base === "NINGUNA" ? 0 : baseAmount * rate / 100;
-  return { base, rate, baseAmount, total: commissionTotal };
+  const generalTotal = base === "NINGUNA" ? 0 : baseAmount * rate / 100;
+  const billedTotal = Number(billed || 0) * billedRate / 100;
+  const cashTotal = Number(cash || 0) * cashRate / 100;
+  const commissionTotal = generalTotal + billedTotal + cashTotal;
+  return { base, rate, baseAmount, generalTotal, billedRate, billedTotal, cashRate, cashTotal, total: commissionTotal };
+}
+
+function fieldLeaseCommissionParts(commission = 0) {
+  if (commission && typeof commission === "object") {
+    const general = Number(commission.generalTotal || 0);
+    const billed = Number(commission.billedTotal || 0);
+    const cash = Number(commission.cashTotal || 0);
+    return {
+      general,
+      billed,
+      cash,
+      total: Number(commission.total || 0) || general + billed + cash
+    };
+  }
+  return { general: Number(commission || 0), billed: 0, cash: 0, total: Number(commission || 0) };
+}
+
+function calculateFieldLeasePartyDistribution(partes = [], billedTotal = 0, cashTotal = 0, commission = 0) {
+  const rows = (partes || []).map(normalizeFieldContractParty).filter((row) => row.nombre || row.porcentaje);
+  const totals = fieldContractPartyTotals(rows);
+  const commissionParts = fieldLeaseCommissionParts(commission);
+  return rows.map((row) => {
+    const type = String(row.tipo || "").toUpperCase();
+    const typeTotal = type === "ARRENDATARIO" ? totals.arrendatarios : totals.arrendadores;
+    const percent = parseMoneyInput(row.porcentaje || 0);
+    const factor = typeTotal > 0 ? percent / typeTotal : percent / 100;
+    const facturado = Number(billedTotal || 0) * factor;
+    const efectivo = Number(cashTotal || 0) * factor;
+    const comisionGeneral = commissionParts.general * factor;
+    const comisionFacturado = commissionParts.billed * factor;
+    const comisionEfectivo = commissionParts.cash * factor;
+    const comision = comisionGeneral + comisionFacturado + comisionEfectivo;
+    const totalCuota = facturado + efectivo;
+    const netoInformado = type === "ARRENDATARIO" ? totalCuota + comision : totalCuota - comision;
+    return {
+      ...row,
+      porcentajeNormalizado: factor * 100,
+      facturado,
+      efectivo,
+      totalCuota,
+      comisionGeneral,
+      comisionFacturado,
+      comisionEfectivo,
+      comision,
+      netoInformado,
+      totalConComision: netoInformado
+    };
+  });
 }
 
 function calculateFieldContractComponent(contract, type, priceInPesos, unit) {
+  const mixedLines = Array.isArray(contract.lineas)
+    ? contract.lineas.map(normalizeFieldContractLine).filter((row) => row.hectareas || row.tasa)
+    : [];
+  if (mixedLines.length) return calculateFieldContractMixedLines(mixedLines, type, priceInPesos);
   const totalHectares = parseMoneyInput(contract.hectareas || 0);
   const prefix = type === "EFECTIVO" ? "efectivo" : "facturado";
   const mode = String(contract[`${prefix}Modo`] || (type === "EFECTIVO" ? "NINGUNO" : "HECTAREAS")).toUpperCase();
@@ -1492,12 +2533,252 @@ function calculateFieldContractComponent(contract, type, priceInPesos, unit) {
   }
   if (base === "PESOS_HA" || base === "DOLARES_HA") {
     const total = hectares * rate * (base === "DOLARES_HA" ? parseMoneyInput($("#field-lease-exchange")?.value || 0) : 1);
-    return { tipo: type, modo: mode, hectareas, tasa: rate, base, cantidad: hectares, total };
+    return { tipo: type, modo: mode, hectareas: hectares, tasa: rate, base, cantidad: hectares, total };
   }
   const kg = hectares * rate;
   const tn = kg / 1000;
-  const total = unit === "TN" ? tn * priceInPesos : kg * priceInPesos;
-  return { tipo: type, modo: mode, hectareas, tasa: rate, base, cantidad: kg, toneladas: tn, total };
+  const cerealBase = base.includes("SOJA") || base.includes("CEREAL") || base.includes("MAIZ") || base.includes("TRIGO");
+  const quotedByTon = unit === "TN" || cerealBase;
+  const total = quotedByTon ? tn * priceInPesos : kg * priceInPesos;
+  return { tipo: type, modo: mode, hectareas: hectares, tasa: rate, base, cantidad: kg, toneladas: tn, unidadCalculo: quotedByTon ? "TN" : "KG", total };
+}
+
+function fieldContractLineAppliesToType(line, type) {
+  const applies = String(line.aplicaA || "FACTURADO").toUpperCase();
+  return applies === "AMBAS" || applies === type;
+}
+
+function fieldLeaseLineQuoteSignature(contract = {}) {
+  const rows = Array.isArray(contract.lineas) ? contract.lineas.map(normalizeFieldContractLine) : [];
+  return rows.map((row) => `${row.id}:${row.aplicaA}:${row.detalle}:${row.base}:${row.hectareas}:${row.tasa}`).join("|");
+}
+
+function fieldContractLineProductKey(base = "") {
+  const key = String(base || "").toUpperCase();
+  if (key.includes("CARNE")) return "CARNE";
+  if (key.includes("SOJA")) return "SOJA";
+  if (key.includes("TRIGO")) return "TRIGO";
+  if (key.includes("MAIZ")) return "MAIZ";
+  if (key.includes("CEREAL")) return "CEREAL";
+  if (key.includes("DOLAR")) return "DOLAR";
+  if (key.includes("PESO")) return "PESOS";
+  if (key.includes("FIJO")) return "FIJO";
+  return key || "GENERAL";
+}
+
+function fieldContractLineProductLabel(value = "") {
+  const key = fieldContractLineProductKey(value);
+  if (key === "CARNE") return "Carne";
+  if (key === "SOJA") return "Soja";
+  if (key === "TRIGO") return "Trigo";
+  if (key === "MAIZ") return "Maiz";
+  if (key === "CEREAL") return "Cereal";
+  if (key === "DOLAR") return "Dolar";
+  if (key === "PESOS") return "Pesos";
+  if (key === "FIJO") return "Importe fijo";
+  return key;
+}
+
+function fieldLeaseDefaultQuoteUnitForProduct(product = "") {
+  const key = fieldContractLineProductKey(product);
+  if (key === "SOJA" || key === "TRIGO" || key === "MAIZ" || key === "CEREAL") return "TN";
+  return "KG";
+}
+
+function fieldLeaseProductQuoteRowsFromContract(contract = {}) {
+  const saved = new Map((state.fieldLeaseProductQuoteRows || []).map((row) => [String(row.producto), row]));
+  const quoteAverages = fieldQuoteAverageByProduct();
+  const lines = Array.isArray(contract.lineas) ? contract.lineas.map(normalizeFieldContractLine) : [];
+  const groups = new Map();
+  lines.forEach((line) => {
+    const product = fieldContractLineProductKey(line.base);
+    const savedRow = saved.get(product) || {};
+    const savedQuote = parseMoneyInput(savedRow.cotizacion || 0);
+    const savedManual = Boolean(savedRow.manual);
+    if (product === "FIJO" || product === "PESOS") return;
+    const productAverage = parseMoneyInput(quoteAverages.get(product) || 0);
+    const existing = groups.get(product) || {
+      producto: product,
+      etiqueta: fieldContractLineProductLabel(product),
+      lineas: 0,
+      unidad: savedRow.unidad || fieldLeaseDefaultQuoteUnitForProduct(product),
+      manual: savedManual,
+      cotizacion: savedManual ? savedQuote : (productAverage || savedQuote || 0)
+    };
+    existing.lineas += 1;
+    groups.set(product, existing);
+  });
+  return Array.from(groups.values());
+}
+
+function fieldLeaseProductQuoteOverridesFromInputs(contract = {}) {
+  return fieldLeaseProductQuoteRowsFromContract(contract).map((row) => {
+    const input = $all("[data-field-product-quote]").find((node) => String(node.dataset.fieldProductQuote) === String(row.producto));
+    const unitInput = $all("[data-field-product-quote-unit]").find((node) => String(node.dataset.fieldProductQuoteUnit) === String(row.producto));
+    const inputQuote = input ? parseMoneyInput(input.value || 0) : 0;
+    const manualQuote = fieldLeaseManualProductQuoteKeys.has(String(row.producto));
+    return {
+      ...row,
+      unidad: unitInput ? unitInput.value : (row.unidad || fieldLeaseDefaultQuoteUnitForProduct(row.producto)),
+      manual: manualQuote,
+      cotizacion: manualQuote && inputQuote ? inputQuote : parseMoneyInput(row.cotizacion || 0)
+    };
+  });
+}
+
+function fieldLeaseProductQuoteByKey(rows = []) {
+  return new Map((rows || []).map((row) => [String(row.producto), parseMoneyInput(row.cotizacion || 0)]));
+}
+
+function fieldLeaseProductQuoteUnitByKey(rows = []) {
+  return new Map((rows || []).map((row) => [String(row.producto), row.unidad || fieldLeaseDefaultQuoteUnitForProduct(row.producto)]));
+}
+
+function fieldLeaseLineQuoteRowsFromContract(contract = {}) {
+  const saved = new Map((state.fieldLeaseLineQuoteRows || []).map((row) => [String(row.id), row]));
+  const productRows = fieldLeaseProductQuoteOverridesFromInputs(contract);
+  const productQuotes = fieldLeaseProductQuoteByKey(productRows);
+  const productUnits = fieldLeaseProductQuoteUnitByKey(productRows);
+  return (Array.isArray(contract.lineas) ? contract.lineas.map(normalizeFieldContractLine) : []).map((line) => {
+    const existing = saved.get(String(line.id)) || {};
+    const product = fieldContractLineProductKey(line.base);
+    return {
+      id: line.id,
+      aplicaA: line.aplicaA,
+      detalle: line.detalle,
+      base: line.base,
+      tasa: line.tasa,
+      producto: product,
+      unidad: existing.unidad || productUnits.get(product) || fieldLeaseDefaultQuoteUnitForProduct(product),
+      cotizacion: parseMoneyInput(productQuotes.get(product) || existing.cotizacion || line.cotizacion || 0)
+    };
+  });
+}
+
+function fieldLeaseLineQuoteOverridesFromInputs(contract = {}) {
+  const rows = fieldLeaseLineQuoteRowsFromContract(contract);
+  return rows.map((row) => {
+    const input = $all("[data-field-line-quote]").find((node) => String(node.dataset.fieldLineQuote) === String(row.id));
+    return {
+      ...row,
+      cotizacion: input ? parseMoneyInput(input.value || 0) : parseMoneyInput(row.cotizacion || 0)
+    };
+  });
+}
+
+function renderFieldLeaseLineQuoteRows(contract = currentFieldContractForCalculation() || {}, force = false) {
+  const panel = $("#field-line-quotes-panel");
+  const body = $("#field-line-quote-body");
+  const productBody = $("#field-product-quote-body");
+  if (!panel || !body || !productBody) return;
+  const productRows = fieldLeaseProductQuoteOverridesFromInputs(contract);
+  state.fieldLeaseProductQuoteRows = productRows;
+  const rows = fieldLeaseLineQuoteRowsFromContract(contract);
+  const signature = `${fieldLeaseLineQuoteSignature(contract)}||${productRows.map((row) => `${row.producto}:${row.cotizacion}:${row.unidad}`).join("|")}`;
+  panel.hidden = !rows.length;
+  if (!rows.length) {
+    body.innerHTML = "";
+    productBody.innerHTML = "";
+    body.dataset.signature = "";
+    return;
+  }
+  if (!force && body.dataset.signature === signature) return;
+  body.dataset.signature = signature;
+  productBody.innerHTML = productRows.length
+    ? productRows.map((row) => `<tr>
+      <td>${escapeHtml(row.etiqueta || row.producto)}</td>
+      <td>${plainNumberValue(row.lineas || 0)}</td>
+      <td><input class="money-input field-product-quote-input" data-field-product-quote="${escapeHtml(row.producto)}" inputmode="decimal" value="${row.cotizacion ? moneyValue(row.cotizacion) : ""}" placeholder="Usa promedio general"></td>
+      <td><select data-field-product-quote-unit="${escapeHtml(row.producto)}"><option value="KG"${row.unidad === "KG" ? " selected" : ""}>Por kg</option><option value="TN"${row.unidad === "TN" ? " selected" : ""}>Por tonelada</option></select></td>
+    </tr>`).join("")
+    : `<tr><td colspan="4">Sin productos que requieran cotizacion diferenciada.</td></tr>`;
+  body.innerHTML = rows.map((row) => `<tr>
+    <td>${escapeHtml(fieldContractLineAppliesLabel(row.aplicaA))}</td>
+    <td>${escapeHtml(row.detalle || "-")}</td>
+    <td>${escapeHtml(fieldContractBaseLabel(row.base))}</td>
+    <td>${plainNumberValue(row.tasa || 0)}</td>
+    <td class="amount">${row.cotizacion ? moneyValue(row.cotizacion) : "Promedio general"}</td>
+  </tr>`).join("");
+}
+
+function applyFieldLeaseLineQuoteOverrides(contract = {}, quoteRows = []) {
+  if (!contract || !Array.isArray(contract.lineas) || !contract.lineas.length) return contract || {};
+  const quoteById = new Map((quoteRows || []).map((row) => [String(row.id), parseMoneyInput(row.cotizacion || 0)]));
+  const productQuotes = fieldLeaseProductQuoteByKey(state.fieldLeaseProductQuoteRows || []);
+  const productUnits = fieldLeaseProductQuoteUnitByKey(state.fieldLeaseProductQuoteRows || []);
+  return {
+    ...contract,
+    lineas: contract.lineas.map((line) => {
+      const normalized = normalizeFieldContractLine(line);
+      const product = fieldContractLineProductKey(normalized.base);
+      const quote = quoteById.get(String(normalized.id)) || productQuotes.get(product);
+      return {
+        ...normalized,
+        cotizacionUnidad: productUnits.get(product) || fieldLeaseDefaultQuoteUnitForProduct(product),
+        cotizacion: quote || normalized.cotizacion || 0
+      };
+    })
+  };
+}
+
+function calculateFieldContractLine(line, priceInPesos) {
+  const base = String(line.base || "KG_CARNE").toUpperCase();
+  const hectares = parseMoneyInput(line.hectareas || 0);
+  const rate = parseMoneyInput(line.tasa || 0);
+  const ownPrice = parseMoneyInput(line.cotizacion || 0);
+  const price = ownPrice || Number(priceInPesos || 0);
+  if (base === "IMPORTE_FIJO") {
+    return {
+      ...line,
+      cantidad: 1,
+      toneladas: 0,
+      cotizacionAplicada: 1,
+      total: rate
+    };
+  }
+  if (base === "PESOS_HA" || base === "DOLARES_HA") {
+    const exchange = parseMoneyInput($("#field-lease-exchange")?.value || 0);
+    const total = hectares * rate * (base === "DOLARES_HA" ? exchange : 1);
+    return {
+      ...line,
+      cantidad: hectares,
+      toneladas: 0,
+      cotizacionAplicada: base === "DOLARES_HA" ? exchange : 1,
+      total
+    };
+  }
+  const kg = hectares * rate;
+  const toneladas = kg / 1000;
+  const cerealBase = base.includes("SOJA") || base.includes("TRIGO") || base.includes("CEREAL") || base.includes("MAIZ");
+  const quoteUnit = String(line.cotizacionUnidad || (cerealBase ? "TN" : "KG")).toUpperCase();
+  const quotedByTon = quoteUnit === "TN";
+  const total = quotedByTon ? toneladas * price : kg * price;
+  return {
+    ...line,
+    cantidad: kg,
+    toneladas,
+    cotizacionAplicada: price,
+    unidadCalculo: quotedByTon ? "TN" : "KG",
+    total
+  };
+}
+
+function calculateFieldContractMixedLines(lines, type, priceInPesos) {
+  const calculatedLines = lines
+    .filter((line) => fieldContractLineAppliesToType(line, type))
+    .map((line) => calculateFieldContractLine(line, priceInPesos));
+  const total = calculatedLines.reduce((sum, line) => sum + Number(line.total || 0), 0);
+  return {
+    tipo: type,
+    modo: "LINEAS_MIXTAS",
+    hectareas: calculatedLines.reduce((sum, line) => sum + Number(line.hectareas || 0), 0),
+    tasa: 0,
+    base: "LINEAS_MIXTAS",
+    cantidad: calculatedLines.reduce((sum, line) => sum + Number(line.cantidad || 0), 0),
+    toneladas: calculatedLines.reduce((sum, line) => sum + Number(line.toneladas || 0), 0),
+    total,
+    lineas: calculatedLines
+  };
 }
 
 function fieldQuoteAverage() {
@@ -1508,6 +2789,34 @@ function fieldQuoteAverage() {
     .filter((value) => value > 0);
   if (!values.length) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function isFieldQuoteWithoutPrice(row = {}) {
+  if (row.sinCotizacion) return true;
+  const raw = String(row.cotizacionTexto || row.cotizacion || "").trim().toLowerCase();
+  return /s\/?\s*cotiz|sin\s+cotiz/.test(raw);
+}
+
+function fieldQuoteDisplayValue(row = {}) {
+  if (isFieldQuoteWithoutPrice(row)) return "s/cotizacion";
+  const value = parseMoneyInput(row.cotizacion || 0);
+  return value ? moneyValue(value) : "-";
+}
+
+function fieldQuoteAverageByProduct() {
+  const grouped = new Map();
+  (state.fieldQuoteRows || []).forEach((item) => {
+    const value = parseMoneyInput(item.cotizacion || 0);
+    if (!value) return;
+    const product = fieldContractLineProductKey(item.producto || "");
+    if (!grouped.has(product)) grouped.set(product, []);
+    grouped.get(product).push(value);
+  });
+  const averages = new Map();
+  grouped.forEach((values, product) => {
+    averages.set(product, values.reduce((sum, value) => sum + value, 0) / values.length);
+  });
+  return averages;
 }
 
 function syncFieldQuoteAverageToPrice() {
@@ -1529,31 +2838,75 @@ function renderFieldQuoteRows() {
         <td>${escapeHtml(item.fecha || "-")}</td>
         <td>${escapeHtml(item.mercado || "-")}</td>
         <td>${escapeHtml(item.producto || "-")}</td>
-        <td>${moneyValue(item.cotizacion)}</td>
-        <td><button type="button" class="small-button danger-button" data-field-quote-remove="${escapeHtml(item.id)}">Quitar</button></td>
+        <td>${escapeHtml(fieldQuoteDisplayValue(item))}</td>
+        <td><button type="button" class="small-button" data-field-quote-edit="${escapeHtml(item.id)}">Modificar</button> <button type="button" class="small-button danger-button" data-field-quote-remove="${escapeHtml(item.id)}">Quitar</button></td>
       </tr>`).join("")
     : `<tr><td colspan="5">Sin cotizaciones cargadas para promedio.</td></tr>`;
+  if ($("#field-quote-add")) {
+    $("#field-quote-add").textContent = state.editingFieldQuoteId ? "Guardar cambio" : "Agregar cotizacion";
+  }
+  if ($("#field-quote-cancel")) {
+    $("#field-quote-cancel").hidden = !state.editingFieldQuoteId;
+  }
+}
+
+function clearFieldQuoteInputs() {
+  state.editingFieldQuoteId = "";
+  if ($("#field-quote-date")) $("#field-quote-date").value = "";
+  if ($("#field-quote-market")) $("#field-quote-market").value = "";
+  if ($("#field-quote-product")) $("#field-quote-product").value = "";
+  if ($("#field-quote-price")) $("#field-quote-price").value = "";
+  if ($("#field-quote-add")) $("#field-quote-add").textContent = "Agregar cotizacion";
+  if ($("#field-quote-cancel")) $("#field-quote-cancel").hidden = true;
+}
+
+function editFieldQuoteRow(quoteId) {
+  const row = (state.fieldQuoteRows || []).find((item) => String(item.id) === String(quoteId));
+  if (!row) return;
+  state.editingFieldQuoteId = row.id;
+  $("#field-quote-date").value = formatDateForInput(row.fecha);
+  $("#field-quote-market").value = row.mercado || "";
+  $("#field-quote-product").value = row.producto || "";
+  if (isFieldQuoteWithoutPrice(row)) $("#field-quote-price").value = "s/cotizacion";
+  else setMoneyInput("#field-quote-price", row.cotizacion || 0);
+  renderFieldQuoteRows();
+  $("#field-quote-date")?.focus();
 }
 
 function addFieldQuoteRow() {
-  const cotizacion = parseMoneyInput($("#field-quote-price")?.value || 0);
-  if (!cotizacion) return;
-  state.fieldQuoteRows.push({
-    id: `COT-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  const rawQuote = String($("#field-quote-price")?.value || "").trim();
+  const withoutQuote = !rawQuote || /s\/?\s*cotiz|sin\s+cotiz/i.test(rawQuote);
+  const cotizacion = withoutQuote ? 0 : parseMoneyInput(rawQuote);
+  if (!cotizacion && !withoutQuote) return;
+  const nextQuote = {
+    id: state.editingFieldQuoteId || `COT-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     fecha: $("#field-quote-date")?.value || "",
     mercado: $("#field-quote-market")?.value || $("#field-lease-market")?.value || "",
     producto: $("#field-quote-product")?.value || $("#field-lease-cereal")?.value || "",
-    cotizacion
-  });
-  $("#field-quote-price").value = "";
+    cotizacion,
+    cotizacionTexto: withoutQuote ? "s/cotizacion" : "",
+    sinCotizacion: withoutQuote
+  };
+  const wasEditing = !!state.editingFieldQuoteId;
+  if (wasEditing) {
+    state.fieldQuoteRows = (state.fieldQuoteRows || []).map((item) => String(item.id) === String(state.editingFieldQuoteId) ? nextQuote : item);
+  } else {
+    state.fieldQuoteRows.push(nextQuote);
+  }
+  if (wasEditing) clearFieldQuoteInputs();
+  else $("#field-quote-price").value = "";
   renderFieldQuoteRows();
   syncFieldQuoteAverageToPrice();
   updateFieldLeasePreview();
+  setFieldLeaseMessage(wasEditing
+    ? "Cotizacion modificada. Guarde el calculo para conservar el cambio."
+    : "Cotizacion agregada. Guarde el calculo para conservarla.", "ok");
 }
 
 function fieldLeaseFrequencyDays(frequency) {
   const key = String(frequency || "").toUpperCase();
   if (key === "TRIMESTRAL") return 90;
+  if (key === "CUATRIMESTRAL") return 120;
   if (key === "SEMESTRAL") return 180;
   if (key === "ANUAL") return 365;
   return 30;
@@ -1572,6 +2925,7 @@ function buildFieldLeaseInstallments({ fecha, cuotas, frecuencia, importeCuota }
 
 function updateFieldLeasePreview() {
   if (!$("#field-lease-total")) return;
+  renderFieldLeaseLineQuoteRows(currentFieldContractForCalculation() || {});
   const calc = fieldLeaseCurrentInput();
   const setPreview = (selector, value) => {
     const node = $(selector);
@@ -1583,11 +2937,114 @@ function updateFieldLeasePreview() {
   setPreview("#field-lease-total", moneyValue(calc.totalPesos));
   setPreview("#field-lease-commission-total", moneyValue(calc.comisionImporte));
   setPreview("#field-lease-grand-total", moneyValue(calc.totalConComision));
-  setPreview("#field-lease-due-preview", calc.vencimiento ? formatDateForDisplay(calc.vencimiento) : "-");
+  setPreview("#field-lease-due-preview", calc.vencimiento ? formatDisplayDate(calc.vencimiento) : "-");
+  renderFieldLeasePartyDistributionRows(calc.distribucionPartes || []);
+  renderFieldLeasePartyReceiptRows(calc.distribucionPartes || []);
+  renderFieldLeaseMiniLedgerRows(calc.distribucionPartes || []);
+  renderFieldLeasePaymentPresetRows(calc);
+  renderFieldLeasePaymentRows(calc.totalConComision);
+  renderFieldLeaseAdjustmentRows();
   const messageNode = $("#field-lease-message");
   if (messageNode && calc.totalPesos && /Falta|promedio esta cargado/i.test(messageNode.textContent || "")) {
     setFieldLeaseMessage("");
   }
+}
+
+function renderFieldLeasePartyDistributionRows(rows = []) {
+  const body = $("#field-lease-party-distribution-body");
+  if (!body) return;
+  body.innerHTML = rows.length
+    ? rows.map((row) => `<tr>
+        <td>${escapeHtml(fieldContractPartyTypeLabel(row.tipo))}</td>
+        <td>${escapeHtml(row.nombre || "-")}</td>
+        <td>${plainNumberValue(row.porcentaje || 0)}%</td>
+        <td class="amount">${moneyValue(row.facturado || 0)}</td>
+        <td class="amount">${moneyValue(row.efectivo || 0)}</td>
+        <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
+        <td class="amount">${moneyValue(row.comision || 0)}</td>
+        <td class="amount">${moneyValue(row.netoInformado ?? row.totalConComision ?? row.totalCuota ?? 0)}<br><button type="button" class="small-button" data-field-party-receipt="${escapeHtml(fieldLeasePartyRowKey(row))}">Recibo</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="8">Sin distribucion especial. Se usaran las partes principales del contrato.</td></tr>`;
+}
+
+function renderFieldLeasePartyReceiptRows(rows = []) {
+  const body = $("#field-party-receipts-body");
+  if (!body) return;
+  const summary = $("#field-party-receipts-summary");
+  const receiptRows = (rows || []).filter((row) => row.nombre || Number(row.totalCuota || 0) || Number(row.netoInformado || 0));
+  if (summary) {
+    const landlords = receiptRows.filter((row) => String(row.tipo || "").toUpperCase() === "ARRENDADOR").length;
+    const tenants = receiptRows.filter((row) => String(row.tipo || "").toUpperCase() === "ARRENDATARIO").length;
+    summary.textContent = receiptRows.length
+      ? `${landlords} arrendador/es - ${tenants} arrendatario/s`
+      : "Sin partes para recibo individual";
+  }
+  body.innerHTML = receiptRows.length
+    ? receiptRows.map((row) => {
+        const result = fieldLeaseMiniLedgerNet(row);
+        const role = String(row.tipo || "").toUpperCase() === "ARRENDATARIO" ? "Arrendatario" : "Arrendador";
+        return `<tr>
+          <td>${escapeHtml(role)}</td>
+          <td>${escapeHtml(row.nombre || "-")}</td>
+          <td>${plainNumberValue(row.porcentaje || 0)}%</td>
+          <td class="amount">${moneyValue(row.facturado || 0)}</td>
+          <td class="amount">${moneyValue(row.efectivo || 0)}</td>
+          <td class="amount">${moneyValue(row.comision || 0)}</td>
+          <td class="amount">${moneyValue(result.neto)}</td>
+          <td><button type="button" class="small-button" data-field-party-receipt="${escapeHtml(fieldLeasePartyRowKey(row))}">Recibo individual</button></td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="8">Sin partes cargadas para generar recibos individuales.</td></tr>`;
+}
+
+function fieldLeasePartyRowKey(row = {}) {
+  return [
+    String(row.tipo || "").toUpperCase(),
+    String(row.nombre || "").trim().toUpperCase(),
+    String(row.cuit || "").replace(/[^\d]/g, "")
+  ].join("|");
+}
+
+function fieldLeaseMiniLedgerNet(row = {}) {
+  const role = String(row.tipo || "").toUpperCase();
+  const base = Number(row.totalCuota || 0);
+  const commission = Number(row.comision || 0);
+  if (role === "ARRENDATARIO") {
+    return {
+      criterio: commission ? "Comision sumada" : "Sin comision",
+      neto: base + commission
+    };
+  }
+  return {
+    criterio: commission ? "Comision descontada" : "Sin comision",
+    neto: base - commission
+  };
+}
+
+function fieldLeaseAppliedAmountForBalance(totals = {}, role = "ARRENDADOR") {
+  const normalizedRole = String(role || "").toUpperCase();
+  const paid = Number(totals.pagado || 0) + Number(totals.pagos || 0) + Number(totals.facturado || 0) + Number(totals.efectivo || 0);
+  const commission = Number(totals.comision || 0);
+  if (normalizedRole === "ARRENDADOR") return paid - commission;
+  return paid + commission;
+}
+
+function renderFieldLeaseMiniLedgerRows(rows = []) {
+  const body = $("#field-lease-mini-ledger-body");
+  if (!body) return;
+  body.innerHTML = rows.length
+    ? rows.map((row) => {
+        const result = fieldLeaseMiniLedgerNet(row);
+        return `<tr${String(row.tipo || "").toUpperCase() === "ARRENDADOR" ? ' class="cash-row-soft"' : ""}>
+          <td>${escapeHtml(row.nombre || "-")}</td>
+          <td>${escapeHtml(fieldContractPartyTypeLabel(row.tipo))}</td>
+          <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
+          <td class="amount">${moneyValue(row.comision || 0)}</td>
+          <td>${escapeHtml(result.criterio)}</td>
+          <td class="amount">${moneyValue(result.neto)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="6">Sin cuenta minima calculada. Cargue/seleccione un contrato.</td></tr>`;
 }
 
 function fieldLeaseMissingRuleMessage(payload) {
@@ -1602,13 +3059,694 @@ function fieldLeaseMissingRuleMessage(payload) {
 
 function resetFieldLeaseForm() {
   $("#field-lease-form")?.reset();
+  if ($("#field-lease-id")) $("#field-lease-id").value = "";
   const today = new Date().toISOString().slice(0, 10);
   $("#field-lease-date").value = today;
   $("#field-lease-due-date").value = today;
+  if ($("#field-payment-date")) $("#field-payment-date").value = today;
   $("#field-lease-currency").value = "ARS";
   $("#field-lease-unit").value = "KG";
+  if ($("#field-payment-commission-mode")) $("#field-payment-commission-mode").value = "NO_APLICA";
+  if ($("#field-payment-commission-bucket")) $("#field-payment-commission-bucket").value = "GENERAL";
+  if ($("#field-payment-commission-party")) $("#field-payment-commission-party").value = "ARRENDATARIO";
+  if ($("#field-payment-commission-status")) $("#field-payment-commission-status").value = "PENDIENTE";
+  if ($("#field-payment-party-simple")) $("#field-payment-party-simple").value = "ARRENDADOR";
+  if ($("#field-payment-concept-simple")) $("#field-payment-concept-simple").value = "PAGO_CUOTA";
   state.fieldQuoteRows = [];
+  state.editingFieldQuoteId = "";
+  state.fieldLeasePaymentRows = [];
+  state.fieldLeaseAdjustmentRows = [];
+  state.fieldLeasePaymentPresetRows = [];
+  state.fieldLeaseProductQuoteRows = [];
+  state.fieldLeaseLineQuoteRows = [];
+  fieldLeaseManualProductQuoteKeys = new Set();
   renderFieldQuoteRows();
+  renderFieldLeaseLineQuoteRows({}, true);
+  renderFieldLeasePaymentPresetRows({});
+  renderFieldLeasePaymentRows(0);
+  renderFieldLeaseAdjustmentRows();
+  updateFieldLeasePreview();
+  setFieldLeaseMessage("");
+}
+
+function fieldLeasePaymentsTotal() {
+  return (state.fieldLeasePaymentRows || []).reduce((sum, item) => sum + parseMoneyInput(item.importe || 0), 0);
+}
+
+function isFieldLeaseCommissionPayment(item) {
+  const concept = String(item?.concepto || "").toUpperCase();
+  return concept === "COMISION_COBRADA" || concept === "COMISION_DESCONTADA";
+}
+
+function isFieldLeaseSettledPayment(item) {
+  const status = String(item?.estado || "").toUpperCase();
+  return status !== "PENDIENTE" && status !== "ANULADO";
+}
+
+function fieldLeasePaymentTotals() {
+  return (state.fieldLeasePaymentRows || []).reduce((acc, item) => {
+    const amount = parseMoneyInput(item.importe || 0);
+    acc.aplicado += amount;
+    if (isFieldLeaseCommissionPayment(item)) acc.comision += amount;
+    else acc.pagado += amount;
+    return acc;
+  }, { pagado: 0, comision: 0, aplicado: 0 });
+}
+
+function fieldLeaseHistoryAppliedAmount(item = {}) {
+  const totals = (item.pagos || []).reduce((acc, payment) => {
+    if (!isFieldLeaseSettledPayment(payment)) return acc;
+    const amount = parseMoneyInput(payment.importe || 0);
+    if (isFieldLeaseCommissionPayment(payment)) {
+      acc.comision += amount;
+      return acc;
+    }
+    const party = String(payment.parte || "").toUpperCase();
+    if (party === "ARRENDADOR") acc.arrendador += amount;
+    else if (party === "ARRENDATARIO") acc.arrendatario += amount;
+    else acc.general += amount;
+    return acc;
+  }, { arrendador: 0, arrendatario: 0, general: 0, comision: 0 });
+  const cuotaAplicada = Math.max(totals.arrendador, totals.arrendatario, totals.general);
+  return cuotaAplicada + totals.comision;
+}
+
+function syncFieldPaymentCommissionShortcut(source = "") {
+  const add = $("#field-payment-commission-add");
+  const deduct = $("#field-payment-commission-deduct");
+  const concept = $("#field-payment-concept");
+  const party = $("#field-payment-party");
+  const application = $("#field-payment-commission-application");
+  const status = $("#field-payment-status");
+  if (!add || !deduct) return;
+  if (source === "ADD" && add.checked) {
+    deduct.checked = false;
+    if (concept) concept.value = "COMISION_COBRADA";
+    if (party) party.value = "ARRENDATARIO";
+    if (application) application.value = "SUMA_PAGADOR";
+    if (status) status.value = "PENDIENTE";
+  }
+  if (source === "DEDUCT" && deduct.checked) {
+    add.checked = false;
+    if (concept) concept.value = "COMISION_DESCONTADA";
+    if (party) party.value = "ARRENDADOR";
+    if (application) application.value = "DESCUENTA_COBRADOR";
+    if (status) status.value = "DESCONTADA";
+  }
+  if (!add.checked && !deduct.checked && application && application.value !== "FACTURA_APARTE") {
+    application.value = "NO_APLICA";
+  }
+}
+
+function syncFieldPaymentCommissionMode() {
+  const mode = $("#field-payment-commission-mode")?.value || "NO_APLICA";
+  const status = $("#field-payment-commission-status");
+  const party = $("#field-payment-commission-party");
+  if (!status) return;
+  if (mode === "ARRENDADOR_DESCUENTA") status.value = "DESCONTADA";
+  else if (mode === "FACTURA_APARTE") status.value = "FACTURADA";
+  else if (mode === "ARRENDATARIO_PAGA") status.value = "PENDIENTE";
+  if (party && mode === "ARRENDADOR_DESCUENTA") party.value = "ARRENDADOR";
+  if (party && mode === "ARRENDATARIO_PAGA") party.value = "ARRENDATARIO";
+}
+
+function setFieldLeaseManualCommissionDisabled(disabled) {
+  [
+    "#field-payment-commission-mode",
+    "#field-payment-commission-amount",
+    "#field-payment-commission-bucket",
+    "#field-payment-commission-party",
+    "#field-payment-commission-status",
+    "#field-payment-commission-reference"
+  ].forEach((selector) => {
+    const node = $(selector);
+    if (node) node.disabled = Boolean(disabled);
+  });
+  const button = $("#field-payment-commission-register");
+  if (button) {
+    button.disabled = Boolean(disabled);
+    button.textContent = disabled ? "Se registra desde el tilde" : "Registrar comision manual";
+  }
+}
+
+function syncFieldLeaseManualCommissionPreview(selected = selectedFieldLeasePresetPayments()) {
+  const note = $("#field-payment-commission-helper");
+  const commissionRows = (selected || []).filter((item) => isFieldLeaseCommissionPayment(item));
+  if (!commissionRows.length) {
+    if (note?.dataset.preview === "1") {
+      if ($("#field-payment-commission-mode")) $("#field-payment-commission-mode").value = "NO_APLICA";
+      if ($("#field-payment-commission-amount")) $("#field-payment-commission-amount").value = "";
+      if ($("#field-payment-commission-bucket")) $("#field-payment-commission-bucket").value = "GENERAL";
+      if ($("#field-payment-commission-party")) $("#field-payment-commission-party").value = "ARRENDATARIO";
+      if ($("#field-payment-commission-status")) $("#field-payment-commission-status").value = "PENDIENTE";
+      if ($("#field-payment-commission-reference")) $("#field-payment-commission-reference").value = "";
+    }
+    if (note) {
+      note.dataset.preview = "0";
+      note.textContent = "Use este bloque solo para cargar una comision adicional/manual que no este en el listado de tilde.";
+    }
+    setFieldLeaseManualCommissionDisabled(false);
+    return;
+  }
+  const total = commissionRows.reduce((sum, item) => sum + parseMoneyInput(item.importe || 0), 0);
+  const first = commissionRows[0];
+  const application = String(first.aplicacionComision || "").toUpperCase();
+  const mode = application === "DESCUENTA_COBRADOR"
+    ? "ARRENDADOR_DESCUENTA"
+    : application === "FACTURA_APARTE"
+      ? "FACTURA_APARTE"
+      : "ARRENDATARIO_PAGA";
+  if ($("#field-payment-commission-mode")) $("#field-payment-commission-mode").value = commissionRows.length === 1 ? mode : "NO_APLICA";
+  if ($("#field-payment-commission-amount")) setMoneyInput("#field-payment-commission-amount", total);
+  if ($("#field-payment-commission-bucket")) $("#field-payment-commission-bucket").value = commissionRows.length === 1 ? (first.comisionTipo || "GENERAL") : "GENERAL";
+  if ($("#field-payment-commission-party")) $("#field-payment-commission-party").value = commissionRows.length === 1 ? (first.parte || "ARRENDATARIO") : "ARRENDATARIO";
+  if ($("#field-payment-commission-status")) $("#field-payment-commission-status").value = commissionRows.length === 1 ? (first.estado || "PENDIENTE") : "PENDIENTE";
+  if ($("#field-payment-commission-reference")) {
+    $("#field-payment-commission-reference").value = commissionRows.length === 1
+      ? (first.referencia || first.etiqueta || "")
+      : `${commissionRows.length} comisiones seleccionadas`;
+  }
+  if (note) {
+    note.dataset.preview = "1";
+    note.textContent = "La comision marcada arriba se registra con Registrar seleccionados. Este bloque queda como vista previa para no duplicarla.";
+  }
+  setFieldLeaseManualCommissionDisabled(true);
+}
+
+function fieldLeasePaymentBalanceBase(totalDue = fieldLeaseCurrentInput().totalConComision) {
+  return Number(totalDue || 0);
+}
+
+function fieldLeasePaymentConceptLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "PAGO_FACTURADO") return "Pago facturado / contrato";
+  if (key === "PAGO_EFECTIVO") return "Pago efectivo";
+  if (key === "COMISION_COBRADA") return "Comision cobrada";
+  if (key === "COMISION_DESCONTADA") return "Comision descontada";
+  if (key === "OTRO") return "Otro ajuste";
+  return "Pago de cuota";
+}
+
+function fieldLeasePaymentPartyLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "ARRENDADOR") return "Arrendador";
+  if (key === "ARRENDATARIO") return "Arrendatario";
+  if (key === "AMBAS") return "Ambas partes";
+  return "General";
+}
+
+function fieldLeaseCommissionApplicationLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "SUMA_PAGADOR") return "Se suma al que paga";
+  if (key === "DESCUENTA_COBRADOR") return "Se descuenta al que cobra";
+  if (key === "FACTURA_APARTE") return "Factura aparte";
+  return "No aplica";
+}
+
+function fieldLeaseCommissionBucketLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "FACTURADO") return "sobre facturado";
+  if (key === "EFECTIVO") return "sobre efectivo";
+  return "general";
+}
+
+function fieldLeasePaymentCommissionDetail(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "SUMA_PAGADOR") return "Comision sumada";
+  if (key === "DESCUENTA_COBRADOR") return "Comision descontada";
+  if (key === "FACTURA_APARTE") return "Comision facturada aparte";
+  return "-";
+}
+
+function fieldLeasePaymentCommissionFullDetail(item = {}) {
+  const base = fieldLeasePaymentCommissionDetail(item.aplicacionComision);
+  if (!isFieldLeaseCommissionPayment(item)) return base;
+  return `${base} - ${fieldLeaseCommissionBucketLabel(item.comisionTipo)}`;
+}
+
+function fieldLeasePaymentStatusLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "FACTURADA") return "Facturada";
+  if (key === "PAGADA") return "Pagada";
+  if (key === "DESCONTADA") return "Descontada";
+  if (key === "INFORMADA") return "Informada";
+  return "Pendiente";
+}
+
+function fieldLeasePaymentAppliesToParty(item, party) {
+  const itemParty = String(item?.parte || "GENERAL").toUpperCase();
+  return itemParty === "GENERAL" || itemParty === "AMBAS" || itemParty === party;
+}
+
+function fieldLeasePaymentMatchesPartyRow(payment = {}, row = {}) {
+  if (!fieldLeasePaymentAppliesToParty(payment, String(row.tipo || "").toUpperCase())) return false;
+  const rowKey = fieldLeasePartyRowKey(row);
+  if (payment.partyKey && String(payment.partyKey) === rowKey) return true;
+  const reference = String(payment.referencia || "").toUpperCase();
+  const name = String(row.nombre || "").trim().toUpperCase();
+  return !!name && reference.includes(name);
+}
+
+function fieldLeasePartySummary(rows, baseTotal, party) {
+  return (rows || []).reduce((acc, item) => {
+    if (!fieldLeasePaymentAppliesToParty(item, party)) return acc;
+    const amount = parseMoneyInput(item.importe || 0);
+    const application = String(item.aplicacionComision || "NO_APLICA").toUpperCase();
+    if (isFieldLeaseCommissionPayment(item)) {
+      if (application === "DESCUENTA_COBRADOR" && party === "ARRENDADOR") acc.comisionDescontada += amount;
+      else if (application === "SUMA_PAGADOR" && party === "ARRENDATARIO") acc.comisionSumada += amount;
+      else if (application === "FACTURA_APARTE") acc.comisionFacturaAparte += amount;
+      else acc.comisionInformada += amount;
+    } else {
+      acc.pagos += amount;
+    }
+    return acc;
+  }, {
+    base: Number(baseTotal || 0),
+    pagos: 0,
+    comisionSumada: 0,
+    comisionDescontada: 0,
+    comisionFacturaAparte: 0,
+    comisionInformada: 0
+  });
+}
+
+function fieldLeaseAdjustmentAllocationValue(row = {}, part = "TOTAL") {
+  const key = String(part || "TOTAL").toUpperCase();
+  if (key === "FACTURADO") return Number(row.facturado || 0);
+  if (key === "EFECTIVO") return Number(row.efectivo || 0);
+  return Number(row.totalCuota || 0);
+}
+
+function fieldLeaseAdjustmentPaymentPresets(calc = fieldLeaseCurrentInput()) {
+  const rows = Array.isArray(calc.distribucionPartes) ? calc.distribucionPartes : [];
+  const adjustments = Array.isArray(calc.ajustes) ? calc.ajustes : [];
+  if (!rows.length || !adjustments.length) return [];
+  const presets = [];
+  adjustments.forEach((adjustment, adjustmentIndex) => {
+    const status = String(adjustment.estado || "PENDIENTE").toUpperCase();
+    if (status !== "PENDIENTE") return;
+    const quotaDiff = parseMoneyInput(adjustment.diferencia || 0);
+    const commissionDiff = parseMoneyInput(adjustment.diferenciaComision || 0);
+    if (!quotaDiff && !commissionDiff) return;
+    const part = String(adjustment.parte || "TOTAL").toUpperCase();
+    const totalBase = rows.reduce((sum, row) => sum + fieldLeaseAdjustmentAllocationValue(row, part), 0);
+    rows.forEach((row, rowIndex) => {
+      const role = String(row.tipo || "").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR";
+      const name = row.nombre || fieldLeasePaymentPartyLabel(role);
+      const partyKey = fieldLeasePartyRowKey(row);
+      const factor = totalBase ? fieldLeaseAdjustmentAllocationValue(row, part) / totalBase : 1 / rows.length;
+      const quotaAmount = Math.abs(quotaDiff * factor);
+      const commissionAmount = Math.abs(commissionDiff * factor);
+      const adjustmentRef = [adjustment.motivo || "Reajuste", adjustment.referencia || ""].filter(Boolean).join(" - ");
+      const adjustmentId = adjustment.id || `AJUSTE-${adjustmentIndex}`;
+      if (quotaAmount > 0.01) {
+        presets.push({
+          id: `AJUSTE-CUOTA-${adjustmentId}-${partyKey || rowIndex}`,
+          partyKey,
+          concepto: "OTRO",
+          parte: role,
+          aplicacionComision: "NO_APLICA",
+          estado: "PAGADA",
+          medio: quotaDiff >= 0 ? (role === "ARRENDATARIO" ? "Transferencia" : "Ajuste") : "Ajuste",
+          referencia: `${name} - ${adjustmentRef}`,
+          importe: quotaAmount,
+          comisionTipo: "",
+          etiqueta: `${quotaDiff >= 0 ? "Diferencia de cuota" : "Descuento de cuota"} - ${name}`,
+          detalle: `${fieldLeaseAdjustmentPartLabel(part)} por pago fuera de termino`
+        });
+      }
+      if (commissionAmount > 0.01) {
+        presets.push({
+          id: `AJUSTE-COMISION-${adjustmentId}-${partyKey || rowIndex}`,
+          partyKey,
+          concepto: role === "ARRENDADOR" ? "COMISION_DESCONTADA" : "COMISION_COBRADA",
+          parte: role,
+          aplicacionComision: role === "ARRENDADOR" ? "DESCUENTA_COBRADOR" : "SUMA_PAGADOR",
+          estado: role === "ARRENDADOR" ? "DESCONTADA" : "PENDIENTE",
+          medio: role === "ARRENDADOR" ? "Descuento" : "Comision",
+          referencia: `${name} - Diferencia comision - ${adjustmentRef}`,
+          importe: commissionAmount,
+          comisionTipo: part === "EFECTIVO" ? "EFECTIVO" : part === "FACTURADO" ? "FACTURADO" : "GENERAL",
+          etiqueta: `${commissionDiff >= 0 ? "Diferencia de comision" : "Reduccion de comision"} - ${name}`,
+          detalle: role === "ARRENDADOR" ? "Ajuste de comision a descontar" : "Ajuste de comision a cobrar"
+        });
+      }
+    });
+  });
+  return presets;
+}
+
+function fieldLeaseQuickPaymentPresets(calc = fieldLeaseCurrentInput()) {
+  const rows = Array.isArray(calc.distribucionPartes) ? calc.distribucionPartes : [];
+  const regularPresets = rows.flatMap((row, index) => {
+    const role = String(row.tipo || "").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR";
+    const name = row.nombre || fieldLeasePaymentPartyLabel(role);
+    const result = fieldLeaseMiniLedgerNet(row);
+    const baseRef = name;
+    const partyKey = fieldLeasePartyRowKey(row);
+    const presets = [];
+    if (Number(row.facturado || 0)) {
+      presets.push({
+        id: `FACTURADO-${partyKey || index}`,
+        partyKey,
+        concepto: "PAGO_FACTURADO",
+        parte: role,
+        aplicacionComision: "NO_APLICA",
+        estado: "PAGADA",
+        medio: "Transferencia",
+        referencia: baseRef,
+        importe: Number(row.facturado || 0),
+        etiqueta: `Facturado / contrato - ${name}`,
+        detalle: role === "ARRENDATARIO" ? "Transferencia del arrendatario por contrato" : "Transferencia al arrendador por contrato"
+      });
+    }
+    if (Number(row.efectivo || 0)) {
+      presets.push({
+        id: `EFECTIVO-${partyKey || index}`,
+        partyKey,
+        concepto: "PAGO_EFECTIVO",
+        parte: role,
+        aplicacionComision: "NO_APLICA",
+        estado: "PAGADA",
+        medio: "Efectivo",
+        referencia: baseRef,
+        importe: Number(row.efectivo || 0),
+        etiqueta: `Efectivo - ${name}`,
+        detalle: role === "ARRENDATARIO" ? "Efectivo entregado por el arrendatario" : "Efectivo a pagar al arrendador"
+      });
+    }
+    [
+      ["GENERAL", "Comision general", Number(row.comisionGeneral || 0)],
+      ["FACTURADO", "Comision sobre facturado", Number(row.comisionFacturado || 0)],
+      ["EFECTIVO", "Comision sobre efectivo", Number(row.comisionEfectivo || 0)]
+    ].forEach(([bucket, label, amount]) => {
+      if (!amount) return;
+      presets.push({
+        id: `COMISION-${bucket}-${partyKey || index}`,
+        partyKey,
+        concepto: role === "ARRENDADOR" ? "COMISION_DESCONTADA" : "COMISION_COBRADA",
+        parte: role,
+        aplicacionComision: role === "ARRENDADOR" ? "DESCUENTA_COBRADOR" : "SUMA_PAGADOR",
+      estado: role === "ARRENDADOR" ? "DESCONTADA" : "PENDIENTE",
+      medio: role === "ARRENDADOR" ? "Descuento" : "Comision",
+      referencia: `${baseRef} - ${label}`,
+      importe: amount,
+      comisionTipo: bucket,
+      etiqueta: role === "ARRENDADOR" ? `${label} descontada - ${name}` : `${label} a cobrar - ${name}`,
+      detalle: role === "ARRENDADOR" ? "Se descuenta al arrendador que cobra" : "Se suma al arrendatario que paga"
+    });
+    });
+    return presets;
+  });
+  return regularPresets.concat(fieldLeaseAdjustmentPaymentPresets(calc));
+}
+
+function fieldLeasePaymentEquivalentToPreset(payment = {}, preset = {}) {
+  if (payment.sourcePresetId && String(payment.sourcePresetId) === String(preset.id)) return true;
+  const sameConcept = String(payment.concepto || "").toUpperCase() === String(preset.concepto || "").toUpperCase();
+  const sameParty = String(payment.parte || "").toUpperCase() === String(preset.parte || "").toUpperCase();
+  const sameApplication = String(payment.aplicacionComision || "NO_APLICA").toUpperCase() === String(preset.aplicacionComision || "NO_APLICA").toUpperCase();
+  const sameCommissionType = String(payment.comisionTipo || "GENERAL").toUpperCase() === String(preset.comisionTipo || "GENERAL").toUpperCase();
+  const sameAmount = Math.abs(parseMoneyInput(payment.importe || 0) - parseMoneyInput(preset.importe || 0)) < 0.01;
+  const samePartyKey = preset.partyKey && payment.partyKey && String(payment.partyKey) === String(preset.partyKey);
+  const referenceMatch = preset.referencia && String(payment.referencia || "").toUpperCase().includes(String(preset.referencia).toUpperCase());
+  const directTenantMatch = String(preset.parte || "").toUpperCase() === "ARRENDATARIO" && !preset.partyKey;
+  const looseTenantMatch = String(preset.parte || "").toUpperCase() === "ARRENDATARIO" && !payment.partyKey;
+  if (sameConcept && sameParty && sameApplication && sameCommissionType && sameAmount && (directTenantMatch || looseTenantMatch)) return true;
+  return sameConcept && sameParty && sameApplication && sameCommissionType && sameAmount && (samePartyKey || referenceMatch);
+}
+
+function filterRegisteredFieldLeasePresets(presets = []) {
+  const payments = state.fieldLeasePaymentRows || [];
+  return presets.filter((preset) => !payments.some((payment) => fieldLeasePaymentEquivalentToPreset(payment, preset)));
+}
+
+function renderFieldLeasePaymentPresetRows(calc = fieldLeaseCurrentInput()) {
+  const body = $("#field-payment-preset-body");
+  if (!body) return;
+  let presets = [];
+  try {
+    presets = filterRegisteredFieldLeasePresets(fieldLeaseQuickPaymentPresets(calc));
+  } catch (error) {
+    presets = [];
+  }
+  state.fieldLeasePaymentPresetRows = presets;
+  if ($("#field-payment-preset-summary")) {
+    $("#field-payment-preset-summary").textContent = presets.length
+      ? `${presets.length} item/s disponibles para registrar`
+      : "Sin items disponibles";
+  }
+  body.innerHTML = presets.length
+    ? presets.map((item, index) => `<tr>
+        <td><input type="checkbox" data-field-payment-preset="${index}"></td>
+        <td>${escapeHtml(item.etiqueta)}</td>
+        <td>${escapeHtml(fieldLeasePaymentPartyLabel(item.parte))}</td>
+        <td>${escapeHtml(item.detalle || "-")}</td>
+        <td class="amount">${moneyValue(item.importe || 0)}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="5">Complete o actualice el calculo para ver los items de pago disponibles.</td></tr>`;
+  updateSelectedFieldLeasePresetPaymentAmount();
+}
+
+function selectedFieldLeasePresetPayments() {
+  return Array.from(document.querySelectorAll("[data-field-payment-preset]:checked"))
+    .map((input) => state.fieldLeasePaymentPresetRows[Number(input.dataset.fieldPaymentPreset)])
+    .filter(Boolean);
+}
+
+function updateSelectedFieldLeasePresetPaymentAmount() {
+  const selected = selectedFieldLeasePresetPayments();
+  const total = selected.reduce((sum, preset) => sum + parseMoneyInput(preset.importe || 0), 0);
+  if ($("#field-payment-amount")) {
+    setMoneyInput("#field-payment-amount", total);
+  }
+  if ($("#field-payment-preset-summary")) {
+    $("#field-payment-preset-summary").textContent = selected.length
+      ? `${selected.length} item/s seleccionados - ${moneyValue(total)}`
+      : (state.fieldLeasePaymentPresetRows || []).length
+        ? `${state.fieldLeasePaymentPresetRows.length} item/s disponibles para registrar`
+        : "Sin items disponibles";
+  }
+  syncFieldLeaseManualCommissionPreview(selected);
+}
+
+function addSelectedFieldLeasePresetPayments() {
+  const selected = selectedFieldLeasePresetPayments();
+  if (!selected.length) {
+    setFieldLeaseMessage("Tilde al menos un item para registrar.", "error");
+    return;
+  }
+  const date = $("#field-payment-date")?.value || new Date().toISOString().slice(0, 10);
+  const defaultMethod = $("#field-payment-method")?.value || "Transferencia";
+  const detail = String($("#field-payment-reference")?.value || "").trim();
+  selected.forEach((preset) => {
+    const isCommission = isFieldLeaseCommissionPayment(preset);
+    state.fieldLeasePaymentRows.push({
+      id: `${isCommission ? "COMISION" : "PAGO"}-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      sourcePresetId: preset.id,
+      partyKey: preset.partyKey || "",
+      fecha: date,
+      concepto: preset.concepto,
+      parte: preset.parte,
+      aplicacionComision: preset.aplicacionComision,
+      estado: preset.estado,
+      medio: preset.medio || defaultMethod,
+      referencia: [preset.referencia, detail].filter(Boolean).join(" - "),
+      importe: preset.importe,
+      comisionTipo: preset.comisionTipo || ""
+    });
+  });
+  if ($("#field-payment-amount")) $("#field-payment-amount").value = "";
+  renderFieldLeasePaymentRows(fieldLeaseCurrentInput().totalConComision);
+  renderFieldLeasePaymentPresetRows(fieldLeaseCurrentInput());
+  setFieldLeaseMessage("Items seleccionados registrados. Revise el detalle y guarde el calculo.", "ok");
+}
+
+function renderFieldLeasePaymentRows(totalDue = fieldLeaseCurrentInput().totalConComision) {
+  const body = $("#field-payment-body");
+  if (!body) return;
+  const rows = state.fieldLeasePaymentRows || [];
+  body.innerHTML = rows.length
+    ? rows.map((item) => `<tr>
+        <td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(item.fecha)) || item.fecha || "-")}</td>
+        <td>${escapeHtml(fieldLeasePaymentConceptLabel(item.concepto))}</td>
+        <td>${escapeHtml(fieldLeasePaymentPartyLabel(item.parte))}</td>
+        <td>${escapeHtml(fieldLeasePaymentCommissionFullDetail(item))}</td>
+        <td>${escapeHtml(fieldLeasePaymentStatusLabel(item.estado))}</td>
+        <td>${escapeHtml(item.medio || "-")}</td>
+        <td>${escapeHtml(item.referencia || "-")}</td>
+        <td class="amount">${moneyValue(item.importe || 0)}</td>
+        <td><button type="button" class="small-button danger-button" data-field-payment-remove="${escapeHtml(item.id)}">Quitar</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="9">Sin pagos registrados para esta cuota.</td></tr>`;
+  const totals = fieldLeasePaymentTotals();
+  const balance = fieldLeasePaymentBalanceBase(totalDue) - totals.aplicado;
+  if ($("#field-payment-paid")) $("#field-payment-paid").textContent = moneyValue(totals.pagado);
+  if ($("#field-payment-commission")) $("#field-payment-commission").textContent = moneyValue(totals.comision);
+  if ($("#field-payment-balance")) $("#field-payment-balance").textContent = moneyValue(balance);
+}
+
+function fieldLeaseAdjustmentPartLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "EFECTIVO") return "Efectivo";
+  if (key === "TOTAL") return "Total cuota";
+  return "Facturado / contrato";
+}
+
+function fieldLeaseAdjustmentStatusLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "PAGADO") return "Pagado";
+  if (key === "COMPENSADO") return "Compensado";
+  if (key === "INFORMATIVO") return "Informativo";
+  return "Pendiente";
+}
+
+function syncFieldLeaseAdjustmentDifference() {
+  const originalAmount = parseMoneyInput($("#field-adjustment-original-amount")?.value || 0);
+  const newAmount = parseMoneyInput($("#field-adjustment-new-amount")?.value || 0);
+  const diffInput = $("#field-adjustment-difference");
+  if (diffInput && originalAmount && newAmount) setMoneyInput("#field-adjustment-difference", newAmount - originalAmount);
+  const originalCommission = parseMoneyInput($("#field-adjustment-original-commission")?.value || 0);
+  const newCommission = parseMoneyInput($("#field-adjustment-new-commission")?.value || 0);
+  const commissionDiffInput = $("#field-adjustment-commission-difference");
+  if (commissionDiffInput && originalCommission && newCommission) setMoneyInput("#field-adjustment-commission-difference", newCommission - originalCommission);
+}
+
+function renderFieldLeaseAdjustmentRows() {
+  const body = $("#field-adjustment-body");
+  if (!body) return;
+  const rows = state.fieldLeaseAdjustmentRows || [];
+  if ($("#field-adjustment-summary")) {
+    const totalDiff = rows.reduce((sum, item) => sum + parseMoneyInput(item.diferencia || 0), 0);
+    const totalCommissionDiff = rows.reduce((sum, item) => sum + parseMoneyInput(item.diferenciaComision || 0), 0);
+    $("#field-adjustment-summary").textContent = rows.length
+      ? `${rows.length} ajuste/s - diferencia cuota ${moneyValue(totalDiff)} - diferencia comision ${moneyValue(totalCommissionDiff)}`
+      : "Sin ajustes cargados";
+  }
+  body.innerHTML = rows.length
+    ? rows.map((item) => `<tr>
+        <td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(item.fecha)) || item.fecha || "-")}</td>
+        <td>${escapeHtml(fieldLeaseAdjustmentPartLabel(item.parte))}</td>
+        <td>${escapeHtml(item.motivo || "-")}</td>
+        <td class="amount">${moneyValue(item.promedioOriginal || 0)}</td>
+        <td class="amount">${moneyValue(item.promedioNuevo || 0)}</td>
+        <td class="amount">${moneyValue(item.importeOriginal || 0)}</td>
+        <td class="amount">${moneyValue(item.importeReajustado || 0)}</td>
+        <td class="amount">${moneyValue(item.diferencia || 0)}</td>
+        <td class="amount">${moneyValue(item.comisionOriginal || 0)}</td>
+        <td class="amount">${moneyValue(item.comisionReajustada || 0)}</td>
+        <td class="amount">${moneyValue(item.diferenciaComision || 0)}</td>
+        <td>${escapeHtml(fieldLeaseAdjustmentStatusLabel(item.estado))}</td>
+        <td><button type="button" class="small-button danger-button" data-field-adjustment-remove="${escapeHtml(item.id)}">Quitar</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="13">Sin ajustes o reliquidaciones para esta cuota.</td></tr>`;
+}
+
+function addFieldLeaseAdjustmentRow() {
+  const originalAmount = parseMoneyInput($("#field-adjustment-original-amount")?.value || 0);
+  const newAmount = parseMoneyInput($("#field-adjustment-new-amount")?.value || 0);
+  const manualDiff = parseMoneyInput($("#field-adjustment-difference")?.value || 0);
+  const difference = manualDiff || (newAmount || originalAmount ? newAmount - originalAmount : 0);
+  const originalCommission = parseMoneyInput($("#field-adjustment-original-commission")?.value || 0);
+  const newCommission = parseMoneyInput($("#field-adjustment-new-commission")?.value || 0);
+  const manualCommissionDiff = parseMoneyInput($("#field-adjustment-commission-difference")?.value || 0);
+  const commissionDifference = manualCommissionDiff || (newCommission || originalCommission ? newCommission - originalCommission : 0);
+  const reason = String($("#field-adjustment-reason")?.value || "").trim();
+  if (!reason && !difference && !originalAmount && !newAmount && !originalCommission && !newCommission && !commissionDifference) {
+    setFieldLeaseMessage("Cargue al menos un motivo o importes para registrar el ajuste.", "error");
+    return;
+  }
+  state.fieldLeaseAdjustmentRows.push({
+    id: `AJUSTE-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    fecha: $("#field-adjustment-date")?.value || new Date().toISOString().slice(0, 10),
+    parte: $("#field-adjustment-part")?.value || "FACTURADO",
+    motivo: reason || "Reajuste posterior de cuota",
+    referencia: $("#field-adjustment-reference")?.value || "",
+    promedioOriginal: parseMoneyInput($("#field-adjustment-original-quote")?.value || 0),
+    promedioNuevo: parseMoneyInput($("#field-adjustment-new-quote")?.value || 0),
+    importeOriginal: originalAmount,
+    importeReajustado: newAmount,
+    diferencia: difference,
+    comisionOriginal: originalCommission,
+    comisionReajustada: newCommission,
+    diferenciaComision: commissionDifference,
+    estado: $("#field-adjustment-status")?.value || "PENDIENTE",
+    observaciones: $("#field-adjustment-notes")?.value || ""
+  });
+  ["#field-adjustment-reason", "#field-adjustment-reference", "#field-adjustment-original-quote", "#field-adjustment-new-quote", "#field-adjustment-original-amount", "#field-adjustment-new-amount", "#field-adjustment-difference", "#field-adjustment-original-commission", "#field-adjustment-new-commission", "#field-adjustment-commission-difference", "#field-adjustment-notes"].forEach((selector) => {
+    const node = $(selector);
+    if (node) node.value = "";
+  });
+  if ($("#field-adjustment-status")) $("#field-adjustment-status").value = "PENDIENTE";
+  renderFieldLeaseAdjustmentRows();
+  setFieldLeaseMessage("Ajuste agregado. Guarde el calculo para conservarlo.", "ok");
+}
+
+function addFieldLeasePaymentRow() {
+  const amount = parseMoneyInput($("#field-payment-amount")?.value || 0);
+  if (!amount) {
+    setFieldLeaseMessage("Cargue un importe para registrar el pago de la cuota.", "error");
+    return;
+  }
+  state.fieldLeasePaymentRows.push({
+    id: `PAGO-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    fecha: $("#field-payment-date")?.value || new Date().toISOString().slice(0, 10),
+    concepto: $("#field-payment-concept-simple")?.value || $("#field-payment-concept")?.value || "PAGO_CUOTA",
+    parte: $("#field-payment-party-simple")?.value || $("#field-payment-party")?.value || "GENERAL",
+    aplicacionComision: "NO_APLICA",
+    estado: "PAGADA",
+    medio: $("#field-payment-method")?.value || "Transferencia",
+    referencia: $("#field-payment-reference")?.value || "",
+    importe: amount
+  });
+  $("#field-payment-reference").value = "";
+  $("#field-payment-amount").value = "";
+  updateFieldLeasePreview();
+  setFieldLeaseMessage("");
+}
+
+function addFieldLeaseCommissionRow() {
+  const mode = $("#field-payment-commission-mode")?.value || "NO_APLICA";
+  const amount = parseMoneyInput($("#field-payment-commission-amount")?.value || 0);
+  if (mode === "NO_APLICA") {
+    setFieldLeaseMessage("Seleccione como corresponde registrar la comision.", "error");
+    return;
+  }
+  if (!amount) {
+    setFieldLeaseMessage("Cargue el importe de la comision.", "error");
+    return;
+  }
+  const isTenantPays = mode === "ARRENDATARIO_PAGA";
+  const isLandlordDeduct = mode === "ARRENDADOR_DESCUENTA";
+  const isInvoiceApart = mode === "FACTURA_APARTE";
+  const selectedParty = $("#field-payment-commission-party")?.value || (isLandlordDeduct ? "ARRENDADOR" : "ARRENDATARIO");
+  const commissionType = $("#field-payment-commission-bucket")?.value || "GENERAL";
+  const statusField = $("#field-payment-commission-status");
+  const status = statusField?.value || (isLandlordDeduct ? "DESCONTADA" : "PENDIENTE");
+  const finalParty = isLandlordDeduct ? "ARRENDADOR" : isTenantPays ? "ARRENDATARIO" : selectedParty;
+  const finalApplication = isLandlordDeduct ? "DESCUENTA_COBRADOR" : isInvoiceApart ? "FACTURA_APARTE" : "SUMA_PAGADOR";
+  state.fieldLeasePaymentRows.push({
+    id: `COMISION-CAMPO-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    fecha: $("#field-payment-date")?.value || new Date().toISOString().slice(0, 10),
+    concepto: isLandlordDeduct ? "COMISION_DESCONTADA" : "COMISION_COBRADA",
+    parte: finalParty,
+    aplicacionComision: finalApplication,
+    estado: status,
+    medio: isLandlordDeduct ? "Descuento" : isInvoiceApart ? "Factura comision" : "Comision",
+    referencia: [
+      $("#field-payment-commission-reference")?.value || "",
+      fieldLeaseCommissionBucketLabel(commissionType)
+    ].filter(Boolean).join(" - "),
+    importe: amount,
+    comisionTipo: commissionType
+  });
+  if ($("#field-payment-commission-reference")) $("#field-payment-commission-reference").value = "";
+  if ($("#field-payment-commission-amount")) $("#field-payment-commission-amount").value = "";
+  if ($("#field-payment-commission-mode")) $("#field-payment-commission-mode").value = "NO_APLICA";
+  if ($("#field-payment-commission-bucket")) $("#field-payment-commission-bucket").value = "GENERAL";
+  if ($("#field-payment-commission-party")) $("#field-payment-commission-party").value = "ARRENDATARIO";
+  if ($("#field-payment-commission-status")) $("#field-payment-commission-status").value = "PENDIENTE";
   updateFieldLeasePreview();
   setFieldLeaseMessage("");
 }
@@ -1624,16 +3762,452 @@ function renderFieldLeases() {
         <td>${escapeHtml(item.campo || "-")}</td>
         <td>${escapeHtml(item.cereal || "-")}</td>
         <td>${plainNumberValue(item.hectareas)}</td>
-        <td>${moneyValue(item.totalPesos)}</td>
-        <td>${escapeHtml(item.vencimiento || item.fecha || "-")}</td>
-        <td><button type="button" class="small-button" data-field-lease-open="${escapeHtml(item.id)}">Abrir</button> <button type="button" class="small-button" data-field-lease-print="${escapeHtml(item.id)}">Imprimir</button> <button type="button" class="small-button danger-button" data-field-lease-delete="${escapeHtml(item.id)}">Eliminar</button></td>
-      </tr>`).join("")
+        <td>${moneyValue(item.totalConComision || item.totalPesos)}</td>
+        <td>${moneyValue(fieldLeaseHistoryAppliedAmount(item))}</td>
+        <td><button type="button" class="small-button" data-field-lease-open="${escapeHtml(item.id)}">Abrir</button> <button type="button" class="small-button" data-field-lease-print="${escapeHtml(item.id)}" data-field-lease-audience="GENERAL">Reporte</button> <button type="button" class="small-button" data-field-lease-receipt="${escapeHtml(item.id)}" data-field-lease-receipt-role="ARRENDADOR">Recibo arr.</button> <button type="button" class="small-button" data-field-lease-receipt="${escapeHtml(item.id)}" data-field-lease-receipt-role="ARRENDATARIO">Recibo arrendat.</button> <button type="button" class="small-button danger-button" data-field-lease-delete="${escapeHtml(item.id)}">Eliminar</button></td>
+      </tr>${fieldLeaseHistoryPartyReceiptRow(item)}`).join("")
     : `<tr><td colspan="8">Sin calculos de arrendamiento cargados.</td></tr>`;
   updateFieldLeasePreview();
 }
 
+function fieldLeaseHistoryPartyReceiptRow(item = {}) {
+  const rows = Array.isArray(item.distribucionPartes) ? item.distribucionPartes : [];
+  const landlords = rows.filter((row) => String(row.tipo || "").toUpperCase() === "ARRENDADOR" && row.nombre);
+  if (landlords.length <= 1) return "";
+  const buttons = landlords.map((row) => `<button type="button" class="small-button" data-field-lease-party-receipt="${escapeHtml(item.id)}" data-field-party-key="${escapeHtml(fieldLeasePartyRowKey(row))}">Recibo ${escapeHtml(row.nombre)}</button>`).join(" ");
+  return `<tr class="cc-detail-row"><td colspan="8"><strong>Recibos individuales arrendador:</strong> ${buttons}</td></tr>`;
+}
+
+function fieldDateValue(value) {
+  const date = parseAnyLocalDate(value);
+  if (!date || Number.isNaN(date.getTime())) return 0;
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function firstFieldContractValue(contract = {}, keys = []) {
+  for (const key of keys) {
+    const value = contract[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+  }
+  return "";
+}
+
+function fieldContractStartValue(contract = {}) {
+  return firstFieldContractValue(contract, [
+    "inicio",
+    "fechaInicio",
+    "fechaDesde",
+    "vigenciaDesde",
+    "vigenciaContratoDesde",
+    "vigencia_contrato_desde",
+    "vigencia contrato desde",
+    "vigencia desde",
+    "contratoDesde",
+    "periodoDesde",
+    "periodo desde",
+    "desde",
+    "start"
+  ]);
+}
+
+function fieldContractEndValue(contract = {}) {
+  return firstFieldContractValue(contract, [
+    "fin",
+    "fechaFin",
+    "fechaHasta",
+    "vigenciaHasta",
+    "vigenciaContratoHasta",
+    "vigencia_contrato_hasta",
+    "vigencia contrato hasta",
+    "vigencia hasta",
+    "contratoHasta",
+    "periodoHasta",
+    "periodo hasta",
+    "hasta",
+    "end"
+  ]);
+}
+
+function fieldContractFrequencyValue(contract = {}) {
+  return firstFieldContractValue(contract, ["frecuencia", "frecuenciaBase", "frecuencia_base", "frecuencia base", "periodicidad", "formaPago", "forma_pago", "forma de pago"]) || "MENSUAL";
+}
+
+function fieldContractDueTextValue(contract = {}) {
+  return firstFieldContractValue(contract, ["vencimientoHabitual", "vencimiento_habitual", "vencimiento habitual", "vencimientoBase", "vencimiento_base", "diaVencimiento", "dia_vencimiento", "diaVto", "dia_vto", "vencimientoTexto", "vencimiento"]);
+}
+
+function fieldContractFrequencyMonths(frequency) {
+  const key = normalizeSearch(frequency || "");
+  if (key.includes("trimestral")) return 3;
+  if (key.includes("cuatrimestral")) return 4;
+  if (key.includes("semestral")) return 6;
+  if (key.includes("anual") || key.includes("unico")) return 12;
+  return 1;
+}
+
+function addFieldMonths(date, months) {
+  const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  result.setMonth(result.getMonth() + Number(months || 0));
+  return result;
+}
+
+function nextFieldBusinessDay(date) {
+  const result = parseAnyLocalDate(date);
+  if (!result) return null;
+  const day = result.getDay();
+  if (day === 6) result.setDate(result.getDate() + 2);
+  if (day === 0) result.setDate(result.getDate() + 1);
+  return result;
+}
+
+function fieldContractDueDay(contract = {}) {
+  const text = String(fieldContractDueTextValue(contract) || "").trim();
+  const numbers = text.match(/\d{1,2}/g) || [];
+  const firstValid = numbers.map(Number).find((value) => value >= 1 && value <= 31);
+  if (firstValid) return firstValid;
+  const start = parseAnyLocalDate(fieldContractStartValue(contract));
+  return start ? start.getDate() : 1;
+}
+
+function fieldContractDueDateForMonth(baseDate, dueDay) {
+  const year = baseDate.getFullYear();
+  const month = baseDate.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  return nextFieldBusinessDay(new Date(year, month, Math.min(Math.max(Number(dueDay || 1), 1), lastDay)));
+}
+
+function fieldContractLabel(contract = {}) {
+  return contract.nombre || [contract.arrendador, contract.arrendatario, contract.campo].filter(Boolean).join(" / ") || "Contrato sin nombre";
+}
+
+function normalizeFieldContractForAgenda(contract = {}) {
+  return {
+    ...contract,
+    inicio: fieldContractStartValue(contract),
+    fin: fieldContractEndValue(contract),
+    frecuencia: fieldContractFrequencyValue(contract),
+    vencimientoHabitual: fieldContractDueTextValue(contract)
+  };
+}
+
+function isFieldContractUsableForAgenda(contract = {}) {
+  return Boolean(
+    contract
+    && (contract.id || contract.nombre || contract.arrendador || contract.arrendatario || contract.campo)
+    && (fieldContractStartValue(contract) || fieldContractDueManualRows(contract).length)
+  );
+}
+
+function fieldContractsForDueAgenda() {
+  const map = new Map();
+  const add = (contract = {}) => {
+    if (!isFieldContractUsableForAgenda(contract)) return;
+    const normalized = normalizeFieldContractForAgenda(contract);
+    const key = normalized.id || normalizeSearch([normalized.nombre, normalized.arrendador, normalized.arrendatario, normalized.campo].filter(Boolean).join("|"));
+    if (!key) return;
+    map.set(key, { ...(map.get(key) || {}), ...normalized });
+  };
+  (state.fieldContracts || []).forEach(add);
+  add(state.activeFieldContract || {});
+  add(fieldContractPayload());
+  return Array.from(map.values());
+}
+
+function fieldContractDueManualRows(contract = {}) {
+  const rows = Array.isArray(contract.cuotas) ? contract.cuotas.map(normalizeFieldContractInstallment) : [];
+  const grouped = new Map();
+  rows.forEach((row) => {
+    if (!row.vencimiento) return;
+    const adjustedDue = nextFieldBusinessDay(row.vencimiento) || row.vencimiento;
+    const adjustedDueText = formatDateForInput(adjustedDue) || row.vencimiento;
+    const key = `${row.numero || ""}|${adjustedDueText}`;
+    const current = grouped.get(key) || {
+      contract,
+      dueDate: adjustedDueText,
+      cuotaNumero: row.numero || "",
+      cuotaTipo: "",
+      cuotaDetalle: "",
+      cuotaManualId: row.id || "",
+      source: "MANUAL"
+    };
+    const typeLabel = fieldContractInstallmentTypeLabel(row.tipo);
+    if (!String(current.cuotaTipo || "").includes(typeLabel)) {
+      current.cuotaTipo = [current.cuotaTipo, typeLabel].filter(Boolean).join(" / ");
+    }
+    current.cuotaDetalle = [current.cuotaDetalle, row.detalle].filter(Boolean).join(" - ");
+    grouped.set(key, current);
+  });
+  return Array.from(grouped.values());
+}
+
+function fieldContractDueRegularRows(contract = {}) {
+  const frequency = fieldContractFrequencyValue(contract);
+  const frequencyKey = normalizeSearch(frequency);
+  if (frequencyKey.includes("manual")) return [];
+  const start = parseAnyLocalDate(fieldContractStartValue(contract));
+  const end = parseAnyLocalDate(fieldContractEndValue(contract));
+  if (!start) return [];
+  const interval = fieldContractFrequencyMonths(frequency);
+  const dueDay = fieldContractDueDay(contract);
+  const limit = end || addFieldMonths(start, frequencyKey.includes("unico") ? 0 : 24);
+  const rows = [];
+  let base = new Date(start.getFullYear(), start.getMonth(), 1);
+  let number = 1;
+  while (base <= limit && number <= 120) {
+    const due = fieldContractDueDateForMonth(base, dueDay);
+    if (due >= start && due <= limit) {
+      rows.push({
+        contract,
+        dueDate: formatDateForInput(due),
+        cuotaNumero: number,
+        cuotaTipo: frequencyKey.includes("unico") ? "Unico pago" : fieldContractInstallmentTypeLabel("MIXTA"),
+        cuotaDetalle: frequency,
+        cuotaManualId: "",
+        source: "FRECUENCIA"
+      });
+    }
+    if (frequencyKey.includes("unico")) break;
+    base = addFieldMonths(base, interval);
+    number += 1;
+  }
+  return rows;
+}
+
+function fieldContractDueRows(contract = {}) {
+  const frequencyKey = normalizeSearch(fieldContractFrequencyValue(contract));
+  const manualRows = fieldContractDueManualRows(contract);
+  const regularRows = fieldContractDueRegularRows(contract);
+  if (frequencyKey.includes("manual")) return manualRows;
+  const seen = new Set();
+  return [...regularRows, ...manualRows].filter((row) => {
+    const key = `${formatDateForInput(row.dueDate) || row.dueDate}|${row.cuotaNumero || ""}|${row.cuotaTipo || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function fieldLeaseContractMatchesDue(lease = {}, due = {}) {
+  const contract = due.contract || {};
+  if (contract.id && lease.contratoId && String(contract.id) === String(lease.contratoId)) return true;
+  const sameContract = normalizeSearch(lease.contrato || "") && normalizeSearch(lease.contrato || "") === normalizeSearch(contract.nombre || "");
+  const sameFarm = normalizeSearch(lease.campo || "") && normalizeSearch(lease.campo || "") === normalizeSearch(contract.campo || "");
+  const sameOwner = normalizeSearch(lease.cliente || "") && normalizeSearch(lease.cliente || "") === normalizeSearch(contract.arrendador || "");
+  const sameTenant = normalizeSearch(lease.arrendatario || "") && normalizeSearch(lease.arrendatario || "") === normalizeSearch(contract.arrendatario || "");
+  return sameContract || (sameFarm && (sameOwner || sameTenant));
+}
+
+function fieldLeaseDueMatchScore(lease = {}, due = {}) {
+  const contract = due.contract || {};
+  const leaseDue = formatDateForInput(lease.vencimiento);
+  const dueDate = formatDateForInput(due.dueDate);
+  const dueInstallmentId = String(due.cuotaManualId || "");
+  const leaseInstallmentId = String(lease.cuotaManualId || "");
+  if (!fieldLeaseContractMatchesDue(lease, due) || !leaseDue || !dueDate) return 0;
+  if (dueInstallmentId || leaseInstallmentId) {
+    return dueInstallmentId
+      && leaseInstallmentId
+      && dueInstallmentId === leaseInstallmentId
+      && leaseDue === dueDate
+      ? 100
+      : 0;
+  }
+  if (leaseDue === dueDate) return contract.id && lease.contratoId ? 95 : 90;
+  return 0;
+}
+
+function fieldLeaseMatchesDue(lease = {}, due = {}) {
+  return fieldLeaseDueMatchScore(lease, due) > 0;
+}
+
+function findFieldLeaseForDue(due = {}, usedLeaseIds = new Set()) {
+  return (state.fieldLeases || [])
+    .filter((lease) => !usedLeaseIds.has(String(lease.id || "")))
+    .map((lease) => ({ lease, score: fieldLeaseDueMatchScore(lease, due) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.lease || null;
+}
+
+function fieldDueStatus(due = {}, lease = null) {
+  const today = dateOnly(new Date()).getTime();
+  const dueTime = fieldDateValue(due.dueDate);
+  if (!lease) return dueTime && dueTime < today ? "VENCIDA" : "PENDIENTE_CALCULO";
+  const total = Number(lease.totalConComision || lease.totalPesos || 0);
+  const applied = fieldLeaseHistoryAppliedAmount(lease);
+  if (total && applied >= total - 0.01) return "PAGADA";
+  if (applied > 0) return "PARCIAL";
+  return "CALCULADA";
+}
+
+function fieldDueStatusLabel(status) {
+  const key = String(status || "").toUpperCase();
+  if (key === "PENDIENTE_CALCULO") return "Pendiente de calcular";
+  if (key === "VENCIDA") return "Vencida sin calcular";
+  if (key === "CALCULADA") return "Calculada / pendiente pago";
+  if (key === "PARCIAL") return "Parcialmente pagada";
+  if (key === "PAGADA") return "Pagada";
+  return "-";
+}
+
+function fieldDueStatusClass(status) {
+  const key = String(status || "").toUpperCase();
+  if (key === "VENCIDA") return "danger";
+  if (key === "PENDIENTE_CALCULO") return "warning";
+  if (key === "PAGADA") return "ok";
+  if (key === "PARCIAL") return "info";
+  return "";
+}
+
+function fieldDueAgendaRows() {
+  const usedLeaseIds = new Set();
+  return fieldContractsForDueAgenda().flatMap((contract) =>
+    fieldContractDueRows(contract).map((due) => {
+      const lease = findFieldLeaseForDue(due, usedLeaseIds);
+      if (lease?.id) usedLeaseIds.add(String(lease.id));
+      const status = fieldDueStatus(due, lease);
+      return {
+        ...due,
+        lease,
+        status,
+        importe: lease ? Number(lease.totalConComision || lease.totalPesos || 0) : 0,
+        aplicado: lease ? fieldLeaseHistoryAppliedAmount(lease) : 0
+      };
+    })
+  );
+}
+
+function filteredFieldDueAgendaRows() {
+  const from = parseAnyLocalDate($("#field-due-from")?.value || "");
+  const to = parseAnyLocalDate($("#field-due-to")?.value || "");
+  const statusFilter = String($("#field-due-status")?.value || "TODOS").toUpperCase();
+  const search = normalizeSearch($("#field-due-search")?.value || "");
+  const fromTime = from ? dateOnly(from).getTime() : 0;
+  const toTime = to ? dateOnly(to).getTime() : 0;
+  return fieldDueAgendaRows()
+    .filter((row) => {
+      const dueTime = fieldDateValue(row.dueDate);
+      if (fromTime && dueTime < fromTime) return false;
+      if (toTime && dueTime > toTime) return false;
+      if (statusFilter !== "TODOS" && String(row.status || "").toUpperCase() !== statusFilter) return false;
+      if (search) {
+        const contract = row.contract || {};
+        const text = normalizeSearch([
+          contract.nombre,
+          contract.campo,
+          contract.arrendador,
+          contract.arrendatario,
+          fieldContractFrequencyValue(contract),
+          row.cuotaTipo,
+          row.cuotaDetalle
+        ].filter(Boolean).join(" "));
+        if (!text.includes(search)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => fieldDateValue(a.dueDate) - fieldDateValue(b.dueDate) || normalizeSearch(fieldContractLabel(a.contract)).localeCompare(normalizeSearch(fieldContractLabel(b.contract))));
+}
+
+function renderFieldDueAgenda() {
+  const body = $("#field-due-body");
+  if (!body) return;
+  const rows = filteredFieldDueAgendaRows();
+  const pending = rows.filter((row) => row.status === "PENDIENTE_CALCULO").length;
+  const overdue = rows.filter((row) => row.status === "VENCIDA").length;
+  const calculatedTotal = rows.reduce((sum, row) => sum + Number(row.importe || 0), 0);
+  if ($("#field-due-count")) $("#field-due-count").textContent = String(rows.length);
+  if ($("#field-due-pending-count")) $("#field-due-pending-count").textContent = String(pending);
+  if ($("#field-due-overdue-count")) $("#field-due-overdue-count").textContent = String(overdue);
+  if ($("#field-due-calculated-total")) $("#field-due-calculated-total").textContent = moneyValue(calculatedTotal);
+  body.innerHTML = rows.length
+    ? rows.map((row) => {
+        const contract = row.contract || {};
+        const parts = [contract.arrendador, contract.arrendatario].filter(Boolean).join(" / ");
+        const statusClass = fieldDueStatusClass(row.status);
+        const action = row.lease
+          ? `<button type="button" class="small-button" data-field-due-open="${escapeHtml(row.lease.id)}">Abrir calculo</button>`
+          : `<button type="button" class="small-button" data-field-due-calc="${escapeHtml(contract.id || "")}" data-field-due-date="${escapeHtml(formatDateForInput(row.dueDate))}" data-field-due-installment="${escapeHtml(row.cuotaManualId || "")}">Calcular cuota</button>`;
+        return `<tr>
+          <td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(row.dueDate)) || row.dueDate || "-")}</td>
+          <td><strong>${escapeHtml(fieldContractLabel(contract))}</strong><br><small>${escapeHtml(contract.campo || "-")}</small></td>
+          <td>${escapeHtml(parts || "-")}</td>
+          <td>${escapeHtml(row.cuotaNumero ? `Cuota ${row.cuotaNumero}` : "-")}<br><small>${escapeHtml([row.cuotaTipo, row.cuotaDetalle].filter(Boolean).join(" - ") || "-")}</small></td>
+          <td><span class="status-pill ${statusClass}">${escapeHtml(fieldDueStatusLabel(row.status))}</span></td>
+          <td class="amount">${row.importe ? moneyValue(row.importe) : "-"}</td>
+          <td>${action}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="7">Sin vencimientos de Campos para los filtros seleccionados.</td></tr>`;
+}
+
+function openFieldDueCalculation(contractId = "", dueDate = "", installmentId = "") {
+  const contract = (state.fieldContracts || []).find((item) => String(item.id) === String(contractId));
+  if (!contract) {
+    $("#field-due-message").textContent = "No se encontro el contrato para calcular la cuota.";
+    $("#field-due-message").className = "form-message error";
+    return;
+  }
+  useFieldContractInCalculation(contract);
+  if ($("#field-lease-id")) $("#field-lease-id").value = "";
+  state.fieldLeasePaymentRows = [];
+  state.fieldLeaseAdjustmentRows = [];
+  if ($("#field-lease-due-date")) $("#field-lease-due-date").value = formatDateForInput(dueDate);
+  if ($("#field-lease-date")) $("#field-lease-date").value = formatDateForInput(dueDate) || new Date().toISOString().slice(0, 10);
+  if ($("#field-lease-installment") && installmentId) $("#field-lease-installment").value = installmentId;
+  renderFieldLeasePaymentRows(0);
+  renderFieldLeaseAdjustmentRows();
+  updateFieldLeasePreview();
+  showFieldsTab("calculo");
+}
+
+function findFieldContractForLease(item = {}) {
+  const contracts = state.fieldContracts || [];
+  if (item.contratoId) {
+    const byId = contracts.find((contract) => String(contract.id) === String(item.contratoId));
+    if (byId) return byId;
+  }
+  const leaseName = normalizeSearch(item.contrato || "");
+  const leaseOwner = normalizeSearch(item.cliente || "");
+  const leaseFarm = normalizeSearch(item.campo || "");
+  return contracts.find((contract) => (
+    leaseName && normalizeSearch(contract.nombre || "") === leaseName
+  )) || contracts.find((contract) => (
+    leaseFarm
+    && normalizeSearch(contract.campo || "") === leaseFarm
+    && (!leaseOwner || normalizeSearch(contract.arrendador || "") === leaseOwner)
+  )) || contracts.find((contract) => (
+    leaseName && normalizeSearch(fieldContractSearchLabel(contract)).includes(leaseName)
+  )) || null;
+}
+
 function fillFieldLeaseForm(item) {
   if (!item) return;
+  clearFieldQuoteInputs();
+  const relatedContract = findFieldContractForLease(item);
+  if (relatedContract) {
+    fillFieldContractForm(relatedContract);
+  } else {
+    state.activeFieldContract = {
+      id: item.contratoId || "",
+      nombre: item.contrato || "",
+      arrendador: item.cliente || "",
+      arrendatario: item.arrendatario || "",
+      campo: item.campo || "",
+      inicio: item.contratoDesde || item.periodoDesde || "",
+      fin: item.contratoHasta || item.periodoHasta || "",
+      frecuencia: item.frecuencia || "MENSUAL",
+      vencimientoHabitual: item.vencimientoHabitual || "",
+      criterioCotizacion: item.criterioCotizacion || item.mercado || "",
+      condiciones: item.observaciones || "",
+      partes: Array.isArray(item.partes) ? item.partes : [],
+      lineas: [
+        ...(Array.isArray(item.facturadoAnualDetalle?.lineas) ? item.facturadoAnualDetalle.lineas : []),
+        ...(Array.isArray(item.efectivoAnualDetalle?.lineas) ? item.efectivoAnualDetalle.lineas : [])
+      ],
+      cuotas: item.cuotaManual ? [item.cuotaManual] : []
+    };
+  }
+  if ($("#field-lease-id")) $("#field-lease-id").value = item.id || "";
   $("#field-lease-contract").value = item.contrato || "";
   $("#field-lease-client").value = item.cliente || "";
   $("#field-lease-farm").value = item.campo || "";
@@ -1650,33 +4224,49 @@ function fillFieldLeaseForm(item) {
   setMoneyInput("#field-lease-exchange", item.tipoCambio || 0);
   if ($("#field-lease-commission-base")) $("#field-lease-commission-base").value = item.comisionBase || "NINGUNA";
   if ($("#field-lease-commission-rate")) $("#field-lease-commission-rate").value = item.comisionPorcentaje || "";
+  if ($("#field-lease-commission-billed-rate")) $("#field-lease-commission-billed-rate").value = item.comisionFacturadoPorcentaje || "";
+  if ($("#field-lease-commission-cash-rate")) $("#field-lease-commission-cash-rate").value = item.comisionEfectivoPorcentaje || "";
   $("#field-lease-notes").value = item.observaciones || "";
   state.fieldQuoteRows = Array.isArray(item.cotizaciones) ? item.cotizaciones : [];
+  state.fieldLeaseProductQuoteRows = Array.isArray(item.productQuotes) ? item.productQuotes : [];
+  fieldLeaseManualProductQuoteKeys = new Set((state.fieldLeaseProductQuoteRows || [])
+    .filter((row) => row.manual && parseMoneyInput(row.cotizacion || 0) > 0)
+    .map((row) => String(row.producto)));
+  state.fieldLeaseLineQuoteRows = Array.isArray(item.lineQuotes) ? item.lineQuotes : [];
+  state.fieldLeasePaymentRows = Array.isArray(item.pagos) ? item.pagos : [];
+  state.fieldLeaseAdjustmentRows = Array.isArray(item.ajustes) ? item.ajustes : [];
+  renderFieldLeaseInstallmentOptions(item.cuotaManualId || "");
   renderFieldQuoteRows();
+  renderFieldLeaseLineQuoteRows(currentFieldContractForCalculation() || {}, true);
+  renderFieldLeasePaymentRows(item.totalConComision || item.totalPesos || 0);
+  renderFieldLeaseAdjustmentRows();
   if (state.fieldQuoteRows.length) syncFieldQuoteAverageToPrice();
   updateFieldLeasePreview();
+  showFieldsTab("calculo");
 }
 
 async function saveFieldLease(event) {
   event.preventDefault();
-  updateFieldLeasePreview();
-  const payload = fieldLeaseCurrentInput();
-  if (!payload.cliente && !payload.contrato && !payload.campo) {
-    setFieldLeaseMessage("Cargue al menos contrato, cliente o campo.", "error");
-    return;
-  }
-  const missingRule = fieldLeaseMissingRuleMessage(payload);
-  if (missingRule) {
-    setFieldLeaseMessage(missingRule, "error");
-    return;
-  }
   try {
+    updateFieldLeasePreview();
+    const payload = fieldLeaseCurrentInput();
+    if (!payload.cliente && !payload.contrato && !payload.campo) {
+      setFieldLeaseMessage("Cargue al menos contrato, cliente o campo.", "error");
+      return;
+    }
+    const missingRule = fieldLeaseMissingRuleMessage(payload);
+    if (missingRule) {
+      setFieldLeaseMessage(missingRule, "error");
+      return;
+    }
     const saved = await fetchJson("/api/campos/arrendamientos", {
       method: "POST",
       body: JSON.stringify(payload)
     });
+    if (saved.item?.id && $("#field-lease-id")) $("#field-lease-id").value = saved.item.id;
     state.fieldLeases = saved.items || [];
     renderFieldLeases();
+    renderFieldDueAgenda();
     setFieldLeaseMessage("Calculo guardado correctamente.", "ok");
   } catch (error) {
     setFieldLeaseMessage(error.message, "error");
@@ -1684,72 +4274,542 @@ async function saveFieldLease(event) {
 }
 
 async function deleteFieldLease(id) {
-  if (!window.confirm("Se eliminara este calculo de arrendamiento. ¿Continuar?")) return;
+  if (!window.confirm("Se eliminará este cálculo de arrendamiento. ¿Continuar?")) return;
   const saved = await fetchJson(`/api/campos/arrendamientos/${encodeURIComponent(id)}`, { method: "DELETE" });
   state.fieldLeases = saved.items || [];
   renderFieldLeases();
+  renderFieldDueAgenda();
 }
 
-function printFieldLeaseReport(item = fieldLeaseCurrentInput()) {
-  const title = safePdfTitle("Calculo_arrendamiento", item.cliente || item.campo || "campos", item.fecha || "");
+function fieldReportDate(value) {
+  const date = parseAnyLocalDate(value);
+  return date ? formatDisplayDate(date) : escapeHtml(value || "-");
+}
+
+function printFieldLeaseReport(item = fieldLeaseCurrentInput(), audience = "INTERNO") {
+  const reportAudience = String(audience || "INTERNO").toUpperCase();
+  const audienceRole = ["ARRENDADOR", "ARRENDATARIO"].includes(reportAudience) ? reportAudience : "";
+  const isInternalReport = reportAudience === "INTERNO";
+  const isGeneralReport = !isInternalReport && !audienceRole;
+  const audienceLabel = isInternalReport ? "Interno" : audienceRole ? fieldContractPartyTypeLabel(audienceRole) : "General de cuota";
+  const title = safePdfTitle(`Calculo_arrendamiento_${audienceLabel}`, item.cliente || item.campo || "campos", item.fecha || "");
   const popup = window.open("", "_blank", "width=1000,height=800");
   if (!popup) return;
+  const cashTotal = Number(item.efectivoTotal || 0);
+  const billedTotal = Number(item.facturadoTotal || 0);
+  const commissionData = {
+    generalTotal: Number(item.comisionGeneralImporte || 0),
+    billedTotal: Number(item.comisionFacturadoImporte || 0),
+    cashTotal: Number(item.comisionEfectivoImporte || 0),
+    total: Number(item.comisionImporte || 0)
+  };
+  const commissionTotal = Number(commissionData.total || 0);
+  const finalTotal = Number(item.totalConComision || item.totalPesos || 0);
+  const distributionRowsData = Array.isArray(item.distribucionPartes) && item.distribucionPartes.length
+    ? item.distribucionPartes
+    : calculateFieldLeasePartyDistribution(
+        Array.isArray(item.partes) && item.partes.length ? item.partes : fieldContractPartyRowsFromContract({
+          arrendador: item.cliente,
+          arrendatario: item.arrendatario
+        }),
+        billedTotal,
+        cashTotal,
+        commissionData
+      );
+  const visibleDistributionRows = isInternalReport || isGeneralReport
+    ? distributionRowsData
+    : distributionRowsData.filter((row) => String(row.tipo || "").toUpperCase() === audienceRole);
+  const rawPaymentRowsData = Array.isArray(item.pagos) ? item.pagos : [];
+  const paymentRowsData = isInternalReport
+    ? rawPaymentRowsData
+    : audienceRole ? rawPaymentRowsData.filter((payment) => fieldLeasePaymentAppliesToParty(payment, audienceRole)) : [];
+  const visibleBilledTotal = isInternalReport || isGeneralReport ? billedTotal : visibleDistributionRows.reduce((sum, row) => sum + Number(row.facturado || 0), 0);
+  const visibleCashTotal = isInternalReport || isGeneralReport ? cashTotal : visibleDistributionRows.reduce((sum, row) => sum + Number(row.efectivo || 0), 0);
+  const visibleQuotaTotal = isInternalReport || isGeneralReport ? Number(item.totalPesos || 0) : visibleDistributionRows.reduce((sum, row) => sum + Number(row.totalCuota || 0), 0);
+  const visibleCommissionTotal = isInternalReport ? commissionTotal : audienceRole ? visibleDistributionRows.reduce((sum, row) => sum + Number(row.comision || 0), 0) : 0;
+  const visibleNetTotal = isInternalReport
+    ? finalTotal
+    : audienceRole ? visibleDistributionRows.reduce((sum, row) => sum + fieldLeaseMiniLedgerNet(row).neto, 0) : Number(item.totalPesos || 0);
+  const paymentsTotals = paymentRowsData.reduce((acc, payment) => {
+    const amount = parseMoneyInput(payment.importe || 0);
+    acc.aplicado += amount;
+    if (isFieldLeaseCommissionPayment(payment)) acc.comision += amount;
+    else acc.pagado += amount;
+    return acc;
+  }, { pagado: 0, comision: 0, aplicado: 0 });
+  const paymentsAppliedToBalance = isInternalReport || isGeneralReport
+    ? paymentsTotals.aplicado
+    : fieldLeaseAppliedAmountForBalance(paymentsTotals, audienceRole);
+  const paymentBalance = visibleNetTotal - paymentsAppliedToBalance;
+  const divisorText = item.frecuenciaDivisor && item.frecuenciaDivisor > 1
+    ? `Importes de la cuota calculados sobre base anual / ${plainNumberValue(item.frecuenciaDivisor)}.`
+    : "Importes calculados para el vencimiento informado.";
+  const manualInstallment = item.cuotaManual || null;
+  const manualInstallmentNote = manualInstallment
+    ? `Cuota ${plainNumberValue(manualInstallment.numero || 0)} - ${fieldContractInstallmentTypeLabel(manualInstallment.tipo)}${manualInstallment.porcentaje ? ` - ${plainNumberValue(manualInstallment.porcentaje)}%` : ""}${manualInstallment.cantidadFija ? ` - ${plainNumberValue(manualInstallment.cantidadFija)} ${manualInstallment.unidadCantidad || "KG"}` : ""}${manualInstallment.importeFijo ? ` - ${moneyValue(manualInstallment.importeFijo)}` : ""}`
+    : "";
+  const mixedLineRows = [
+    ...(Array.isArray(item.facturadoDetalle?.lineas) ? item.facturadoDetalle.lineas.map((line) => ({ ...line, bloque: "Facturado / contrato" })) : []),
+    ...(Array.isArray(item.efectivoDetalle?.lineas) ? item.efectivoDetalle.lineas.map((line) => ({ ...line, bloque: "Efectivo" })) : [])
+  ];
+  const productQuoteRows = Array.isArray(item.productQuotes)
+    ? item.productQuotes.filter((row) => parseMoneyInput(row.cotizacion || 0))
+    : [];
+  const hasProductSpecificQuoteContext = mixedLineRows.length > 0 || productQuoteRows.length > 0;
   const quoteRows = Array.isArray(item.cotizaciones) && item.cotizaciones.length
-    ? item.cotizaciones.map((row) => `<tr><td>${escapeHtml(row.fecha || "-")}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${moneyValue(row.cotizacion)}</td></tr>`).join("")
+    ? item.cotizaciones.map((row) => `<tr><td>${fieldReportDate(row.fecha)}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${escapeHtml(fieldQuoteDisplayValue(row))}</td></tr>`).join("")
     : `<tr><td colspan="4">Sin detalle de cotizaciones. Se informa la cotizacion/promedio cargado manualmente.</td></tr>`;
-  const componentRow = (label, detail) => `<tr><td>${label}</td><td>${escapeHtml(detail?.base || "-")}</td><td>${plainNumberValue(detail?.hectareas || 0)}</td><td>${plainNumberValue(detail?.tasa || 0)}</td><td>${plainNumberValue(detail?.cantidad || 0)}</td><td class="amount">${moneyValue(detail?.total || 0)}</td></tr>`;
+  const quoteGroups = new Map();
+  (Array.isArray(item.cotizaciones) ? item.cotizaciones : []).forEach((row) => {
+    const product = fieldContractLineProductKey(row.producto || "");
+    if (!quoteGroups.has(product)) quoteGroups.set(product, []);
+    quoteGroups.get(product).push(row);
+  });
+  const quoteGroupsBlock = quoteGroups.size
+    ? Array.from(quoteGroups.entries()).map(([product, rows]) => {
+        const quoteValues = rows.map((row) => parseMoneyInput(row.cotizacion || 0)).filter((value) => value > 0);
+        const average = quoteValues.length ? quoteValues.reduce((sum, value) => sum + value, 0) / quoteValues.length : 0;
+        return `<h3>${escapeHtml(fieldContractLineProductLabel(product))}</h3>
+          <table><thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th></tr></thead><tbody>
+            ${rows.map((row) => `<tr><td>${fieldReportDate(row.fecha)}</td><td>${escapeHtml(row.mercado || "-")}</td><td>${escapeHtml(row.producto || "-")}</td><td class="amount">${escapeHtml(fieldQuoteDisplayValue(row))}</td></tr>`).join("")}
+            <tr class="total"><td colspan="3">Promedio ${escapeHtml(fieldContractLineProductLabel(product))}${quoteValues.length !== rows.length ? ` (${quoteValues.length} cotizaciones con valor)` : ""}</td><td class="amount">${average ? moneyValue(average) : "-"}</td></tr>
+          </tbody></table>`;
+      }).join("")
+    : productQuoteRows.length
+      ? `<table><thead><tr><th>Producto / indice</th><th>Lineas que aplica</th><th>Unidad</th><th>Cotizacion aplicada</th></tr></thead><tbody>
+          ${productQuoteRows.map((row) => `<tr><td>${escapeHtml(row.etiqueta || fieldContractLineProductLabel(row.producto))}</td><td>${plainNumberValue(row.lineas || 0)}</td><td>${String(row.unidad || "").toUpperCase() === "TN" ? "Por tonelada" : "Por kg"}</td><td class="amount">${moneyValue(row.cotizacion)}</td></tr>`).join("")}
+        </tbody></table>`
+      : hasProductSpecificQuoteContext
+        ? `<table><tbody><tr><td>Contrato con lineas mixtas: las cotizaciones se informan por producto o indice en el detalle de lineas. No corresponde informar un promedio general unico.</td></tr></tbody></table>`
+    : `<table><tbody>${quoteRows}<tr class="total"><td colspan="3">Promedio / cotizacion aplicada</td><td class="amount">${moneyValue(item.cotizacionPesos || item.cotizacion)}</td></tr></tbody></table>`;
+  const quoteGridRows = hasProductSpecificQuoteContext
+    ? `<span>Cotizaciones</span><strong>Por producto / indice</strong>
+      <span>Detalle cotizacion</span><strong>Ver bloque de cotizaciones utilizadas</strong>`
+    : `<span>Cotizacion por ${item.unidadCotizacion === "TN" ? "tonelada" : "kg"}</span><strong>${item.moneda === "USD" ? `USD ${plainNumberValue(item.cotizacion)} x TC ${moneyValue(item.tipoCambio)}` : moneyValue(item.cotizacion)}</strong>
+      <span>Promedio aplicado</span><strong>${moneyValue(item.cotizacionPesos || item.cotizacion)}</strong>`;
+  const componentRow = (label, detail, cssClass = "") => {
+    const annualTotal = Number(detail?.totalAnual || 0);
+    const cuotaTotal = Number(detail?.total || 0);
+    const tons = detail?.toneladas ? `${plainNumberValue(detail.toneladas)} tn` : "-";
+    return `<tr class="${cssClass}"><td>${label}</td><td>${escapeHtml(detail?.base || "-")}</td><td>${plainNumberValue(detail?.hectareas || 0)}</td><td>${plainNumberValue(detail?.tasa || 0)}</td><td>${plainNumberValue(detail?.cantidad || 0)} kg</td><td>${tons}</td><td class="amount">${moneyValue(annualTotal)}</td><td class="amount">${moneyValue(cuotaTotal)}</td></tr>`;
+  };
+  const lineQuantityText = (line) => String(line.unidadCalculo || "").toUpperCase() === "TN"
+    ? `${plainNumberValue(line.toneladas || 0)} tn`
+    : `${plainNumberValue(line.cantidad || 0)} kg`;
+  const lineQuoteText = (line) => line.cotizacionAplicada
+    ? `${moneyValue(line.cotizacionAplicada)} / ${String(line.unidadCalculo || "").toUpperCase() === "TN" ? "tn" : "kg"}`
+    : "-";
+  const mixedLinesBlock = mixedLineRows.length
+    ? `<h2>Detalle de lineas mixtas</h2>
+      <table><thead><tr><th>Bloque</th><th>Detalle</th><th>Has.</th><th>Base</th><th>Kg/ha o importe</th><th>Cantidad cuota</th><th>Cotizacion usada</th><th>Importe cuota</th></tr></thead><tbody>
+        ${mixedLineRows.map((line) => `<tr${String(line.bloque || "").toUpperCase().includes("EFECTIVO") ? ' class="cash"' : ""}>
+          <td>${escapeHtml(line.bloque || "-")}</td>
+          <td>${escapeHtml(line.detalle || "-")}</td>
+          <td>${plainNumberValue(line.hectareas || 0)}</td>
+          <td>${escapeHtml(fieldContractBaseLabel(line.base))}</td>
+          <td>${plainNumberValue(line.tasa || 0)}</td>
+          <td>${lineQuantityText(line)}</td>
+          <td class="amount">${lineQuoteText(line)}</td>
+          <td class="amount">${moneyValue(line.total || 0)}</td>
+        </tr>`).join("")}
+      </tbody></table>`
+    : "";
+  const commissionRows = isInternalReport
+    ? [
+        item.comisionGeneralImporte ? `<tr><td>Comision general</td><td>${escapeHtml(item.comisionBase || "-")}</td><td>${plainNumberValue(item.comisionPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionBaseImporte || 0)}</td><td class="amount">${moneyValue(item.comisionGeneralImporte)}</td></tr>` : "",
+        item.comisionFacturadoImporte ? `<tr><td>Comision sobre facturado</td><td>Facturado / contrato</td><td>${plainNumberValue(item.comisionFacturadoPorcentaje || 0)}%</td><td class="amount">${moneyValue(billedTotal)}</td><td class="amount">${moneyValue(item.comisionFacturadoImporte)}</td></tr>` : "",
+        item.comisionEfectivoImporte ? `<tr><td>Comision sobre efectivo</td><td>Efectivo</td><td>${plainNumberValue(item.comisionEfectivoPorcentaje || 0)}%</td><td class="amount">${moneyValue(cashTotal)}</td><td class="amount">${moneyValue(item.comisionEfectivoImporte)}</td></tr>` : ""
+      ].join("")
+    : visibleCommissionTotal
+      ? `<tr><td>Comision correspondiente a ${escapeHtml(audienceLabel.toLowerCase())}</td><td>${audienceRole === "ARRENDADOR" ? "Se descuenta al cobrador" : "Se suma al pagador"}</td><td>-</td><td class="amount">${moneyValue(visibleQuotaTotal)}</td><td class="amount">${moneyValue(visibleCommissionTotal)}</td></tr>`
+      : "";
+  const commissionBlock = commissionRows && !isGeneralReport
+    ? `<h2>Comision</h2><table><thead><tr><th>Concepto</th><th>Aplica sobre</th><th>%</th><th>Base</th><th>Importe</th></tr></thead><tbody>${commissionRows}<tr class="total"><td colspan="4">Total comision</td><td class="amount">${moneyValue(visibleCommissionTotal)}</td></tr></tbody></table>`
+    : "";
+  const paymentRows = paymentRowsData.length
+    ? paymentRowsData.map((payment) => {
+        const cashPayment = /EFECTIVO/i.test([payment.concepto, payment.medio, payment.referencia].filter(Boolean).join(" "));
+        return `<tr${cashPayment ? ' class="cash"' : ""}><td>${fieldReportDate(payment.fecha)}</td><td>${escapeHtml(fieldLeasePaymentConceptLabel(payment.concepto))}</td><td>${escapeHtml(fieldLeasePaymentPartyLabel(payment.parte))}</td><td>${escapeHtml(fieldLeasePaymentCommissionFullDetail(payment))}</td><td>${escapeHtml(fieldLeasePaymentStatusLabel(payment.estado))}</td><td>${escapeHtml(payment.medio || "-")}</td><td>${escapeHtml(payment.referencia || "-")}</td><td class="amount">${moneyValue(payment.importe || 0)}</td></tr>`;
+      }).join("")
+    : `<tr><td colspan="8">Sin pagos registrados para esta cuota.</td></tr>`;
+  const adjustmentRowsData = Array.isArray(item.ajustes) ? item.ajustes : [];
+  const adjustmentRows = adjustmentRowsData.length
+    ? adjustmentRowsData.map((adjustment) => `<tr>
+        <td>${fieldReportDate(adjustment.fecha)}</td>
+        <td>${escapeHtml(fieldLeaseAdjustmentPartLabel(adjustment.parte))}</td>
+        <td>${escapeHtml(adjustment.motivo || "-")}</td>
+        <td>${escapeHtml(adjustment.referencia || "-")}</td>
+        <td class="amount">${adjustment.promedioOriginal ? moneyValue(adjustment.promedioOriginal) : "-"}</td>
+        <td class="amount">${adjustment.promedioNuevo ? moneyValue(adjustment.promedioNuevo) : "-"}</td>
+        <td class="amount">${adjustment.importeOriginal ? moneyValue(adjustment.importeOriginal) : "-"}</td>
+        <td class="amount">${adjustment.importeReajustado ? moneyValue(adjustment.importeReajustado) : "-"}</td>
+        <td class="amount">${moneyValue(adjustment.diferencia || 0)}</td>
+        <td class="amount">${adjustment.comisionOriginal ? moneyValue(adjustment.comisionOriginal) : "-"}</td>
+        <td class="amount">${adjustment.comisionReajustada ? moneyValue(adjustment.comisionReajustada) : "-"}</td>
+        <td class="amount">${moneyValue(adjustment.diferenciaComision || 0)}</td>
+        <td>${escapeHtml(fieldLeaseAdjustmentStatusLabel(adjustment.estado))}</td>
+      </tr>`).join("")
+    : "";
+  const adjustmentTotal = adjustmentRowsData.reduce((sum, adjustment) => sum + Number(adjustment.diferencia || 0), 0);
+  const adjustmentCommissionTotal = adjustmentRowsData.reduce((sum, adjustment) => sum + Number(adjustment.diferenciaComision || 0), 0);
+  const adjustmentBlock = adjustmentRowsData.length
+    ? `<h2>Ajustes / reliquidaciones</h2>
+      <table><thead><tr><th>Fecha</th><th>Parte ajustada</th><th>Motivo</th><th>Referencia</th><th>Prom. original</th><th>Prom. reajustado</th><th>Importe original</th><th>Importe reajustado</th><th>Diferencia cuota</th><th>Com. original</th><th>Com. reaj.</th><th>Dif. com.</th><th>Estado</th></tr></thead><tbody>
+        ${adjustmentRows}
+        <tr class="total"><td colspan="8">Diferencia total por ajustes</td><td class="amount">${moneyValue(adjustmentTotal)}</td><td colspan="2">Diferencia comision</td><td class="amount">${moneyValue(adjustmentCommissionTotal)}</td><td></td></tr>
+      </tbody></table>`
+    : "";
+  const partyNetRows = visibleDistributionRows.length
+    ? visibleDistributionRows.map((row) => {
+        const result = fieldLeaseMiniLedgerNet(row);
+        const role = String(row.tipo || "").toUpperCase();
+        const roleShort = role === "ARRENDATARIO" ? "Arrendatario" : "Arrendador";
+        const cuitCompact = String(row.cuit || "-").replace(/[^\d]/g, "") || "-";
+        const criterionShort = Number(row.comision || 0)
+          ? (role === "ARRENDATARIO" ? "Suma com." : "Desc. com.")
+          : "-";
+        return `<tr>
+          <td>${escapeHtml(row.nombre || "-")}</td>
+          <td>${escapeHtml(roleShort)}</td>
+          <td class="nowrap">${escapeHtml(cuitCompact)}</td>
+          <td class="amount">${plainNumberValue(row.porcentaje || 0)}%</td>
+          <td class="amount">${moneyValue(row.facturado || 0)}</td>
+          <td class="amount">${moneyValue(row.efectivo || 0)}</td>
+          <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
+          <td class="amount">${moneyValue(row.comision || 0)}</td>
+          <td>${escapeHtml(criterionShort)}</td>
+          <td class="amount">${moneyValue(result.neto)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="10">Sin partes cargadas para este reporte.</td></tr>`;
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
-    body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22}
-    header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:12px}
-    img{width:160px;height:58px;object-fit:contain}
-    h1{font-size:18px;margin:0} h2{font-size:13px;margin:12px 0 5px} p{margin:3px 0;font-size:11px}
-    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border:1px solid #dbcbb8;margin-bottom:10px}
-    .grid span,.grid strong{border-bottom:1px solid #dbcbb8;padding:5px;font-size:10px}.grid span{background:#f8f2ea;color:#7b5a32}.grid strong{font-size:11px}
-    table{width:100%;border-collapse:collapse;font-size:10px;margin-top:5px}th,td{border:1px solid #dbcbb8;padding:5px;text-align:left}th{background:#f8f2ea}.amount{text-align:right;font-weight:700}
-    .total{background:#fff3e8;font-weight:700}.cash{background:#fff8ed}.note{border:1px solid #dbcbb8;padding:7px;margin-top:10px;font-size:10px}
-    button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:10mm}body{margin:0}button{display:none}}
+    body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22;font-size:10.5px}
+    header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:10px}
+    img{width:185px;height:68px;object-fit:contain}
+    h1{font-size:18px;margin:0 0 3px} h2{font-size:12px;margin:11px 0 5px;color:#3d2d22} p{margin:2px 0;font-size:10px}
+    .muted{color:#7b5a32}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0 10px}
+    .box{border:1px solid #dbcbb8;background:#fffaf4;padding:7px;min-height:42px}.box span{display:block;font-size:9px;color:#7b5a32;text-transform:uppercase}.box strong{display:block;font-size:15px;margin-top:4px;color:#1f160f}
+    .box.main{background:#fff3e8;border-color:#d4ac7a}.box.main strong{font-size:16px}
+    .grid{display:grid;grid-template-columns:155px 1fr 155px 1fr;border:1px solid #dbcbb8;margin-bottom:8px}
+    .grid span,.grid strong{border-bottom:1px solid #dbcbb8;padding:4px;font-size:9.5px}.grid span{background:#f8f2ea;color:#7b5a32}.grid strong{font-size:10px}
+    table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:5px}th,td{border:1px solid #dbcbb8;padding:4px;text-align:left;vertical-align:top}th{background:#f8f2ea}.amount{text-align:right;font-weight:700;white-space:nowrap}
+    .party-table{font-size:7.6px;table-layout:fixed}.party-table th,.party-table td{padding:2.5px}.party-table .party-name{width:22%}.party-table .party-role{width:8%}.party-table .party-cuit{width:9%}.party-table .party-percent{width:5%}.party-table .party-money{width:9.5%}.party-table .party-criterion{width:7%}.nowrap{white-space:nowrap}
+    .total{background:#fff3e8;font-weight:700}.cash,.cash-row-soft{background:#fff8ed}.cash td,.cash-row-soft td{font-style:italic;font-weight:700}.note{border:1px solid #dbcbb8;padding:7px;margin-top:9px;font-size:9.5px;line-height:1.25}
+    .print-actions{margin-top:14px}.print-actions button{padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}body{margin:0}.print-actions{display:none}h2{break-after:avoid}table{break-inside:auto}tr{break-inside:avoid}}
   </style></head><body>
-    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Campos - Calculo de arrendamiento</h1><p>Hugo Pinna - Contratos y Campos</p><p>Fecha: ${escapeHtml(item.fecha || "-")}</p></div></header>
+    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Calculo de arrendamiento - ${escapeHtml(audienceLabel)}</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.cliente || "-")} / ${escapeHtml(item.arrendatario || "-")} | ${escapeHtml(item.campo || "-")} | Fecha de calculo: ${fieldReportDate(item.fecha)}</p></div></header>
+    <section class="summary">
+      <div class="box"><span>Vencimiento</span><strong>${fieldReportDate(item.vencimiento)}</strong></div>
+      <div class="box"><span>Facturado / contrato</span><strong>${moneyValue(visibleBilledTotal)}</strong></div>
+      <div class="box"><span>Efectivo</span><strong>${moneyValue(visibleCashTotal)}</strong></div>
+      <div class="box main"><span>${visibleCommissionTotal ? "Neto con comision" : "Total cuota"}</span><strong>${moneyValue(visibleNetTotal)}</strong></div>
+      ${isGeneralReport ? "" : `<div class="box"><span>Pagado</span><strong>${moneyValue(paymentsTotals.pagado)}</strong></div>
+      <div class="box"><span>Comision/descuento</span><strong>${moneyValue(paymentsTotals.comision)}</strong></div>
+      <div class="box main"><span>Saldo</span><strong>${moneyValue(paymentBalance)}</strong></div>`}
+    </section>
     <div class="grid">
       <span>Contrato / referencia</span><strong>${escapeHtml(item.contrato || "-")}</strong>
-      <span>Cliente / arrendador</span><strong>${escapeHtml(item.cliente || "-")}</strong>
+      <span>Arrendador</span><strong>${escapeHtml(item.cliente || "-")}</strong>
+      <span>Arrendatario</span><strong>${escapeHtml(item.arrendatario || "-")}</strong>
       <span>Campo</span><strong>${escapeHtml(item.campo || "-")}</strong>
-      <span>Periodo</span><strong>${escapeHtml(item.periodoDesde || "-")} a ${escapeHtml(item.periodoHasta || "-")}</strong>
-      <span>Vencimiento cuota</span><strong>${escapeHtml(item.vencimiento || "-")}</strong>
-      <span>Proximo vencimiento</span><strong>${escapeHtml(item.proximoVencimiento || "-")}</strong>
+      <span>Vigencia contrato</span><strong>${fieldReportDate(item.contratoDesde)} a ${fieldReportDate(item.contratoHasta)}</strong>
+      <span>Fecha de calculo</span><strong>${fieldReportDate(item.fecha)}</strong>
+      <span>Periodo de cuota</span><strong>${fieldReportDate(item.periodoDesde)} a ${fieldReportDate(item.periodoHasta)}</strong>
+      <span>Vencimiento cuota</span><strong>${fieldReportDate(item.vencimiento)}</strong>
+      <span>Cuota manual</span><strong>${escapeHtml(manualInstallmentNote || "No aplica")}</strong>
+      <span>Detalle cuota</span><strong>${escapeHtml(manualInstallment?.detalle || "-")}</strong>
+      <span>Proximo vencimiento</span><strong>${fieldReportDate(item.proximoVencimiento)}</strong>
+      <span>Frecuencia</span><strong>${escapeHtml(item.frecuencia || "-")}${item.frecuenciaDivisor && item.frecuenciaDivisor > 1 ? ` (anual / ${plainNumberValue(item.frecuenciaDivisor)})` : ""}</strong>
       <span>Hectareas</span><strong>${plainNumberValue(item.hectareas)}</strong>
       <span>Producto / referencia</span><strong>${escapeHtml([item.cereal, item.mercado].filter(Boolean).join(" - ") || "-")}</strong>
-      <span>Cotizacion por ${item.unidadCotizacion === "TN" ? "tonelada" : "kg"}</span><strong>${item.moneda === "USD" ? `USD ${plainNumberValue(item.cotizacion)} x TC ${moneyValue(item.tipoCambio)}` : moneyValue(item.cotizacion)}</strong>
-      <span>Total cuota</span><strong>${moneyValue(item.totalPesos)}</strong>
-      <span>Comision</span><strong>${item.comisionBase && item.comisionBase !== "NINGUNA" ? `${escapeHtml(item.comisionBase)} ${plainNumberValue(item.comisionPorcentaje)}% = ${moneyValue(item.comisionImporte)}` : "-"}</strong>
-      <span>Total con comision</span><strong>${moneyValue(item.totalConComision || item.totalPesos)}</strong>
+      ${quoteGridRows}
+      <span>Criterio</span><strong>${escapeHtml(divisorText)}</strong>
     </div>
-    <h2>Cotizaciones utilizadas</h2>
-    <table><thead><tr><th>Fecha</th><th>Mercado</th><th>Producto</th><th>Cotizacion</th></tr></thead><tbody>${quoteRows}<tr class="total"><td colspan="3">Promedio / cotizacion aplicada</td><td class="amount">${moneyValue(item.cotizacionPesos || item.cotizacion)}</td></tr></tbody></table>
     <h2>Detalle de calculo de la cuota</h2>
-    <table><thead><tr><th>Bloque</th><th>Base</th><th>Has.</th><th>Kg/ha o importe</th><th>Cantidad kg</th><th>Importe</th></tr></thead><tbody>
+    <table><thead><tr><th>Bloque</th><th>Base</th><th>Has.</th><th>Kg/ha o importe</th><th>Kg anuales</th><th>Toneladas</th><th>Base anual</th><th>Importe cuota</th></tr></thead><tbody>
       ${componentRow("Facturado / contrato", item.facturadoDetalle || {})}
-      ${item.efectivoTotal ? componentRow("Efectivo", item.efectivoDetalle || {}) : ""}
-      ${item.comisionImporte ? `<tr><td>Comision</td><td>${escapeHtml(item.comisionBase || "-")}</td><td colspan="3">${plainNumberValue(item.comisionPorcentaje || 0)}%</td><td class="amount">${moneyValue(item.comisionImporte)}</td></tr>` : ""}
-      <tr class="total"><td colspan="5">Total cuota</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr>
-      ${item.comisionImporte ? `<tr class="total"><td colspan="5">Total con comision</td><td class="amount">${moneyValue(item.totalConComision || item.totalPesos)}</td></tr>` : ""}
+      ${cashTotal ? componentRow("Efectivo", item.efectivoDetalle || {}, "cash") : ""}
+      <tr class="total"><td colspan="7">Total cuota</td><td class="amount">${moneyValue(item.totalPesos)}</td></tr>
+    </tbody></table>
+    ${mixedLinesBlock}
+    <h2>Cotizaciones utilizadas</h2>
+    ${quoteGroupsBlock}
+    ${commissionBlock}
+    ${adjustmentBlock}
+    <h2>${isInternalReport || isGeneralReport ? "Distribucion por partes de la cuota" : `Resumen correspondiente a ${escapeHtml(audienceLabel.toLowerCase())}`}</h2>
+    <table class="party-table"><thead><tr><th class="party-name">Parte</th><th class="party-role">Rol</th><th class="party-cuit">CUIT</th><th class="party-percent">%</th><th class="party-money">Fact.</th><th class="party-money">Efec.</th><th class="party-money">Total</th><th class="party-money">Com.</th><th class="party-criterion">Criterio</th><th class="party-money">Neto</th></tr></thead><tbody>
+      ${partyNetRows}
     </tbody></table>
     ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
-    <button onclick="window.print()">Imprimir / guardar PDF</button>
+    ${isGeneralReport ? "" : `<h2>Pagos imputados a esta cuota</h2>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="7">Total pagado</td><td class="amount">${moneyValue(paymentsTotals.pagado)}</td></tr><tr class="total"><td colspan="7">Comision/descuento registrado</td><td class="amount">${moneyValue(paymentsTotals.comision)}</td></tr><tr class="total"><td colspan="7">Total aplicado al saldo</td><td class="amount">${moneyValue(paymentsAppliedToBalance)}</td></tr><tr class="total"><td colspan="7">Saldo pendiente general</td><td class="amount">${moneyValue(paymentBalance)}</td></tr></tbody></table>`}
+    <div class="print-actions"><button type="button" data-print-popup>Imprimir / guardar PDF</button></div>
   </body></html>`);
-  popup.document.close();
+  finishPrintPopup(popup);
 }
 
-function printCurrentFieldLeaseReport() {
-  updateFieldLeasePreview();
-  const payload = fieldLeaseCurrentInput();
-  const missingRule = fieldLeaseMissingRuleMessage(payload);
-  if (missingRule) {
-    setFieldLeaseMessage(missingRule, "error");
+function printCurrentFieldLeaseReport(audience = "INTERNO") {
+  try {
+    updateFieldLeasePreview();
+    const payload = fieldLeaseCurrentInput();
+    const missingRule = fieldLeaseMissingRuleMessage(payload);
+    if (missingRule) {
+      setFieldLeaseMessage(missingRule, "error");
+      return;
+    }
+    setFieldLeaseMessage("");
+    printFieldLeaseReport(payload, audience);
+  } catch (error) {
+    setFieldLeaseMessage(error.message || "No se pudo generar el reporte del calculo.", "error");
+  }
+}
+
+function fieldLeaseReceiptRowsForRole(item = {}, role = "ARRENDADOR", partyKey = "") {
+  const billedTotal = Number(item.facturadoTotal || 0);
+  const cashTotal = Number(item.efectivoTotal || 0);
+  const commissionData = {
+    generalTotal: Number(item.comisionGeneralImporte || 0),
+    billedTotal: Number(item.comisionFacturadoImporte || 0),
+    cashTotal: Number(item.comisionEfectivoImporte || 0),
+    total: Number(item.comisionImporte || 0)
+  };
+  const distributionRows = Array.isArray(item.distribucionPartes) && item.distribucionPartes.length
+    ? item.distribucionPartes
+    : calculateFieldLeasePartyDistribution(
+        fieldContractPartyRowsFromContract(item),
+        billedTotal,
+        cashTotal,
+        commissionData
+      );
+  return distributionRows.filter((row) => {
+    if (String(row.tipo || "").toUpperCase() !== role) return false;
+    return partyKey ? fieldLeasePartyRowKey(row) === partyKey : true;
+  });
+}
+
+function fieldLeaseReceiptPaymentRowsForRole(item = {}, role = "ARRENDADOR", rows = [], specificParty = false) {
+  return (Array.isArray(item.pagos) ? item.pagos : []).filter((payment) => {
+    if (!specificParty) return fieldLeasePaymentAppliesToParty(payment, role);
+    if (!rows.length) return false;
+    if (rows.some((row) => payment.partyKey && String(payment.partyKey) === fieldLeasePartyRowKey(row))) return true;
+    if (String(role || "").toUpperCase() === "ARRENDADOR") {
+      return rows.some((row) => {
+        const reference = String(payment.referencia || "").toUpperCase();
+        const name = String(row.nombre || "").trim().toUpperCase();
+        return !!name && reference.includes(name);
+      });
+    }
+    return fieldLeasePaymentAppliesToParty(payment, role);
+  });
+}
+
+function fieldLeaseReceiptPdfTitle(item = {}, roleLabel = "Arrendador", rows = [], partyKey = "") {
+  const partyName = partyKey && rows.length === 1 ? rows[0].nombre : "";
+  const dueLabel = fieldReportDate(item.vencimiento || item.fecha || "");
+  return safePdfTitle(
+    "Recibo_arrendamiento",
+    roleLabel,
+    partyName,
+    item.contrato || item.campo || "cuota",
+    dueLabel ? `Vto_${dueLabel}` : ""
+  );
+}
+
+function printFieldLeaseReceipt(item = fieldLeaseCurrentInput(), role = "ARRENDADOR", partyKey = "") {
+  const receiptRole = String(role || "ARRENDADOR").toUpperCase() === "ARRENDATARIO" ? "ARRENDATARIO" : "ARRENDADOR";
+  const roleLabel = fieldContractPartyTypeLabel(receiptRole);
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    setFieldLeaseMessage("El navegador bloqueo la ventana del recibo. Habilite ventanas emergentes.", "error");
     return;
   }
-  setFieldLeaseMessage("");
-  printFieldLeaseReport(payload);
+  const rows = fieldLeaseReceiptRowsForRole(item, receiptRole, partyKey);
+  const receiptTitle = fieldLeaseReceiptPdfTitle(item, roleLabel, rows, partyKey);
+  const payments = fieldLeaseReceiptPaymentRowsForRole(item, receiptRole, rows, !!partyKey);
+  const totals = rows.reduce((acc, row) => {
+    const result = fieldLeaseMiniLedgerNet(row);
+    acc.facturado += Number(row.facturado || 0);
+    acc.efectivo += Number(row.efectivo || 0);
+    acc.totalCuota += Number(row.totalCuota || 0);
+    acc.comisionFacturado += Number(row.comisionFacturado || 0);
+    acc.comisionEfectivo += Number(row.comisionEfectivo || 0);
+    acc.comision += Number(row.comision || 0);
+    acc.neto += result.neto;
+    return acc;
+  }, { facturado: 0, efectivo: 0, totalCuota: 0, comisionFacturado: 0, comisionEfectivo: 0, comision: 0, neto: 0 });
+  const paymentTotals = payments.reduce((acc, payment) => {
+    const amount = parseMoneyInput(payment.importe || 0);
+    acc.total += amount;
+    const concept = String(payment.concepto || "").toUpperCase();
+    if (isFieldLeaseCommissionPayment(payment)) acc.comision += amount;
+    else if (concept === "PAGO_FACTURADO") acc.facturado += amount;
+    else if (concept === "PAGO_EFECTIVO") acc.efectivo += amount;
+    else acc.pagos += amount;
+    return acc;
+  }, { pagos: 0, facturado: 0, efectivo: 0, comision: 0, total: 0 });
+  const paymentAppliedToBalance = fieldLeaseAppliedAmountForBalance(paymentTotals, receiptRole);
+  const balance = totals.neto - paymentAppliedToBalance;
+  const hasRecordedPayments = payments.length > 0;
+  const receiptMainAmount = hasRecordedPayments ? paymentAppliedToBalance : totals.neto;
+  const receiptMainLabel = receiptRole === "ARRENDADOR"
+    ? "Importe efectivamente pagado en este recibo"
+    : "Importe efectivamente cobrado en este recibo";
+  const receiptMainNote = hasRecordedPayments
+    ? "Segun pagos, descuentos y comisiones registrados para este comprobante."
+    : "Importe informado antes de registrar pagos o descuentos.";
+  const commissionGeneral = Math.max(totals.comision - totals.comisionFacturado - totals.comisionEfectivo, 0);
+  const netFacturado = receiptRole === "ARRENDADOR"
+    ? totals.facturado - totals.comisionFacturado
+    : totals.facturado + totals.comisionFacturado;
+  const netEfectivo = receiptRole === "ARRENDADOR"
+    ? totals.efectivo - totals.comisionEfectivo
+    : totals.efectivo + totals.comisionEfectivo;
+  const netGeneral = receiptRole === "ARRENDADOR" ? -commissionGeneral : commissionGeneral;
+  const commissionColumnLabel = receiptRole === "ARRENDADOR" ? "Comision descontada" : "Comision sumada";
+  const netColumnLabel = receiptRole === "ARRENDADOR" ? "Neto que cobra" : "Total a pagar";
+  const settlementRows = `
+    <tr>
+      <td>Contrato / facturado</td>
+      <td class="amount">${moneyValue(totals.facturado)}</td>
+      <td class="amount">${moneyValue(totals.comisionFacturado)}</td>
+      <td class="amount">${moneyValue(netFacturado)}</td>
+    </tr>
+    <tr class="cash">
+      <td>Efectivo</td>
+      <td class="amount">${moneyValue(totals.efectivo)}</td>
+      <td class="amount">${moneyValue(totals.comisionEfectivo)}</td>
+      <td class="amount">${moneyValue(netEfectivo)}</td>
+    </tr>
+    ${commissionGeneral ? `<tr>
+      <td>Comision general no asignada a bloque</td>
+      <td class="amount">-</td>
+      <td class="amount">${moneyValue(commissionGeneral)}</td>
+      <td class="amount">${moneyValue(netGeneral)}</td>
+    </tr>` : ""}
+    <tr class="total">
+      <td>Total de este recibo</td>
+      <td class="amount">${moneyValue(totals.totalCuota)}</td>
+      <td class="amount">${moneyValue(totals.comision)}</td>
+      <td class="amount">${moneyValue(totals.neto)}</td>
+    </tr>`;
+  const paymentExplanation = receiptRole === "ARRENDADOR"
+    ? "Para el arrendador, la comision se descuenta del importe que cobra. El saldo compara el neto contra los pagos reales registrados."
+    : "Para el arrendatario, la comision se suma al importe que paga. El saldo compara el total a pagar contra los pagos registrados.";
+  const partyRows = rows.length
+    ? rows.map((row) => {
+        const result = fieldLeaseMiniLedgerNet(row);
+        return `<tr>
+          <td>${escapeHtml(row.nombre || "-")}</td>
+          <td class="nowrap">${escapeHtml(row.cuit || "-")}</td>
+          <td class="amount">${plainNumberValue(row.porcentaje || 0)}%</td>
+          <td class="amount">${moneyValue(row.facturado || 0)}</td>
+          <td class="amount">${moneyValue(row.efectivo || 0)}</td>
+          <td class="amount">${moneyValue(row.totalCuota || 0)}</td>
+          <td class="amount">${moneyValue(row.comisionFacturado || 0)}</td>
+          <td class="amount">${moneyValue(row.comisionEfectivo || 0)}</td>
+          <td class="amount">${moneyValue(row.comision || 0)}</td>
+          <td>${escapeHtml(result.criterio)}</td>
+          <td class="amount">${moneyValue(result.neto)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="11">Sin partes cargadas para ${escapeHtml(roleLabel.toLowerCase())}.</td></tr>`;
+  const paymentRows = payments.length
+    ? payments.map((payment) => {
+        const cashPayment = /EFECTIVO/i.test([payment.concepto, payment.medio, payment.referencia].filter(Boolean).join(" "));
+        return `<tr${cashPayment ? ' class="cash"' : ""}>
+          <td>${fieldReportDate(payment.fecha)}</td>
+          <td>${escapeHtml(fieldLeasePaymentConceptLabel(payment.concepto))}</td>
+          <td>${escapeHtml(fieldLeasePaymentCommissionFullDetail(payment))}</td>
+          <td>${escapeHtml(fieldLeasePaymentStatusLabel(payment.estado))}</td>
+          <td>${escapeHtml(payment.medio || "-")}</td>
+          <td>${escapeHtml(payment.referencia || "-")}</td>
+          <td class="amount">${moneyValue(payment.importe || 0)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="7">Sin pagos o descuentos registrados para esta parte.</td></tr>`;
+  const commissionLabel = receiptRole === "ARRENDADOR" ? "Comision descontada" : "Comision a pagar / sumada";
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(receiptTitle)}</title><style>
+    body{font-family:Arial,sans-serif;margin:12mm;color:#3d2d22;font-size:10.5px}
+    header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #7b5a32;padding-bottom:8px;margin-bottom:10px}
+    img{width:185px;height:68px;object-fit:contain}
+    h1{font-size:18px;margin:0 0 3px} h2{font-size:12px;margin:12px 0 5px;color:#3d2d22} p{margin:2px 0;font-size:10px}.muted{color:#7b5a32}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0 10px}.box{border:1px solid #dbcbb8;background:#fffaf4;padding:7px;min-height:42px}.box span{display:block;font-size:9px;color:#7b5a32;text-transform:uppercase}.box strong{display:block;font-size:15px;margin-top:4px;color:#1f160f}.box.main{background:#fff3e8;border-color:#d4ac7a}.box.main strong{font-size:16px}.receipt-total{border:2px solid #7b5a32;background:#fff3e8;padding:9px 11px;margin:9px 0 8px}.receipt-total span{display:block;font-size:10px;color:#7b5a32;text-transform:uppercase;font-weight:700}.receipt-total strong{display:block;font-size:21px;margin-top:3px;color:#1f160f}.receipt-total small{display:block;margin-top:3px;font-size:9px;color:#7b5a32}
+    .grid{display:grid;grid-template-columns:150px 1fr 150px 1fr;border:1px solid #dbcbb8;margin-bottom:8px}.grid span,.grid strong{border-bottom:1px solid #dbcbb8;padding:4px;font-size:9.5px}.grid span{background:#f8f2ea;color:#7b5a32}.grid strong{font-size:10px}
+    table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:5px}th,td{border:1px solid #dbcbb8;padding:4px;text-align:left;vertical-align:top}th{background:#f8f2ea}.amount{text-align:right;font-weight:700;white-space:nowrap}.nowrap{white-space:nowrap}.total{background:#fff3e8;font-weight:700}.cash td{font-style:italic;font-weight:700}.settlement-table{font-size:10px}.settlement-table th,.settlement-table td{padding:5px}.note{border:1px solid #dbcbb8;padding:7px;margin-top:9px;font-size:9.5px;line-height:1.25}.print-actions{margin-top:14px}.print-actions button{padding:8px 12px}
+    @media print{@page{size:A4 portrait;margin:9mm}body{margin:0}.print-actions{display:none}tr{break-inside:avoid}h2{break-after:avoid}}
+  </style></head><body>
+    <header><img src="${window.location.origin}/logo-hugo-pinna-horizontal.png"><div><h1>Recibo de cuota - ${escapeHtml(roleLabel)}</h1><p>Hugo Pinna - Contratos y Campos</p><p class="muted">${escapeHtml(item.contrato || "-")} | ${escapeHtml(item.campo || "-")} | Vencimiento: ${fieldReportDate(item.vencimiento)}</p></div></header>
+    <section class="receipt-total">
+      <span>${escapeHtml(receiptMainLabel)}</span>
+      <strong>${moneyValue(receiptMainAmount)}</strong>
+      <small>${escapeHtml(receiptMainNote)}</small>
+    </section>
+    <section class="summary">
+      <div class="box"><span>${receiptRole === "ARRENDADOR" ? "Neto facturado" : "Total facturado"}</span><strong>${moneyValue(netFacturado)}</strong></div>
+      <div class="box"><span>${receiptRole === "ARRENDADOR" ? "Neto efectivo" : "Total efectivo"}</span><strong>${moneyValue(netEfectivo)}</strong></div>
+      <div class="box"><span>${escapeHtml(commissionLabel)}</span><strong>${moneyValue(totals.comision)}</strong></div>
+      <div class="box main"><span>Neto informado</span><strong>${moneyValue(totals.neto)}</strong></div>
+      <div class="box"><span>Total cuota</span><strong>${moneyValue(totals.totalCuota)}</strong></div>
+      <div class="box main"><span>Saldo</span><strong>${moneyValue(balance)}</strong></div>
+    </section>
+    <div class="grid">
+      <span>Contrato</span><strong>${escapeHtml(item.contrato || "-")}</strong>
+      <span>Campo</span><strong>${escapeHtml(item.campo || "-")}</strong>
+      <span>Arrendador</span><strong>${escapeHtml(item.cliente || "-")}</strong>
+      <span>Arrendatario</span><strong>${escapeHtml(item.arrendatario || "-")}</strong>
+      <span>Vigencia contrato</span><strong>${fieldReportDate(item.contratoDesde)} a ${fieldReportDate(item.contratoHasta)}</strong>
+      <span>Vencimiento cuota</span><strong>${fieldReportDate(item.vencimiento)}</strong>
+      <span>Periodo de cuota</span><strong>${fieldReportDate(item.periodoDesde)} a ${fieldReportDate(item.periodoHasta)}</strong>
+      <span>Fecha calculo</span><strong>${fieldReportDate(item.fecha)}</strong>
+    </div>
+    <h2>Resumen para ${escapeHtml(roleLabel.toLowerCase())}</h2>
+    <table class="settlement-table"><thead><tr><th>Concepto</th><th>Importe bruto</th><th>${escapeHtml(commissionColumnLabel)}</th><th>${escapeHtml(netColumnLabel)}</th></tr></thead><tbody>${settlementRows}</tbody></table>
+    <div class="note">${escapeHtml(paymentExplanation)}</div>
+    <h2>Detalle correspondiente al ${escapeHtml(roleLabel.toLowerCase())}</h2>
+    <table><thead><tr><th>Parte</th><th>CUIT</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Com. fact.</th><th>Com. efect.</th><th>Total com.</th><th>Criterio</th><th>Neto</th></tr></thead><tbody>${partyRows}<tr class="total"><td colspan="3">Total</td><td class="amount">${moneyValue(totals.facturado)}</td><td class="amount">${moneyValue(totals.efectivo)}</td><td class="amount">${moneyValue(totals.totalCuota)}</td><td class="amount">${moneyValue(totals.comisionFacturado)}</td><td class="amount">${moneyValue(totals.comisionEfectivo)}</td><td class="amount">${moneyValue(totals.comision)}</td><td></td><td class="amount">${moneyValue(totals.neto)}</td></tr></tbody></table>
+    <h2>Pagos, descuentos o comisiones imputadas</h2>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${paymentRows}<tr class="total"><td colspan="6">Pagos por contrato / facturado</td><td class="amount">${moneyValue(paymentTotals.facturado)}</td></tr><tr class="total"><td colspan="6">Pagos en efectivo</td><td class="amount">${moneyValue(paymentTotals.efectivo)}</td></tr><tr class="total"><td colspan="6">Otros pagos registrados</td><td class="amount">${moneyValue(paymentTotals.pagos)}</td></tr><tr class="total"><td colspan="6">Comisiones / descuentos registrados</td><td class="amount">${moneyValue(paymentTotals.comision)}</td></tr><tr class="total"><td colspan="6">Total aplicado al saldo</td><td class="amount">${moneyValue(paymentAppliedToBalance)}</td></tr><tr class="total"><td colspan="6">Saldo de la parte</td><td class="amount">${moneyValue(balance)}</td></tr></tbody></table>
+    ${item.observaciones ? `<div class="note"><strong>Observaciones</strong><br>${escapeHtml(item.observaciones)}</div>` : ""}
+    <div class="print-actions"><button type="button" data-print-popup>Imprimir / guardar PDF</button></div>
+  </body></html>`);
+  finishPrintPopup(popup);
+}
+
+function printCurrentFieldLeaseReceipt(role = "ARRENDADOR") {
+  try {
+    updateFieldLeasePreview();
+    const payload = fieldLeaseCurrentInput();
+    const missingRule = fieldLeaseMissingRuleMessage(payload);
+    if (missingRule) {
+      setFieldLeaseMessage(missingRule, "error");
+      return;
+    }
+    setFieldLeaseMessage("");
+    printFieldLeaseReceipt(payload, role);
+  } catch (error) {
+    setFieldLeaseMessage(error.message || "No se pudo generar el recibo de la cuota.", "error");
+  }
+}
+
+function printCurrentFieldLeasePartyReceipt(partyKey = "") {
+  try {
+    updateFieldLeasePreview();
+    const payload = fieldLeaseCurrentInput();
+    const row = (payload.distribucionPartes || []).find((item) => fieldLeasePartyRowKey(item) === partyKey);
+    if (!row) {
+      setFieldLeaseMessage("No se encontro la parte seleccionada para generar el recibo.", "error");
+      return;
+    }
+    const missingRule = fieldLeaseMissingRuleMessage(payload);
+    if (missingRule) {
+      setFieldLeaseMessage(missingRule, "error");
+      return;
+    }
+    setFieldLeaseMessage("");
+    printFieldLeaseReceipt(payload, String(row.tipo || "ARRENDADOR").toUpperCase(), partyKey);
+  } catch (error) {
+    setFieldLeaseMessage(error.message || "No se pudo generar el recibo de la parte seleccionada.", "error");
+  }
 }
 
 function renderMetrics() {
@@ -1777,6 +4837,8 @@ function periodDestinationLabel(operation) {
 }
 
 async function renderPeriodStats() {
+  clearTimeout(periodStatsTimer);
+  const requestId = ++periodStatsRequestId;
   const from = parseInputDate($("#dashboard-period-from").value);
   const to = parseInputDate($("#dashboard-period-to").value);
   const typeFilter = normalizeSearch($("#period-type-filter").value);
@@ -1784,14 +4846,19 @@ async function renderPeriodStats() {
   const categoryFilter = normalizeSearch($("#period-category-filter").value);
   const clientFilter = normalizeSearch($("#period-client-filter").value);
   const message = $("#period-message");
+  const runButton = $("#dashboard-period-run");
   message.textContent = "Calculando periodo...";
   message.className = "form-message";
+  runButton.disabled = true;
+  runButton.textContent = "Calculando...";
   const details = await Promise.all(state.operaciones.map((operation) =>
     fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`)
       .then((response) => ({ ...operation, ...(response.item || {}) }))
       .catch(() => operation)
   ));
+  if (requestId !== periodStatsRequestId) return;
   const operations = details.filter((operation) => {
+    if (operationSearchStatusInfo(operation).annulled) return false;
     const date = operationDateForPeriod(operation);
     if (!date) return false;
     date.setHours(0, 0, 0, 0);
@@ -1877,6 +4944,53 @@ async function renderPeriodStats() {
     : `<tr><td colspan="5">Sin clientes para el periodo.</td></tr>`;
   message.textContent = operations.length ? "Periodo calculado." : "No hay operaciones en ese periodo.";
   message.className = `form-message ${operations.length ? "ok" : ""}`.trim();
+  runButton.disabled = false;
+  runButton.textContent = "Ver periodo";
+}
+
+function formatBackupDate(value) {
+  if (!value) return "pendiente";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "pendiente" : date.toLocaleString("es-AR");
+}
+
+async function loadBackupAutomationStatus() {
+  const backupNode = $("#automatic-backup-status");
+  const restoreNode = $("#restore-test-status");
+  if (!backupNode || !restoreNode) return;
+  if (state.usuario?.rol !== "ADMIN") {
+    backupNode.hidden = true;
+    restoreNode.hidden = true;
+    return;
+  }
+  try {
+    const status = await fetchJson("/api/backup/status");
+    if (!status.enabled) {
+      backupNode.textContent = "Backup automático: pendiente de activar en el servidor.";
+      restoreNode.textContent = "Prueba de restauración: pendiente de activar.";
+      return;
+    }
+    backupNode.textContent = status.running
+      ? "Backup automático cifrado: en proceso..."
+      : status.lastBackupPath
+        ? `Último backup cifrado: ${formatBackupDate(status.lastBackupAt || status.lastRunAt)}. Próximo control: ${formatBackupDate(status.nextRunAt)}.`
+        : `Backup automático cifrado: programado. Próximo control: ${formatBackupDate(status.nextRunAt)}.`;
+    restoreNode.textContent = status.lastError
+      ? `Backups: requiere atención. ${status.lastError}`
+      : status.lastRestoreTestOk === true
+        ? `Última prueba de restauración: ${formatBackupDate(status.lastRestoreTestAt)}. Resultado correcto.`
+        : "Prueba de restauración: se realizará con el primer backup y luego cada 7 días.";
+    restoreNode.className = status.lastError ? "form-message error" : "subtle";
+  } catch (error) {
+    backupNode.textContent = "Backup automático: no se pudo consultar el estado.";
+    restoreNode.textContent = error.message;
+    restoreNode.className = "form-message error";
+  }
+}
+
+function schedulePeriodStats() {
+  clearTimeout(periodStatsTimer);
+  periodStatsTimer = setTimeout(renderPeriodStats, 300);
 }
 
 function operationLineKilos(line) {
@@ -1884,7 +4998,32 @@ function operationLineKilos(line) {
 }
 
 function operationSearchDate(operation) {
-  return parseDisplayDate(operation.fechaCarga || operation.draftData?.fechaCarga || operation.fecha || operation.draftData?.fecha);
+  return parseDisplayDate(operation.fecha || operation.draftData?.fecha || operation.fechaCarga || operation.draftData?.fechaCarga);
+}
+
+function operationSearchStatusInfo(operation) {
+  const liquidationStatus = normalizeSearch(operation.liquidacionEstado || operation.draftData?.liquidacionEstado);
+  const operationStatus = normalizeSearch(operation.estado || operation.draftData?.estado);
+  const hasAccountMovements = Boolean(operation.enCuentaCorriente)
+    || (state.cuenta?.movimientos || []).some((movement) => String(movement.operacion || "") === String(operation.id || "") && String(movement.estado || "").toUpperCase() !== "ANULADO");
+  const derivationReason = normalizeSearch(operation.motivoDerivacion || operation.draftData?.motivoDerivacion || operation.motivoAnulacion || operation.draftData?.motivoAnulacion);
+  const annulledStatus = operationStatus.includes("anulada");
+  const derived = operationStatus.includes("derivada")
+    || (annulledStatus && derivationReason.includes("movimiento externo"));
+  const annulled = annulledStatus && !derived;
+  const confirmed = !annulled && !derived && (Boolean(operation.liquidacionConfirmada || operation.draftData?.liquidacionConfirmada)
+    || hasAccountMovements
+    || liquidationStatus.includes("confirmada")
+    || liquidationStatus.includes("cerrada")
+    || operationStatus.includes("confirmada")
+    || operationStatus.includes("cerrada"));
+  return {
+    pending: !confirmed && !annulled && !derived,
+    confirmed,
+    annulled,
+    derived,
+    label: derived ? "Derivada a movimiento externo" : annulled ? "Anulada" : confirmed ? (hasAccountMovements ? "En cuenta corriente" : "Confirmada") : "Pendiente"
+  };
 }
 
 function operationSearchBasicMatches(operation, filters) {
@@ -1893,6 +5032,11 @@ function operationSearchBasicMatches(operation, filters) {
   date.setHours(0, 0, 0, 0);
   if (filters.from && date < dateOnly(filters.from)) return false;
   if (filters.to && date > dateOnly(filters.to)) return false;
+  const statusInfo = operationSearchStatusInfo(operation);
+  if (filters.status === "PENDIENTES" && !statusInfo.pending) return false;
+  if (filters.status === "CONFIRMADAS" && !statusInfo.confirmed) return false;
+  if (filters.status === "DERIVADAS" && !statusInfo.derived) return false;
+  if (filters.status === "ANULADAS" && !statusInfo.annulled) return false;
   const clientText = normalizeSearch([
     operation.vendedor,
     operation.comprador,
@@ -1932,24 +5076,33 @@ function operationSearchLineSummary(operation, categoryFilter = "") {
 }
 
 async function renderOperationSearch() {
+  clearTimeout(operationSearchTimer);
+  const requestId = ++operationSearchRequestId;
   const filters = {
     from: parseInputDate($("#operation-search-from").value),
     to: parseInputDate($("#operation-search-to").value),
     client: normalizeSearch($("#operation-search-client").value),
     type: normalizeSearch($("#operation-search-type").value),
     category: normalizeSearch($("#operation-search-category").value),
+    status: $("#operation-search-status").value,
     text: normalizeSearch($("#operation-search-text").value)
   };
   const message = $("#operation-search-message");
+  const runButton = $("#operation-search-run");
   message.textContent = "Buscando operaciones...";
   message.className = "form-message";
-  const candidates = state.operaciones.filter((operation) => operationSearchBasicMatches(operation, filters));
+  runButton.disabled = true;
+  runButton.textContent = "Buscando...";
+  const coarseFilters = { ...filters, client: "", type: "", text: "" };
+  const candidates = state.operaciones.filter((operation) => operationSearchBasicMatches(operation, coarseFilters));
   const details = await Promise.all(candidates.map((operation) =>
     fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`)
       .then((response) => ({ ...operation, ...(response.item || {}) }))
       .catch(() => operation)
   ));
+  if (requestId !== operationSearchRequestId) return;
   const rows = details
+    .filter((operation) => operationSearchBasicMatches(operation, filters))
     .map((operation) => ({ operation, summary: operationSearchLineSummary(operation, filters.category) }))
     .filter((item) => !filters.category || item.summary.heads || item.summary.kilos || item.summary.amount)
     .sort((a, b) => {
@@ -1957,6 +5110,8 @@ async function renderOperationSearch() {
       const dateB = operationSearchDate(b.operation)?.getTime() || 0;
       return dateB - dateA || String(b.operation.id || "").localeCompare(String(a.operation.id || ""), "es");
     });
+  state.operationSearchRows = rows;
+  state.operationSearchPage = 1;
   const totals = rows.reduce((acc, item) => {
     acc.heads += item.summary.heads;
     acc.kilos += item.summary.kilos;
@@ -1967,27 +5122,43 @@ async function renderOperationSearch() {
   $("#operation-search-heads").textContent = plainNumberValue(totals.heads);
   $("#operation-search-kilos").textContent = `${plainNumberValue(totals.kilos)} kgs`;
   $("#operation-search-amount").textContent = moneyValue(totals.amount);
-  $("#operation-search-body").innerHTML = rows.length
-    ? rows.map(({ operation, summary }) => {
+  renderOperationSearchPage();
+  message.textContent = rows.length ? "Busqueda lista." : "No se encontraron operaciones.";
+  message.className = `form-message ${rows.length ? "ok" : ""}`.trim();
+  runButton.disabled = false;
+  runButton.textContent = "Buscar";
+}
+
+function scheduleOperationSearch() {
+  clearTimeout(operationSearchTimer);
+  operationSearchTimer = setTimeout(renderOperationSearch, 300);
+}
+
+function renderOperationSearchPage() {
+  const page = pageItems(state.operationSearchRows || [], state.operationSearchPage);
+  state.operationSearchPage = page.current;
+  $("#operation-search-body").innerHTML = page.total
+    ? page.items.map(({ operation, summary }) => {
         const categories = Array.from(summary.categories.entries())
           .map(([name, heads]) => `${name}${heads ? ` (${plainNumberValue(heads)})` : ""}`)
           .join(", ");
+        const statusInfo = operationSearchStatusInfo(operation);
         return `<tr>
           <td>${escapeHtml(operation.id || "-")}</td>
-          <td>${escapeHtml(operation.fechaCarga || operation.draftData?.fechaCarga || operation.fecha || "-")}</td>
+          <td>${escapeHtml(operation.fecha || operation.draftData?.fecha || operation.fechaCarga || "-")}</td>
           <td>${escapeHtml(`${operationTypeLabel(operation)} ${operation.destino || operation.draftData?.destino || ""}`.trim())}</td>
+          <td>${escapeHtml(statusInfo.label)}</td>
           <td>${escapeHtml(operation.vendedor || operation.draftData?.vendedor || "-")}</td>
           <td>${escapeHtml(operation.comprador || operation.consignataria || operation.draftData?.comprador || operation.draftData?.consignataria || "-")}</td>
           <td>${escapeHtml(categories || "-")}</td>
           <td>${plainNumberValue(summary.heads)}</td>
           <td>${plainNumberValue(summary.kilos)} kgs</td>
           <td>${moneyValue(summary.amount)}</td>
-          <td><button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button></td>
+          <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? `<div class="operation-row-actions"><span class="subtle">Registro comercial</span><button type="button" class="operation-action-button operation-action-reactivate" data-reactivate-operation="${escapeHtml(operation.id)}" title="Reactivar operacion" aria-label="Reactivar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8634;</span></button></div>` : `<button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button>`}</td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="10">No hay operaciones para los filtros aplicados.</td></tr>`;
-  message.textContent = rows.length ? "Busqueda lista." : "No se encontraron operaciones.";
-  message.className = `form-message ${rows.length ? "ok" : ""}`.trim();
+    : `<tr><td colspan="11">No hay operaciones para los filtros aplicados.</td></tr>`;
+  renderPagination("#operation-search-pagination", page, "operation-search");
 }
 
 function movementDateForRealCommission(movement) {
@@ -2154,15 +5325,34 @@ function renderDashboardPendingList() {
   $("#dashboard-pending-net").className = amountClass(net);
   $("#dashboard-pending-body").innerHTML = pending.length
     ? pending.map((movement) => `
-        <tr class="${isCashMovement(movement) ? "movement-cash" : ""}">
+        <tr class="${isCashMovement(movement) ? "movement-cash" : ""} dashboard-open-row" data-dashboard-open-movement="${escapeHtml(movement.id || "")}" title="Doble click para abrir el origen">
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
           <td>${escapeHtml(currentAccountDueDetailText(movement))}</td>
           <td>${escapeHtml(movement.comprobante || "-")}</td>
+          <td>${escapeHtml(movement.operacion || "-")}</td>
           <td class="${amountClass(movement.pendienteFirmado)}">${moneyValue(movement.pendienteFirmado)}</td>
+          <td><button type="button" class="small-button" data-dashboard-open-movement="${escapeHtml(movement.id || "")}">Abrir</button></td>
         </tr>
       `).join("")
-    : `<tr><td colspan="5">Sin pendientes vencidos.</td></tr>`;
+    : `<tr><td colspan="7">Sin pendientes vencidos.</td></tr>`;
+}
+
+async function openDashboardPendingMovement(movementId) {
+  const movement = (state.cuenta?.movimientos || []).find((item) => String(item.id) === String(movementId));
+  if (!movement) return;
+  if (movement.operacion) {
+    setView("operaciones");
+    await openSale(movement.operacion, "report");
+    return;
+  }
+  setView("cuenta");
+  $("#cc-client-search").value = movement.cliente || "";
+  $("#cc-status-filter").value = "TODOS";
+  $("#cc-concept-filter").value = "TODOS";
+  setCurrentAccountTab("estado");
+  renderCuentaCorriente();
+  $("#cuenta")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function signedPendingAmount(movement) {
@@ -2246,7 +5436,20 @@ function isCashMovement(movement) {
   return detailHasCash || normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.origen || ""}`).includes("efectivo");
 }
 
+function isPriceDifferenceCommissionAdjustment(movement) {
+  return String(movement?.tipoAjuste || "").toUpperCase() === "DIFERENCIA_PRECIO_COMISION";
+}
+
+function commissionPriceAdjustmentBreakdownRow(movement, colspan = 9) {
+  if (String(movement?.tipoDesglose || "").toUpperCase() !== "COMISION_VENDEDOR_TOTAL") return "";
+  const total = Number(movement.comisionTotal || movement.importe || 0);
+  const adjustment = Number(movement.ajusteCompensado || 0);
+  const pending = Number(movement.importePendiente ?? movement.diferenciaFacturar ?? Math.max(total - adjustment, 0));
+  return `<tr class="cc-detail-row commission-adjustment-detail"><td colspan="${colspan}"><strong>Detalle de comision:</strong> Total ${moneyValue(total)} | Ajuste de precio compensado ${moneyValue(adjustment)} | <strong>Diferencia a facturar ${moneyValue(pending)}</strong></td></tr>`;
+}
+
 function movementDueKind(movement) {
+  if (isPriceDifferenceCommissionAdjustment(movement)) return "Ajuste de precio";
   if (isCashMovement(movement)) return "Efectivo";
   if (String(movement?.origen || "").toUpperCase() === "FACTURACION_PARCIAL") return "Facturacion parcial";
   if (String(movement?.origen || "").toUpperCase() === "COMISION") return "Comision";
@@ -2270,7 +5473,11 @@ function currentAccountDueDetailText(movement) {
   const kind = movementDueKind(movement);
   const business = operationBusinessText(movement);
   const receipt = movement?.comprobante ? ` - ${movement.comprobante}` : "";
-  return `${kind}${business ? ` - ${business}` : movement?.concepto ? ` - ${movement.concepto}` : ""}${receipt}`;
+  const classification = [
+    movement?.cuentaAsociada ? `Cuenta: ${movement.cuentaAsociada}` : "",
+    movement?.tipoOrigen ? `Origen: ${movement.tipoOrigen}` : ""
+  ].filter(Boolean).join(" | ");
+  return `${kind}${business ? ` - ${business}` : movement?.concepto ? ` - ${movement.concepto}` : ""}${receipt}${classification ? ` | ${classification}` : ""}`;
 }
 
 function movementAccountEntities(movement) {
@@ -2313,12 +5520,24 @@ function isConsigneeInformationalDue(movement) {
 
 function isCommissionPendingMovement(movement, viewMode = "CLIENTE") {
   if (viewMode === "CONSIGNATARIA") return isConsigneeOwnCharge(movement) || Boolean(movementCommissionistAccountKey(movement));
+  if (viewMode === "COMISIONISTA") {
+    if (isCommissionistSourceOperation(movement)) return !isCommissionistSourceLiquidated(movement);
+    return Boolean(commissionistDetailFromObservation(movement?.observacion));
+  }
   return String(movement?.origen || "").toUpperCase() === "COMISION";
 }
 
 function commissionKind(movement) {
+  const detail = commissionistDetailFromObservation(movement?.observacion);
+  const explicitKind = normalizeSearch(detail?.tipoComision || movement?.tipoComision || "");
+  if (explicitKind === "efectivo") return "efectivo";
+  if (explicitKind === "facturado") return "facturado";
   const text = normalizeSearch(`${movement?.concepto || ""} ${movement?.comprobante || ""} ${movement?.observacion || ""}`);
   return text.includes("efectivo") ? "efectivo" : "facturado";
+}
+
+function commissionKindLabel(movement) {
+  return commissionKind(movement) === "efectivo" ? "Sobre efectivo" : "Sobre facturado";
 }
 
 function sameCommissionInvoiceMovement(movement, item, invoice) {
@@ -2345,6 +5564,7 @@ function applyCommissionInvoiceMarks(cuenta) {
       movement.facturaComision = invoice.numero;
       movement.fechaFacturaComision = invoice.fecha;
       movement.estadoFacturacionComision = "FACTURADO";
+      movement.detalleFacturaComision = item.detalleComisionista || null;
     });
   });
   return cuenta;
@@ -2354,12 +5574,18 @@ function commissionSplitSummary(movements, viewMode = "CLIENTE") {
   const byClient = new Map();
   (movements || []).forEach((movement) => {
     const status = String(movement?.estado || "").toUpperCase();
-    if (movement?.paymentId || status === "IMPUTADO" || status === "ANULADO") return;
-    if (movement?.facturaComisionId || movement?.facturaComision) return;
+    const commissionistSource = viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
+    if (movement?.paymentId || status === "ANULADO") return;
+    if (status === "IMPUTADO" && !commissionistSource) return;
+    if (viewMode !== "COMISIONISTA" && (movement?.facturaComisionId || movement?.facturaComision)) return;
     if (!isCommissionPendingMovement(movement, viewMode)) return;
     const client = movement?.cliente || "Sin cliente";
     const row = byClient.get(client) || { cliente: client, facturado: 0, efectivo: 0, total: 0 };
-    const amount = pendingSignedAmount(movement);
+    const amount = viewMode === "COMISIONISTA"
+      ? isCommissionistSourceOperation(movement)
+        ? Number(movement.importeComision || 0)
+        : Math.abs(pendingSignedAmount(movement))
+      : pendingSignedAmount(movement);
     if (commissionKind(movement) === "efectivo") row.efectivo += amount;
     else row.facturado += amount;
     row.total += amount;
@@ -2378,8 +5604,74 @@ function commissionSplitTotals(rows) {
   }), { facturado: 0, efectivo: 0, total: 0 });
 }
 
+function clientCommissionInvoiceRows(words = [], exactClient = "") {
+  if (!state.cuenta) return [];
+  const query = normalizeSearch($("#cc-client-search")?.value || "");
+  if (!query) return [];
+  return (state.cuenta.movimientos || [])
+    .filter((movement) => {
+      const status = String(movement?.estado || "").toUpperCase();
+      if (movement?.paymentId || status === "IMPUTADO" || status === "ANULADO") return false;
+      if (movement?.facturaComisionId || movement?.facturaComision) return false;
+      if (!isCommissionPendingMovement(movement, "CLIENTE")) return false;
+      if (!matchesCurrentAccountClientSearch(movement, words, exactClient)) return false;
+      return signedPendingAmount(movement) > 0.01;
+    })
+    .sort((a, b) => {
+      const dateA = parseDisplayDate(a.vencimiento || a.fecha)?.getTime() || 0;
+      const dateB = parseDisplayDate(b.vencimiento || b.fecha)?.getTime() || 0;
+      return dateA - dateB || String(a.cliente || "").localeCompare(String(b.cliente || ""), "es");
+    });
+}
+
+function refreshClientCommissionInvoiceSummary() {
+  const selected = $all("[data-cc-commission-invoice-row]:checked");
+  const total = selected.reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccPending || 0), 0);
+  const countNode = $("#cc-commission-invoice-count");
+  if (!countNode) return;
+  if (selected.length) {
+    countNode.textContent = `${selected.length} seleccionada/s - ${moneyValue(total)}`;
+  }
+}
+
+function renderClientCommissionInvoicePanel(rows) {
+  const panel = $("#cc-commission-invoice-panel");
+  if (!panel) return;
+  const viewMode = $("#cc-view-mode")?.value || "CLIENTE";
+  panel.hidden = viewMode !== "CLIENTE";
+  if (panel.hidden) return;
+  const query = ($("#cc-client-search")?.value || "").trim();
+  const countNode = $("#cc-commission-invoice-count");
+  const body = $("#cc-commission-invoice-body");
+  if (!body || !countNode) return;
+  countNode.textContent = rows.length
+    ? `${rows.length} comision/es disponibles`
+    : query
+      ? "Sin comisiones pendientes para facturar"
+      : "Busque un cliente";
+  body.innerHTML = rows.length
+    ? rows.map((movement) => {
+        const pending = Math.abs(Number(movement.importePendiente ?? movement.importe ?? 0));
+        const kind = commissionKind(movement) === "efectivo" ? "Sobre efectivo" : "Sobre facturado";
+        return `
+          <tr>
+            <td><input type="checkbox" data-cc-commission-invoice-row="${escapeHtml(movement.id)}" data-cc-pending="${pending}"></td>
+            <td>${escapeHtml(movement.vencimiento || movement.fecha || "-")}</td>
+            <td>${escapeHtml(movement.cliente || "-")}</td>
+            <td>${escapeHtml(kind)}${movement.concepto ? `<br><small>${escapeHtml(movement.concepto)}</small>` : ""}</td>
+            <td>${escapeHtml(movement.comprobante || "-")}</td>
+            <td>${moneyValue(pending)}</td>
+          </tr>
+        `;
+      }).join("")
+    : `<tr><td colspan="6">${query ? "No hay comisiones pendientes sin facturar para este cliente." : "Busque un cliente para seleccionar comisiones."}</td></tr>`;
+}
+
 function currentAccountConceptText(movement, viewMode) {
   const invoiceSuffix = movement.facturaComision ? ` | Factura comision: ${movement.facturaComision}` : "";
+  if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) {
+    return `Operacion origen de comision - ${commissionKindLabel(movement)} - ${movement.concepto || "-"}${movement.baseComision ? ` - Base ${moneyValue(movement.baseComision)}` : ""}${movement.porcComision ? ` - ${plainNumberValue(movement.porcComision)}%` : ""}`;
+  }
   if (viewMode !== "CONSIGNATARIA") return `${movement.concepto || "-"}${invoiceSuffix}`;
   if (isConsigneeOwnCharge(movement)) {
     return `Comision / diferencia pendiente de Gonzalo Espinosa${movement.contraparte ? ` - por ${movement.contraparte}` : ""}${invoiceSuffix}`;
@@ -2411,12 +5703,73 @@ function isCommissionistClientName(name) {
 }
 
 function movementCommissionistAccountKey(movement) {
+  const directCommissionist = normalizeSearch(movement.comisionista || "");
+  if (directCommissionist) return directCommissionist;
   const detail = commissionistDetailFromObservation(movement.observacion);
   const detailCommissionist = normalizeSearch(detail?.comisionista || "");
   if (detailCommissionist) return detailCommissionist;
   if (normalizeSearch(movement.concepto).includes("comisionista")) return normalizeSearch(movement.cliente);
   if (movement.paymentId && isCommissionistClientName(movement.cliente)) return normalizeSearch(movement.cliente);
   return "";
+}
+
+function isCommissionistSourceOperation(movement) {
+  return Boolean(normalizeSearch(movement?.comisionista || ""))
+    && String(movement?.origen || "").toUpperCase() === "EXTERNO"
+    && !commissionistDetailFromObservation(movement?.observacion)
+    && !normalizeSearch(movement?.concepto || "").includes("comisionista");
+}
+
+function isCommissionistSourceLiquidated(movement) {
+  if (!isCommissionistSourceOperation(movement)) return false;
+  const key = normalizeSearch(movement.comisionista || "");
+  const id = String(movement.id || "");
+  const receiptKey = [
+    normalizeSearch(movement.comprobante || ""),
+    normalizeSearch(movement.cliente || ""),
+    normalizeSearch(movement.fecha || movement.vencimiento || "")
+  ].join("|");
+  return (state.cuenta?.movimientos || []).some((candidate) => {
+    const detail = commissionistDetailFromObservation(candidate.observacion);
+    if (!detail || normalizeSearch(detail.comisionista || "") !== key) return false;
+    return (Array.isArray(detail.items) ? detail.items : []).some((item) => {
+      if (String(item.id || "") === id) return true;
+      const itemReceiptKey = [
+        normalizeSearch(item.comprobante || ""),
+        normalizeSearch(item.vendedor || ""),
+        normalizeSearch(item.fecha || "")
+      ].join("|");
+      return itemReceiptKey === receiptKey;
+    });
+  });
+}
+
+function currentAccountMovementStatusForDisplay(movement, viewMode) {
+  if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) {
+    return isCommissionistSourceLiquidated(movement) ? "Comision liquidada" : "Pendiente de liquidar";
+  }
+  return movement.estado || "-";
+}
+
+function currentAccountMovementStatusFilterValue(movement, viewMode) {
+  if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) {
+    return isCommissionistSourceLiquidated(movement) ? "IMPUTADO" : "PENDIENTE";
+  }
+  return String(movement.estado || "").toUpperCase();
+}
+
+function currentAccountBalanceMovements(movements, viewMode) {
+  if (viewMode === "CONSIGNATARIA") {
+    return (movements || [])
+      .filter((movement) => !movement.facturaComisionId && !movement.facturaComision)
+      .filter((movement) => isConsigneeOwnCharge(movement) || movementCommissionistAccountKey(movement));
+  }
+  if (viewMode === "COMISIONISTA") {
+    return (movements || [])
+      .filter((movement) => !isCommissionistSourceOperation(movement))
+      .filter((movement) => !movement.paymentId);
+  }
+  return movements || [];
 }
 
 function matchesCurrentAccountClientSearch(movement, words, exactClient = "") {
@@ -2440,8 +5793,62 @@ function matchesCurrentAccountCommissionistSearch(movement, words, exactCommissi
   if (exactCommissionist) return commissionist === exactCommissionist;
   if (!words.length) return Boolean(commissionist);
   const detail = commissionistDetailFromObservation(movement.observacion);
-  const haystack = normalizeSearch(`${detail?.comisionista || ""} ${movement.cliente || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
+  const haystack = normalizeSearch(`${detail?.comisionista || ""} ${movement.comisionista || ""} ${movement.cliente || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
   return words.every((word) => haystack.includes(word));
+}
+
+function currentAccountKeywordText(movement) {
+  const detail = commissionistDetailFromObservation(movement.observacion);
+  const detailText = detail
+    ? [
+        detail.comisionista,
+        detail.periodoDesde,
+        detail.periodoHasta,
+        ...(Array.isArray(detail.items) ? detail.items.flatMap((item) => [
+          item.id,
+          item.origen,
+          item.vendedor,
+          item.comprador,
+          item.comprobante
+        ]) : [])
+      ].filter(Boolean).join(" ")
+    : "";
+  return normalizeSearch([
+    movement.id,
+    movement.operacion,
+    movement.cliente,
+    movement.contraparte,
+    movement.vendedor,
+    movement.comprador,
+    movement.consignataria,
+    movement.comisionista,
+    movement.consignatariaCuenta,
+    movement.concepto,
+    movement.comprobante,
+    movement.facturaComision,
+    movement.observacion,
+    movement.cuentaAsociada,
+    movement.tipoOrigen,
+    detailText
+  ].filter(Boolean).join(" "));
+}
+
+function matchesCurrentAccountKeyword(movement, words) {
+  if (!words?.length) return true;
+  const haystack = currentAccountKeywordText(movement);
+  return words.every((word) => haystack.includes(word));
+}
+
+function currentAccountOperationType(movement) {
+  const text = normalizeSearch(`${movement.tipoOperacion || ""} ${movement.tipo || ""} ${movement.concepto || ""}`);
+  if (text.includes("consignada")) return "CONSIGNADA";
+  if (text.includes("directa")) return "DIRECTA";
+  return "";
+}
+
+function matchesCurrentAccountOperationType(movement, filter) {
+  if (!filter || filter === "TODOS") return true;
+  return currentAccountOperationType(movement) === filter;
 }
 
 function commissionistDetailFromObservation(observation) {
@@ -2511,7 +5918,10 @@ function commissionistStatusRows(commissionistName = $("#commissionist-client")?
       const total = Math.abs(Number(movement.importe || 0)) || Math.abs(Number(subtotals.facturado.comision || 0) + Number(subtotals.efectivo.comision || 0));
       const pending = Number(movement.importePendiente ?? total);
       const paid = Math.max(total - Math.abs(pending), 0);
+      const isGeneratedCommissionistMovement = Boolean(detail)
+        || normalizeSearch(movement.concepto || "").includes("comisionista");
       return {
+        id: movement.id,
         fecha: movement.fecha || movement.vencimiento || "",
         comprobante: movement.facturaComision
           ? `${movement.facturaComision} (${movement.comprobante || "-"})`
@@ -2521,7 +5931,8 @@ function commissionistStatusRows(commissionistName = $("#commissionist-client")?
         total,
         pending: Math.abs(pending),
         paid,
-        estado: movement.facturaComision ? `FACTURADO - ${movement.estado || "PENDIENTE"}` : `SIN FACTURAR - ${movement.estado || "PENDIENTE"}`
+        estado: movement.facturaComision ? `FACTURADO - ${movement.estado || "PENDIENTE"}` : `SIN FACTURAR - ${movement.estado || "PENDIENTE"}`,
+        canDelete: isGeneratedCommissionistMovement && canEditExternalMovement(movement)
       };
     })
     .sort((a, b) => (parseDisplayDate(b.fecha)?.getTime() || 0) - (parseDisplayDate(a.fecha)?.getTime() || 0));
@@ -2552,8 +5963,9 @@ function renderCommissionistStatus() {
         <td class="amount">${moneyValue(row.total)}</td>
         <td class="amount ${row.pending > 0.01 ? "negative" : "positive"}">${moneyValue(row.pending)}</td>
         <td>${escapeHtml(row.pending > 0.01 ? row.estado : "PAGADO")}</td>
+        <td>${row.canDelete ? `<button type="button" class="small-button danger-button" data-commissionist-status-delete="${escapeHtml(row.id)}">Anular</button>` : "-"}</td>
       </tr>`).join("")
-    : `<tr><td colspan="7">Seleccione un comisionista para ver su estado.</td></tr>`;
+    : `<tr><td colspan="8">Seleccione un comisionista para ver su estado.</td></tr>`;
 }
 
 function isCashDetailRow(row) {
@@ -2574,15 +5986,100 @@ function externalMovementActions(movement) {
     : "";
 }
 
+function currentAccountQuickPaymentButton(movement) {
+  if (!movement || movement.paymentId) return "";
+  if (($("#cc-view-mode")?.value || "") === "COMISIONISTA" && isCommissionistSourceOperation(movement)) return "";
+  const status = String(movement.estado || "").toUpperCase();
+  if (status === "IMPUTADO" || status === "ANULADO") return "";
+  const amount = pendingSignedAmount(movement);
+  if (Math.abs(amount) <= 0.01) return "";
+  const label = amount < 0 ? "Registrar pago" : "Registrar cobro";
+  return `<button type="button" class="small-button" data-cc-quick-payment="${escapeHtml(movement.id)}">${label}</button>`;
+}
+
+function renderCurrentAccountClassificationOptions() {
+  const movements = state.cuenta?.movimientos || [];
+  const accounts = new Set();
+  const origins = new Set(["Remate", "Venta a feria", "Venta directa", "Adelanto", "Flete"]);
+  movements.forEach((movement) => {
+    if (String(movement.cuentaAsociada || "").trim()) accounts.add(String(movement.cuentaAsociada).trim());
+    if (String(movement.tipoOrigen || "").trim()) origins.add(String(movement.tipoOrigen).trim());
+  });
+  (state.cuenta?.pagos || []).forEach((payment) => {
+    if (String(payment.cuentaAsociada || "").trim()) accounts.add(String(payment.cuentaAsociada).trim());
+    if (String(payment.tipoOrigen || "").trim()) origins.add(String(payment.tipoOrigen).trim());
+  });
+  const render = (selector, values) => {
+    const node = $(selector);
+    if (!node) return;
+    node.innerHTML = Array.from(values)
+      .sort((a, b) => a.localeCompare(b, "es"))
+      .map((value) => `<option value="${escapeHtml(value)}"></option>`)
+      .join("");
+  };
+  render("#cc-associated-account-list", accounts);
+  render("#cc-origin-type-list", origins);
+}
+
+function renderAssociatedAccountBalances({ viewMode, words, exactClient, associatedAccountFilter, originTypeFilter }) {
+  const panel = $("#cc-associated-balance-panel");
+  const body = $("#cc-associated-balance-body");
+  const totalNode = $("#cc-associated-balance-total");
+  if (!panel || !body || !totalNode) return;
+  if (viewMode !== "CLIENTE") {
+    panel.hidden = true;
+    return;
+  }
+  const groups = new Map();
+  (state.cuenta?.movimientos || [])
+    .filter((movement) => String(movement.estado || "").toUpperCase() !== "ANULADO")
+    .filter((movement) => movement.cuentaAsociada || movement.tipoOrigen)
+    .filter((movement) => matchesCurrentAccountClientSearch(movement, words, exactClient))
+    .filter((movement) => !associatedAccountFilter || normalizeSearch(movement.cuentaAsociada || "").includes(associatedAccountFilter))
+    .filter((movement) => !originTypeFilter || normalizeSearch(movement.tipoOrigen || "").includes(originTypeFilter))
+    .forEach((movement) => {
+      const client = movement.cliente || "Sin cliente";
+      const account = movement.cuentaAsociada || "Sin cuenta informada";
+      const origin = movement.tipoOrigen || "Sin origen informado";
+      const key = [normalizeSearch(client), normalizeSearch(account), normalizeSearch(origin)].join("|");
+      const row = groups.get(key) || { client, account, origin, balance: 0 };
+      row.balance += Number(movement.importe || 0);
+      groups.set(key, row);
+    });
+  const rows = [...groups.values()]
+    .filter((row) => Math.abs(row.balance) > 0.01)
+    .sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance) || a.account.localeCompare(b.account, "es"));
+  panel.hidden = !rows.length;
+  if (!rows.length) {
+    body.innerHTML = "";
+    totalNode.textContent = "Sin saldos asociados";
+    return;
+  }
+  const total = rows.reduce((sum, row) => sum + row.balance, 0);
+  totalNode.textContent = `Saldo asociado ${moneyValue(total)}`;
+  body.innerHTML = rows.map((row) => `<tr>
+    <td>${escapeHtml(row.client)}</td>
+    <td><strong>${escapeHtml(row.account)}</strong></td>
+    <td>${escapeHtml(row.origin)}</td>
+    <td class="${row.balance > 0 ? "positive" : "negative"}">${row.balance > 0 ? "A recuperar / cobrar" : "Disponible / a pagar"}</td>
+    <td class="amount ${row.balance > 0 ? "positive" : "negative"}">${moneyValue(Math.abs(row.balance))}</td>
+  </tr>`).join("");
+}
+
 function renderCuentaCorriente() {
   if (!state.cuenta) return;
+  renderCurrentAccountClassificationOptions();
   const query = normalizeSearch($("#cc-client-search").value);
+  const keywordWords = normalizeSearch($("#cc-keyword-filter")?.value || "").split(" ").filter(Boolean);
   const viewMode = $("#cc-view-mode").value;
   const statusFilter = $("#cc-status-filter").value;
   const conceptFilter = $("#cc-concept-filter").value;
+  const operationTypeFilter = $("#cc-operation-type-filter")?.value || "TODOS";
   const dueFilter = $("#cc-due-filter").value;
   const dateFrom = parseInputDate($("#cc-date-from").value);
   const dateTo = parseInputDate($("#cc-date-to").value);
+  const associatedAccountFilter = normalizeSearch($("#cc-associated-account-filter")?.value || "");
+  const originTypeFilter = normalizeSearch($("#cc-origin-type-filter")?.value || "");
   const duePanelRange = getCurrentAccountDuePanelRange();
   const words = query.split(" ").filter(Boolean);
   const exactClient = viewMode === "CLIENTE" ? getExactCurrentAccountClient(query) : "";
@@ -2596,25 +6093,36 @@ function renderCuentaCorriente() {
         ? matchesCurrentAccountCommissionistSearch(movement, words, exactCommissionist)
         : matchesCurrentAccountClientSearch(movement, words, exactClient);
     if (!matchesEntity) return false;
-    if (statusFilter !== "TODOS" && String(movement.estado || "").toUpperCase() !== statusFilter) return false;
-    if (conceptFilter === "COMISION" && (!isCommissionPendingMovement(movement, viewMode) || String(movement.estado || "").toUpperCase() === "IMPUTADO")) return false;
+    if (statusFilter !== "TODOS" && currentAccountMovementStatusFilterValue(movement, viewMode) !== statusFilter) return false;
+    if (conceptFilter === "COMISION") {
+      const commissionistSource = viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
+      if (!isCommissionPendingMovement(movement, viewMode) || (String(movement.estado || "").toUpperCase() === "IMPUTADO" && !commissionistSource)) return false;
+    }
+    if (!matchesCurrentAccountOperationType(movement, operationTypeFilter)) return false;
+    if (!matchesCurrentAccountKeyword(movement, keywordWords)) return false;
+    if (associatedAccountFilter && !normalizeSearch(movement.cuentaAsociada || "").includes(associatedAccountFilter)) return false;
+    if (originTypeFilter && !normalizeSearch(movement.tipoOrigen || "").includes(originTypeFilter)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
-  const balance = viewMode === "CONSIGNATARIA"
-    ? movements
-      .filter((movement) => !movement.facturaComisionId && !movement.facturaComision)
-      .filter((movement) => isConsigneeOwnCharge(movement) || movementCommissionistAccountKey(movement))
-      .reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
-    : movements.reduce((sum, movement) => sum + Number(movement.importe || 0), 0);
+  const balanceMovements = currentAccountBalanceMovements(movements, viewMode);
+  const balance = viewMode === "CONSIGNATARIA" || viewMode === "COMISIONISTA"
+    ? balanceMovements.reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
+    : balanceMovements.reduce((sum, movement) => sum + Number(movement.importe || 0), 0);
   const selectedClient = words.length ? $("#cc-client-search").value.trim() : (viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : viewMode === "COMISIONISTA" ? "Todos los comisionistas" : "Todos");
 
   $("#cc-selected-client").textContent = selectedClient || "Todos";
   const balanceLabel = document.querySelector("#cc-selected-balance")?.previousElementSibling;
-  if (balanceLabel) balanceLabel.textContent = viewMode === "CONSIGNATARIA" ? "Comisiones pendientes" : "Saldo";
+  if (balanceLabel) balanceLabel.textContent = viewMode === "CONSIGNATARIA"
+    ? "Comisiones pendientes"
+    : viewMode === "COMISIONISTA"
+      ? "Saldo comisionista"
+      : "Saldo";
   $("#cc-selected-balance").textContent = moneyValue(balance);
   $("#cc-selected-balance").className = amountClass(balance);
   $("#cc-selected-count").textContent = movements.length;
+  renderAssociatedAccountBalances({ viewMode, words, exactClient, associatedAccountFilter, originTypeFilter });
+  renderClientFundsSummary(viewMode === "CLIENTE" ? exactClient : "");
   const commissionRows = commissionSplitSummary(movements, viewMode);
   const commissionTotals = commissionSplitTotals(commissionRows);
   const commissionPanel = $("#cc-commission-summary-panel");
@@ -2643,11 +6151,13 @@ function renderCuentaCorriente() {
         `
       : `<tr><td colspan="4">Sin comisiones pendientes para esta busqueda.</td></tr>`;
   }
+  renderClientCommissionInvoicePanel(clientCommissionInvoiceRows(words, exactClient));
   $("#cc-due-title").textContent = viewMode === "CONSIGNATARIA" ? "Vencimientos de clientes y comisiones" : "Vencimientos pendientes";
   $("#cc-due-subtitle").textContent = viewMode === "CONSIGNATARIA"
     ? "Incluye vencimientos informativos entre la consignataria y tus clientes, y comisiones pendientes a cobrar."
     : "Ordenados por fecha de vencimiento.";
 
+  const imputationsByMovement = currentAccountImputationsByMovement();
   $("#cc-movements-body").innerHTML = movements.length
     ? movements.slice(0, 200).map((movement) => {
         const detail = commissionistDetailFromObservation(movement.observacion);
@@ -2659,9 +6169,11 @@ function renderCuentaCorriente() {
           : movement.operacion
             ? `<button type="button" class="small-button" data-cc-operation-report="${escapeHtml(movement.operacion)}">Ver comprobante</button>`
             : externalMovementActions(movement);
+        const quickAction = currentAccountQuickPaymentButton(movement);
         const amountDisplay = currentAccountMovementAmountForDisplay(movement, payment);
+        const imputationRows = currentAccountImputationRowsHtml(movement, imputationsByMovement.get(String(movement.id)) || [], 9);
         return `
-        <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
+        <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${isPriceDifferenceCommissionAdjustment(movement) ? "movement-adjustment" : ""} ${movement.estado === "ANULADO" ? "movement-cancelled" : ""}">
           <td>${escapeHtml(movement.fecha || "-")}</td>
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
@@ -2669,18 +6181,27 @@ function renderCuentaCorriente() {
           <td>${escapeHtml(movement.comprobante || "-")}</td>
           <td>${escapeHtml(movement.operacion || "-")}</td>
           <td class="${amountDisplay.className}">${amountDisplay.text}</td>
-          <td>${escapeHtml(movement.estado || "-")}</td>
-          <td>${baseActions}${documentActionButtons(movement)}</td>
+          <td>${escapeHtml(currentAccountMovementStatusForDisplay(movement, viewMode))}</td>
+          <td>${quickAction}${quickAction && baseActions ? " " : ""}${baseActions}${documentActionButtons(movement)}</td>
         </tr>
         ${compensationSummaryTableRow(payment, 9)}
+        ${imputationRows}
+        ${commissionPriceAdjustmentBreakdownRow(movement, 9)}
         ${detail ? `<tr class="cc-detail-row"><td colspan="9">${commissionistDetailHtml(detail)}</td></tr>` : ""}
       `;
       }).join("")
     : `<tr><td colspan="9">Sin movimientos para esta busqueda.</td></tr>`;
 
-  const due = (state.cuenta.vencimientos || []).filter((movement) => {
-    if (Math.abs(signedPendingAmount(movement)) <= 0.01) return false;
-    if (movement.paymentId) return false;
+  const dueSource = viewMode === "COMISIONISTA" ? (state.cuenta.movimientos || []) : (state.cuenta.vencimientos || []);
+  const due = dueSource.filter((movement) => {
+    const commissionistSource = viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
+    if (commissionistSource) {
+      if (isCommissionistSourceLiquidated(movement)) return false;
+      if (Math.abs(Number(movement.importeComision || 0)) <= 0.01) return false;
+    } else {
+      if (Math.abs(signedPendingAmount(movement)) <= 0.01) return false;
+      if (movement.paymentId) return false;
+    }
     const matchesEntity = viewMode === "CONSIGNATARIA"
       ? matchesCurrentAccountConsigneeSearch(movement, words, exactConsignee)
       : viewMode === "COMISIONISTA"
@@ -2688,21 +6209,25 @@ function renderCuentaCorriente() {
         : matchesCurrentAccountClientSearch(movement, words, exactClient);
     if (!matchesEntity) return false;
     if (conceptFilter === "COMISION" && !isCommissionPendingMovement(movement, viewMode)) return false;
+    if (!matchesCurrentAccountOperationType(movement, operationTypeFilter)) return false;
+    if (!matchesCurrentAccountKeyword(movement, keywordWords)) return false;
+    if (associatedAccountFilter && !normalizeSearch(movement.cuentaAsociada || "").includes(associatedAccountFilter)) return false;
+    if (originTypeFilter && !normalizeSearch(movement.tipoOrigen || "").includes(originTypeFilter)) return false;
     if (!matchesCurrentAccountDateRange(movement, dateFrom, dateTo)) return false;
     if (!dueDateInRange(movement, duePanelRange.from, duePanelRange.to)) return false;
     return matchesCurrentAccountDueFilter(movement, dueFilter);
   });
   $("#cc-due-body").innerHTML = due.length
     ? due.slice(0, 80).map((movement) => {
-      const amount = signedPendingAmount(movement);
+      const amountDisplay = currentAccountMovementAmountForDisplay(movement, null);
       return `
-        <tr class="${isCashMovement(movement) ? "movement-cash" : ""}">
+        <tr class="${isCashMovement(movement) ? "movement-cash" : ""} ${isPriceDifferenceCommissionAdjustment(movement) ? "movement-adjustment" : ""}">
           <td>${escapeHtml(movement.vencimiento || "-")}</td>
           <td>${escapeHtml(movement.cliente || "-")}</td>
           <td>${escapeHtml(currentAccountConceptText(movement, viewMode))}</td>
           <td>${escapeHtml(movement.comprobante || "-")}</td>
-          <td class="${amountClass(amount)}">${moneyValue(amount)}</td>
-          <td>${externalMovementActions(movement)}</td>
+          <td class="${amountDisplay.className}">${amountDisplay.text}</td>
+          <td>${currentAccountQuickPaymentButton(movement)}${externalMovementActions(movement)}</td>
         </tr>
       `;
     }).join("")
@@ -2734,7 +6259,7 @@ function matchesCurrentAccountDateRange(movement, from, to) {
 
 function matchesCurrentAccountDueFilter(movement, filter) {
   if (!filter || filter === "TODOS") return true;
-  if (String(movement.estado || "").toUpperCase() === "IMPUTADO") return false;
+  if (String(movement.estado || "").toUpperCase() === "IMPUTADO" && !isCommissionistSourceOperation(movement)) return false;
   const due = parseDisplayDate(movement.vencimiento);
   if (!due) return false;
   const today = new Date();
@@ -2808,10 +6333,13 @@ function openCurrentAccountPanel(panelId) {
     $("#cc-external-due-date").value = today;
     setMoneyInput("#cc-external-due-amount", 0);
     state.externalDueRows = [];
+    state.editingExternalDueRowId = "";
     $("#cc-external-commissionist").value = "";
     setMoneyInput("#cc-external-commission-base", 0);
     $("#cc-external-commission-percent").value = "";
     setMoneyInput("#cc-external-commission-amount", 0);
+    $("#cc-external-associated-account").value = $("#cc-associated-account-filter")?.value || "";
+    $("#cc-external-origin-type").value = $("#cc-origin-type-filter")?.value || "";
     syncExternalConceptFields();
     renderExternalDueRows();
   } else {
@@ -2819,6 +6347,10 @@ function openCurrentAccountPanel(panelId) {
     $("#cc-payment-type").value = openCurrentAccountSuggestedPaymentType($("#cc-payment-client").value);
     $("#cc-payment-date").value = today;
     setMoneyInput("#cc-payment-amount", 0);
+    $("#cc-payment-reference").value = "";
+    $("#cc-payment-notes").value = "";
+    $("#cc-payment-associated-account").value = $("#cc-associated-account-filter")?.value || "";
+    $("#cc-payment-origin-type").value = $("#cc-origin-type-filter")?.value || "";
     currentPaymentInstruments = [];
     $("#cc-instrument-date").value = today;
     setMoneyInput("#cc-instrument-amount", 0);
@@ -2853,9 +6385,59 @@ function openCurrentAccountSuggestedPaymentType(clientName) {
   return hasReceivableFromClient ? "COBRO" : $("#cc-payment-type").value;
 }
 
+function selectCurrentAccountImputationForMovement(movementId) {
+  const id = String(movementId || "");
+  const boxes = $all("[data-cc-impute], [data-cc-impute-group]");
+  let found = false;
+  boxes.forEach((box) => {
+    let matches = String(box.dataset.ccImpute || "") === id;
+    if (!matches && box.dataset.ccGroupItems) {
+      try {
+        const items = JSON.parse(decodeURIComponent(box.dataset.ccGroupItems));
+        matches = Array.isArray(items) && items.some((item) => String(item.movementId || "") === id);
+      } catch (error) {
+        matches = false;
+      }
+    }
+    box.checked = matches;
+    if (matches) found = true;
+  });
+  refreshPrimaryImputationSummary();
+  return found;
+}
+
+function openCurrentAccountQuickPayment(movementId) {
+  const movement = (state.cuenta?.movimientos || []).find((item) => String(item.id || "") === String(movementId || ""));
+  if (!movement) return;
+  const signed = pendingSignedAmount(movement);
+  if (Math.abs(signed) <= 0.01) return;
+  openCurrentAccountPanel("#cc-payment-panel");
+  $("#cc-payment-client").value = movement.cliente || "";
+  $("#cc-payment-type").value = signed < 0 ? "PAGO" : "COBRO";
+  $("#cc-counterparty-type").value = $("#cc-payment-type").value === "PAGO" ? "COBRO" : "PAGO";
+  setMoneyInput("#cc-payment-amount", Math.abs(signed));
+  $("#cc-payment-reference").value = movement.comprobante || movement.operacion || "";
+  $("#cc-payment-notes").value = movement.operacion ? `Movimiento ${movement.operacion}` : "";
+  $("#cc-payment-associated-account").value = movement.cuentaAsociada || movement.consignataria || "";
+  $("#cc-payment-origin-type").value = movement.tipoOrigen || movement.destinoOperacion || "";
+  syncCurrentAccountPaymentMode();
+  renderCurrentAccountImputations();
+  renderCurrentAccountCounterpartyImputations();
+  const selected = selectCurrentAccountImputationForMovement(movement.id);
+  if (!selected) {
+    $("#cc-payment-message").textContent = "No se pudo marcar automaticamente el movimiento. Revisá si corresponde Pago o Cobro y seleccionalo manualmente.";
+    $("#cc-payment-message").className = "form-message error";
+  } else {
+    $("#cc-payment-message").textContent = "Movimiento seleccionado para imputar.";
+    $("#cc-payment-message").className = "form-message success";
+  }
+  $("#cc-payment-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function syncCurrentAccountPaymentMode() {
   const type = $("#cc-payment-type").value;
   const isCompensation = type === "COMPENSACION";
+  const isFund = type === "FONDO";
   const config = {
     COBRO: {
       title: "Registrar cobro recibido",
@@ -2868,44 +6450,122 @@ function syncCurrentAccountPaymentMode() {
       imputation: "Imputar liquidaciones a pagar / descontar gastos"
     },
     COMPENSACION: {
-      title: "Compensacion / aplicacion de saldo disponible",
-      text: "Usalo cuando la plata no pasa por Gonzalo Espinosa: el cliente ya cobro por fuera y esa plata queda disponible para pagar gastos o saldos pendientes.",
-      imputation: "Seleccionar venta/liquidacion cobrada por fuera y gastos a aplicar"
+      title: "Aplicar saldo disponible",
+      text: "Usalo para pagar gastos o saldos pendientes con dinero que el cliente ya tiene disponible.",
+      imputation: "Seleccionar gastos o pagos a aplicar"
+    },
+    FONDO: {
+      title: "Registrar fondos recibidos directamente por el cliente",
+      text: "Toma una transferencia o instrumento de un pago ya registrado y lo controla como dinero disponible, sin duplicar el cobro ni modificar nuevamente la cuenta corriente.",
+      imputation: "Sin imputaciones en este paso"
     }
   }[type] || {};
   $("#cc-payment-title").textContent = config.title || "Registrar pago / cobro";
   $("#cc-payment-mode-help").innerHTML = `<strong>${escapeHtml(config.title || "")}</strong><span>${escapeHtml(config.text || "")}</span>`;
   $("#cc-imputation-title").textContent = config.imputation || "Imputar pendientes";
-  $("#cc-instrument-panel").hidden = isCompensation;
+  $("#cc-instrument-panel").hidden = isCompensation || isFund;
   $("#cc-compensation-panel").hidden = !isCompensation;
-  $(".cc-counterparty-option").hidden = isCompensation;
-  $("#cc-discount-only").closest("label").hidden = isCompensation;
+  $("#cc-fund-panel").hidden = !isFund;
+  $("#cc-imputation-panel").hidden = isFund;
+  $(".cc-counterparty-option").hidden = isCompensation || isFund;
+  $("#cc-discount-only").closest("label").hidden = isCompensation || isFund;
   $("#cc-payment-method").closest("label").hidden = false;
-  $("#cc-payment-method").closest("label").childNodes[0].textContent = isCompensation ? "Medio cobrado por fuera" : "Medio";
-  $("#cc-payment-reference").closest("label").childNodes[0].textContent = isCompensation ? "Referencia del cobro externo" : "Referencia";
+  $("#cc-payment-method").closest("label").childNodes[0].textContent = isCompensation ? "Medio utilizado" : isFund ? "Medio recibido por el cliente" : "Medio";
+  $("#cc-payment-reference").closest("label").childNodes[0].textContent = isCompensation ? "Referencia de la aplicacion" : isFund ? "Referencia del ingreso" : "Referencia";
   $("#cc-payment-amount").readOnly = isCompensation;
-  $("#cc-payment-amount").closest("label").childNodes[0].textContent = isCompensation ? "Saldo disponible / control" : "Importe";
-  $("#cc-save-payment").textContent = isCompensation ? "Guardar compensacion" : "Guardar pago / cobro";
-  $("#cc-save-payment-receipt").textContent = isCompensation ? "Guardar y generar comprobante de compensacion" : "Guardar y generar comprobante";
-  if (isCompensation) {
+  $("#cc-payment-amount").closest("label").childNodes[0].textContent = isCompensation ? "Saldo aplicado / control" : isFund ? "Importe disponible recibido" : "Importe";
+  $("#cc-save-payment").textContent = isCompensation ? "Guardar aplicacion" : isFund ? "Guardar saldo disponible" : "Guardar pago / cobro";
+  $("#cc-save-payment-receipt").textContent = isCompensation ? "Guardar y generar comprobante de aplicacion" : isFund ? "Guardar y generar comprobante de fondos" : "Guardar y generar comprobante";
+  if (isCompensation || isFund) {
     $("#cc-counterparty-enabled").checked = false;
     $("#cc-counterparty-panel").hidden = true;
     currentPaymentInstruments = [];
     renderCurrentAccountInstruments();
   }
+  if (isFund) renderFundSourceOptions();
   renderCompensationBalancePreview();
+}
+
+function isFundLedgerPayment(payment) {
+  return payment?.tipo === "COMPENSACION" || payment?.tipo === "FONDO";
+}
+
+function fundSourceCandidates(clientName) {
+  const client = normalizeAccountName(clientName);
+  if (!client) return [];
+  const used = new Set((state.cuenta?.pagos || [])
+    .filter((payment) => payment.tipo === "FONDO" && !payment.anulado)
+    .map((payment) => `${payment.sourcePaymentId || ""}|${payment.sourceInstrumentId || ""}`));
+  return (state.cuenta?.pagos || [])
+    .filter((payment) => payment.tipo === "PAGO" && !payment.anulado && normalizeAccountName(payment.cliente) === client)
+    .flatMap((payment) => {
+      const instruments = payment.instrumentos?.length
+        ? payment.instrumentos
+        : [{ id: "PAYMENT", medio: payment.medio, fecha: payment.fecha, referencia: payment.referencia, importe: payment.importe }];
+      const sourceDetail = (payment.imputaciones || [])[0];
+      const sourceLabel = [sourceDetail?.comprobante, sourceDetail?.concepto].filter(Boolean).join(" - ");
+      return instruments
+        .filter((instrument) => Number(instrument.importe || 0) > 0.01)
+        .filter((instrument) => !used.has(`${payment.id}|${instrument.id || "PAYMENT"}`))
+        .map((instrument) => ({
+          key: `${payment.id}|${instrument.id || "PAYMENT"}`,
+          paymentId: payment.id,
+          instrumentId: instrument.id || "PAYMENT",
+          paymentDate: payment.fecha || "",
+          date: instrument.fecha || payment.fecha || "",
+          method: instrument.medio || payment.medio || "Transferencia",
+          reference: instrument.referencia || payment.referencia || "",
+          amount: Number(instrument.importe || 0),
+          label: sourceLabel || payment.referencia || payment.id
+        }));
+    });
+}
+
+function selectedFundSource() {
+  const key = $("#cc-fund-source")?.value || "";
+  return fundSourceCandidates($("#cc-payment-client")?.value || "").find((item) => item.key === key) || null;
+}
+
+function syncSelectedFundSource() {
+  const source = selectedFundSource();
+  if (!source) return;
+  setMoneyInput("#cc-payment-amount", source.amount);
+  $("#cc-payment-method").value = Array.from($("#cc-payment-method").options).some((option) => option.value === source.method)
+    ? source.method
+    : "Otro";
+  $("#cc-payment-reference").value = [source.paymentId, source.reference].filter(Boolean).join(" - ");
+  $("#cc-payment-date").value = dateToInput(source.date || source.paymentDate) || $("#cc-payment-date").value;
+  $("#cc-fund-origin-label").value = `${source.label} - ${source.method}`;
+  $("#cc-fund-source-help").textContent = `${source.paymentId} · ${source.method} · ${moneyValue(source.amount)}. Se controlara como dinero recibido directamente por el cliente.`;
+}
+
+function renderFundSourceOptions() {
+  const select = $("#cc-fund-source");
+  if (!select) return;
+  const current = select.value;
+  const rows = fundSourceCandidates($("#cc-payment-client")?.value || "");
+  select.innerHTML = rows.length
+    ? rows.map((item) => `<option value="${escapeHtml(item.key)}">${escapeHtml(item.paymentId)} - ${escapeHtml(item.method)} - ${moneyValue(item.amount)} - ${escapeHtml(item.label)}</option>`).join("")
+    : `<option value="">Sin transferencias o instrumentos disponibles</option>`;
+  if (rows.some((item) => item.key === current)) select.value = current;
+  if (rows.length) syncSelectedFundSource();
+  else {
+    setMoneyInput("#cc-payment-amount", 0);
+    $("#cc-fund-origin-label").value = "";
+    $("#cc-fund-source-help").textContent = "No hay instrumentos disponibles: deben pertenecer a un pago vigente del cliente y no estar asociados a otro saldo.";
+  }
 }
 
 function compensationAvailableBalanceForClient(clientName) {
   const client = normalizeAccountName(clientName);
   if (!client) return 0;
   return (state.cuenta?.pagos || [])
-    .filter((payment) => payment.tipo === "COMPENSACION" && !payment.anulado && normalizeAccountName(payment.cliente) === client)
+    .filter((payment) => isFundLedgerPayment(payment) && !payment.anulado && normalizeAccountName(payment.cliente) === client)
     .reduce((sum, payment) => sum + compensationSignedAmount(payment), 0);
 }
 
 function compensationOriginFromPayment(payment) {
-  if (!payment || payment.tipo !== "COMPENSACION") return null;
+  if (!isFundLedgerPayment(payment)) return null;
   if (payment.compensationOriginId) {
     return {
       id: String(payment.compensationOriginId),
@@ -2919,23 +6579,28 @@ function compensationOriginFromPayment(payment) {
       label: `${source.comprobante || "Liquidacion cobrada por fuera"} - ${source.concepto || source.movementId}`
     };
   }
+  if (payment.tipo === "FONDO") return { id: String(payment.id), label: payment.referencia || `Fondos ${payment.id}` };
   return { id: "GENERAL", label: "Saldo general anterior sin origen identificado" };
 }
 
-function compensationOriginsForClient(clientName) {
+function compensationOriginsForClient(clientName, includeClosed = false) {
   const client = normalizeAccountName(clientName);
   const groups = new Map();
   (state.cuenta?.pagos || [])
-    .filter((payment) => payment.tipo === "COMPENSACION" && !payment.anulado && normalizeAccountName(payment.cliente) === client)
+    .filter((payment) => isFundLedgerPayment(payment) && !payment.anulado && normalizeAccountName(payment.cliente) === client)
     .forEach((payment) => {
       const origin = compensationOriginFromPayment(payment);
       if (!origin) return;
-      if (!groups.has(origin.id)) groups.set(origin.id, { ...origin, balance: 0 });
+      if (!groups.has(origin.id)) groups.set(origin.id, { ...origin, balance: 0, received: 0, applied: 0, entries: [] });
       const row = groups.get(origin.id);
-      row.balance += compensationSignedAmount(payment);
+      const signed = compensationSignedAmount(payment);
+      row.balance += signed;
+      if (signed > 0) row.received += signed;
+      if (signed < 0) row.applied += Math.abs(signed);
+      row.entries.push(payment);
       if ((!row.label || row.id === "GENERAL") && origin.label) row.label = origin.label;
     });
-  return Array.from(groups.values()).filter((item) => Math.abs(item.balance) > 0.01);
+  return Array.from(groups.values()).filter((item) => includeClosed || Math.abs(item.balance) > 0.01);
 }
 
 function selectedCompensationOpeningOrigin() {
@@ -2957,8 +6622,7 @@ function selectedCompensationOrigin() {
 }
 
 function selectedCompensationSignedTotal() {
-  return $all("[data-cc-impute]:checked")
-    .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
+  return compensationAppliedSignedTotal(selectedCurrentAccountImputationRows("[data-cc-impute]:checked, [data-cc-impute-group]:checked"));
 }
 
 function renderCompensationBalancePreview() {
@@ -2989,6 +6653,36 @@ function renderCompensationBalancePreview() {
   $("#cc-comp-balance-after").className = amountClass(after);
 }
 
+function fundEntryDescription(payment) {
+  if (payment.tipo === "FONDO") return `Ingreso disponible · ${payment.medio || "-"}`;
+  return compensationSignedAmount(payment) < 0
+    ? `Aplicacion de fondos · ${payment.medio || "-"}`
+    : `Saldo cobrado por fuera · ${payment.medio || "-"}`;
+}
+
+function renderClientFundsSummary(clientName) {
+  const panel = $("#cc-funds-summary-panel");
+  const body = $("#cc-funds-summary-body");
+  if (!panel || !body) return;
+  const client = normalizeAccountName(clientName);
+  const rows = client ? compensationOriginsForClient(clientName, true) : [];
+  panel.hidden = !rows.length;
+  const total = rows.reduce((sum, item) => sum + Number(item.balance || 0), 0);
+  $("#cc-funds-summary-total").textContent = `Disponible ${moneyValue(total)}`;
+  body.innerHTML = rows.length
+    ? rows.map((item) => {
+        const history = [...item.entries].sort((a, b) => (parseDisplayDate(a.fecha)?.getTime() || 0) - (parseDisplayDate(b.fecha)?.getTime() || 0));
+        const originEntry = history.find((entry) => compensationSignedAmount(entry) > 0);
+        const canCancelOrigin = originEntry?.tipo === "FONDO" && item.applied <= 0.01;
+        const historyRows = history.map((entry) => {
+          const signed = compensationSignedAmount(entry);
+          return `<tr><td>${escapeHtml(entry.fecha || "-")}</td><td>${escapeHtml(entry.id || "-")}</td><td>${escapeHtml(fundEntryDescription(entry))}</td><td>${escapeHtml(entry.referencia || "-")}</td><td class="${amountClass(signed)}">${signed < 0 ? "-" : ""}${moneyValue(Math.abs(signed))}</td><td><button type="button" class="small-button" data-cc-fund-receipt="${escapeHtml(entry.id)}">Ver</button>${entry.tipo === "COMPENSACION" ? ` <button type="button" class="small-button danger-button" data-cc-fund-cancel="${escapeHtml(entry.id)}">Anular</button>` : ""}</td></tr>`;
+        }).join("");
+        return `<tr><td><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(originEntry?.sourcePaymentId || originEntry?.id || "")}</small></td><td class="amount positive">${moneyValue(item.received)}</td><td class="amount negative">${moneyValue(item.applied)}</td><td class="amount ${amountClass(item.balance)}">${moneyValue(item.balance)}</td><td>${originEntry ? `<button type="button" class="small-button" data-cc-fund-receipt="${escapeHtml(originEntry.id)}">Comprobante</button>` : "-"}${canCancelOrigin ? ` <button type="button" class="small-button danger-button" data-cc-fund-cancel="${escapeHtml(originEntry.id)}">Anular origen</button>` : ""}</td></tr><tr class="cc-detail-row"><td colspan="5"><details><summary>Ver movimientos del fondo (${history.length})</summary><table class="nested-table"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Movimiento</th><th>Referencia</th><th>Importe</th><th></th></tr></thead><tbody>${historyRows}</tbody></table></details></td></tr>`;
+      }).join("")
+    : `<tr><td colspan="5">Sin fondos disponibles registrados.</td></tr>`;
+}
+
 function externalMovementBaseId(id) {
   return String(id || "").replace(/-(NETO(?:-\d+)?|IVA|VTO-\d+)$/i, "");
 }
@@ -3008,6 +6702,18 @@ function syncExternalConceptFields() {
     state.externalDueRows = [];
   }
   renderExternalDueRows();
+}
+
+function ensureExternalConceptOption(concept) {
+  const select = $("#cc-external-concept");
+  const value = String(concept || "").trim();
+  if (!select || !value) return;
+  const exists = Array.from(select.options).some((option) => option.value === value || option.textContent === value);
+  if (exists) return;
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = value;
+  select.appendChild(option);
 }
 
 function externalDueTargetAmount() {
@@ -3032,7 +6738,7 @@ function renderExternalDueRows() {
     ? `${state.externalDueRows.length} vencimiento/s - total ${moneyValue(total)}${target ? ` / esperado ${moneyValue(target)}` : ""}`
     : `Sin vencimientos cargados${target ? ` - esperado ${moneyValue(target)}` : ""}`;
   body.innerHTML = state.externalDueRows.length
-    ? state.externalDueRows.map((item) => `<tr><td>${escapeHtml(formatDate(item.vencimiento))}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button danger-button" data-cc-remove-external-due="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
+    ? state.externalDueRows.map((item) => `<tr><td>${escapeHtml(formatDisplayDate(parseAnyLocalDate(item.vencimiento)) || item.vencimiento || "-")}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button" data-cc-edit-external-due="${escapeHtml(item.id)}">Editar</button> <button type="button" class="small-button danger-button" data-cc-remove-external-due="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
     : `<tr><td colspan="3">Sin vencimientos cargados.</td></tr>`;
 }
 
@@ -3040,20 +6746,38 @@ function addExternalDueRow() {
   const vencimiento = $("#cc-external-due-date").value || $("#cc-external-due").value;
   const importe = numberValue("#cc-external-due-amount");
   if (!vencimiento || importe <= 0) {
-    $("#cc-external-message").textContent = "Para agregar un vencimiento cargÃ¡ fecha e importe mayor a cero.";
+    $("#cc-external-message").textContent = "Para agregar un vencimiento cargá fecha e importe mayor a cero.";
     $("#cc-external-message").className = "form-message error";
     return;
   }
-  state.externalDueRows.push({
-    id: `VTO-${Date.now()}-${state.externalDueRows.length}`,
-    vencimiento,
-    importe
-  });
+  const editingId = state.editingExternalDueRowId;
+  if (editingId) {
+    state.externalDueRows = state.externalDueRows.map((item) => item.id === editingId
+      ? { ...item, vencimiento, importe }
+      : item);
+  } else {
+    state.externalDueRows.push({
+      id: `VTO-${Date.now()}-${state.externalDueRows.length}`,
+      vencimiento,
+      importe
+    });
+  }
+  state.editingExternalDueRowId = "";
+  $("#cc-external-due-add").textContent = "Agregar vencimiento";
   $("#cc-external-message").textContent = "";
   $("#cc-external-message").className = "form-message";
   $("#cc-external-due-date").value = vencimiento;
   setMoneyInput("#cc-external-due-amount", 0);
   renderExternalDueRows();
+}
+
+function editExternalDueRow(id) {
+  const row = state.externalDueRows.find((item) => item.id === id);
+  if (!row) return;
+  state.editingExternalDueRowId = row.id;
+  $("#cc-external-due-date").value = dateToInput(row.vencimiento);
+  setMoneyInput("#cc-external-due-amount", Number(row.importe || 0));
+  $("#cc-external-due-add").textContent = "Guardar cambio";
 }
 
 function collectExternalDueRows() {
@@ -3108,7 +6832,9 @@ function openExternalMovementEdit(movementId) {
   $("#cc-external-message").className = "form-message";
   $("#cc-external-client").value = signSource.cliente || "";
   $("#cc-external-direction").value = Number(signSource.importe || 0) >= 0 ? "COBRAR" : "PAGAR";
-  $("#cc-external-concept").value = isMag ? "Venta MAG" : (movement.concepto || "Otros gastos");
+  const conceptValue = isMag ? "Venta MAG" : (movement.concepto || "Otros gastos");
+  ensureExternalConceptOption(conceptValue);
+  $("#cc-external-concept").value = conceptValue;
   $("#cc-external-receipt").value = signSource.comprobante || "";
   $("#cc-external-date").value = dateToInput(signSource.fecha || "");
   $("#cc-external-due").value = dateToInput(signSource.vencimiento || "");
@@ -3117,6 +6843,8 @@ function openExternalMovementEdit(movementId) {
   setMoneyInput("#cc-external-mag-net", accountTotal + Math.abs(Number(ivaRow?.importe || 0)));
   setMoneyInput("#cc-external-mag-iva", Math.abs(Number(ivaRow?.importe || 0)));
   $("#cc-external-notes").value = signSource.observacion || "";
+  $("#cc-external-associated-account").value = signSource.cuentaAsociada || "";
+  $("#cc-external-origin-type").value = signSource.tipoOrigen || "";
   const commissionRow = accountRows.find((item) => item.comisionista || Number(item.baseComision || 0) || Number(item.importeComision || 0)) || netRow;
   $("#cc-external-commissionist").value = commissionRow?.comisionista || "";
   setMoneyInput("#cc-external-commission-base", Number(commissionRow?.baseComision || 0));
@@ -3129,6 +6857,8 @@ function openExternalMovementEdit(movementId) {
         importe: Math.abs(Number(item.importe || 0))
       }))
     : [];
+  state.editingExternalDueRowId = "";
+  $("#cc-external-due-add").textContent = "Agregar vencimiento";
   $("#cc-external-multiple-due").checked = accountRows.length > 1;
   $("#cc-external-due-panel").hidden = accountRows.length <= 1;
   syncExternalConceptFields();
@@ -3178,6 +6908,10 @@ function commissionInvoicePaymentGroups(movements, type = $("#cc-payment-type")?
     const group = groups.get(id);
     if (movement.comprobante) group.comprobantes.add(movement.comprobante);
     if (movement.operacion) group.operaciones.add(movement.operacion);
+    (movement.detalleFacturaComision?.items || []).forEach((item) => {
+      if (item.comprobante) group.comprobantes.add(item.comprobante);
+      if (item.id) group.operaciones.add(item.id);
+    });
     group.items.push({
       movementId: movement.id,
       pending,
@@ -3264,10 +6998,13 @@ function updateCurrentAccountImputationSummary({ selector, summarySelector, avai
 function refreshPrimaryImputationSummary() {
   const available = getPaymentPendingMovements().length;
   const selected = $all("[data-cc-impute]:checked, [data-cc-impute-group]:checked");
-  const signedTotal = selected.reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
+  const selectedRows = selectedCurrentAccountImputationRows("[data-cc-impute]:checked, [data-cc-impute-group]:checked");
+  const signedTotal = selectedRows.reduce((sum, row) => sum + Number(row.signedPending || 0), 0);
   const positiveTotal = selected
     .filter((item) => Number(item.dataset.ccSignedPending || 0) > 0)
     .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccPending || 0), 0);
+  const compensationOffset = compensationOffsetAmount(selectedRows);
+  const compensationSigned = compensationAppliedSignedTotal(selectedRows);
   const discountOnly = $("#cc-discount-only")?.checked;
   updateCurrentAccountImputationSummary({
     selector: "[data-cc-impute]:checked, [data-cc-impute-group]:checked",
@@ -3276,8 +7013,9 @@ function refreshPrimaryImputationSummary() {
     updatePaymentAmount: true
   });
     if ($("#cc-payment-type").value === "COMPENSACION" && selected.length) {
-    $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - saldo disponible/control ${moneyValue(Math.abs(signedTotal))}`;
-    if (!currentPaymentInstruments.length) setMoneyInput("#cc-payment-amount", Math.abs(signedTotal));
+    const remainder = signedTotal - compensationSigned;
+    $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - compensado ${moneyValue(compensationOffset)}${Math.abs(remainder) > 0.01 ? ` - queda pendiente ${moneyValue(Math.abs(remainder))}` : ""}`;
+    if (!currentPaymentInstruments.length) setMoneyInput("#cc-payment-amount", compensationOffset);
   } else if (selected.length && selected.some((item) => Number(item.dataset.ccSignedPending || 0) < 0) && selected.some((item) => Number(item.dataset.ccSignedPending || 0) > 0)) {
     if (discountOnly) {
       $("#cc-imputation-summary").textContent = `${selected.length} seleccionado/s - descuentos a aplicar ${moneyValue(positiveTotal)}`;
@@ -3299,28 +7037,59 @@ function refreshCounterpartyImputationSummary() {
   });
 }
 
+function isDollarInstrumentMethod(value) {
+  return normalizeSearch(value || "").includes("dolares");
+}
+
+function toggleCurrentAccountDollarInstrumentFields() {
+  const show = isDollarInstrumentMethod($("#cc-instrument-method")?.value);
+  ["#cc-instrument-dollars-label", "#cc-instrument-dollar-rate-label"].forEach((selector) => {
+    const node = $(selector);
+    if (node) node.hidden = !show;
+  });
+}
+
 function addCurrentAccountInstrument() {
-  const importe = numberValue("#cc-instrument-amount");
+  const medio = $("#cc-instrument-method").value;
+  const aplicacion = $("#cc-instrument-application")?.value || "CLIENTE";
+  const dolarCantidad = parseMoneyInput($("#cc-instrument-dollars")?.value || 0);
+  const dolarCotizacion = parseMoneyInput($("#cc-instrument-dollar-rate")?.value || 0);
+  let importe = numberValue("#cc-instrument-amount");
+  if (!importe && isDollarInstrumentMethod(medio) && dolarCantidad && dolarCotizacion) {
+    importe = dolarCantidad * dolarCotizacion;
+    setMoneyInput("#cc-instrument-amount", importe);
+  }
   if (!importe) return;
   currentPaymentInstruments.push({
     id: `INST-${Date.now()}`,
-    medio: $("#cc-instrument-method").value,
+    medio,
+    aplicacion,
     fecha: $("#cc-instrument-date").value,
     referencia: $("#cc-instrument-reference").value,
-    importe
+    importe,
+    dolarCantidad: isDollarInstrumentMethod(medio) ? dolarCantidad : 0,
+    dolarCotizacion: isDollarInstrumentMethod(medio) ? dolarCotizacion : 0
   });
   setMoneyInput("#cc-instrument-amount", 0);
   $("#cc-instrument-reference").value = "";
+  if ($("#cc-instrument-dollars")) $("#cc-instrument-dollars").value = "";
+  if ($("#cc-instrument-dollar-rate")) setMoneyInput("#cc-instrument-dollar-rate", 0);
   renderCurrentAccountInstruments();
 }
 
 function renderCurrentAccountInstruments() {
   const total = currentPaymentInstruments.reduce((sum, item) => sum + Number(item.importe || 0), 0);
-  $("#cc-instrument-summary").textContent = currentPaymentInstruments.length ? `${currentPaymentInstruments.length} instrumento/s - ${moneyValue(total)}` : "Sin instrumentos cargados";
+  const expenseTotal = currentPaymentInstruments
+    .filter((item) => item.aplicacion === "GASTO")
+    .reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const clientTotal = total - expenseTotal;
+  $("#cc-instrument-summary").textContent = currentPaymentInstruments.length
+    ? `${currentPaymentInstruments.length} instrumento/s - total ${moneyValue(total)}${expenseTotal ? ` - entrega ${moneyValue(clientTotal)} - gastos ${moneyValue(expenseTotal)}` : ""}`
+    : "Sin instrumentos cargados";
   if (total) setMoneyInput("#cc-payment-amount", total);
   $("#cc-instrument-body").innerHTML = currentPaymentInstruments.length
-    ? currentPaymentInstruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button danger-button" data-cc-remove-instrument="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
-    : `<tr><td colspan="5">Sin instrumentos cargados.</td></tr>`;
+    ? currentPaymentInstruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${item.aplicacion === "GASTO" ? "Pago de gasto / tercero" : "Entrega al cliente"}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td>${item.dolarCantidad ? `USD ${plainNumberValue(item.dolarCantidad)}` : "-"}</td><td>${item.dolarCotizacion ? moneyValue(item.dolarCotizacion) : "-"}</td><td>${moneyValue(item.importe)}</td><td><button type="button" class="small-button danger-button" data-cc-remove-instrument="${escapeHtml(item.id)}">Quitar</button></td></tr>`).join("")
+    : `<tr><td colspan="8">Sin instrumentos cargados.</td></tr>`;
 }
 
 function compensationSummary(payment) {
@@ -3350,16 +7119,17 @@ function compensationSummary(payment) {
 }
 
 function compensationSignedAmount(payment) {
-  if (!payment || payment.tipo !== "COMPENSACION") return 0;
+  if (!isFundLedgerPayment(payment)) return 0;
+  if (payment.tipo === "FONDO") return Math.abs(Number(payment.importe || 0));
   if (payment.importeFirmado !== undefined && payment.importeFirmado !== "") return Number(payment.importeFirmado || 0);
   return Number(payment.importe || 0);
 }
 
 function compensationRunningBalance(payment) {
-  if (!payment || payment.tipo !== "COMPENSACION") return 0;
+  if (!isFundLedgerPayment(payment)) return 0;
   const origin = compensationOriginFromPayment(payment);
   const rows = (state.cuenta?.pagos || [])
-    .filter((item) => item.tipo === "COMPENSACION" && !item.anulado && normalizeAccountName(item.cliente) === normalizeAccountName(payment.cliente))
+    .filter((item) => isFundLedgerPayment(item) && !item.anulado && normalizeAccountName(item.cliente) === normalizeAccountName(payment.cliente))
     .filter((item) => {
       if (!origin) return true;
       const itemOrigin = compensationOriginFromPayment(item);
@@ -3394,9 +7164,22 @@ function compensationSummaryTableRow(payment, colspan) {
 }
 
 function currentAccountMovementAmountForDisplay(movement, payment) {
+  const viewMode = $("#cc-view-mode")?.value || "CLIENTE";
+  if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) {
+    const commission = Math.abs(Number(movement.importeComision || 0));
+    return {
+      value: commission,
+      text: commission ? `${moneyValue(commission)} comision` : "-",
+      className: commission ? "amount-positive" : ""
+    };
+  }
   const raw = Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
   if (payment?.tipo !== "COMPENSACION") {
-    return { value: raw, text: moneyValue(raw), className: amountClass(raw) };
+    return {
+      value: raw,
+      text: moneyValue(raw),
+      className: amountClass(raw)
+    };
   }
   const summary = compensationSummary(payment);
   const signed = compensationSignedAmount(payment);
@@ -3408,6 +7191,10 @@ function currentAccountMovementAmountForDisplay(movement, payment) {
 }
 
 function currentAccountMovementConceptForDisplay(movement, payment) {
+  const viewMode = $("#cc-view-mode")?.value || "CLIENTE";
+  if (viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement)) {
+    return `Operacion origen de comision - ${commissionKindLabel(movement)} - ${movement.concepto || "-"}${movement.baseComision ? ` - Base ${moneyValue(movement.baseComision)}` : ""}${movement.porcComision ? ` - ${plainNumberValue(movement.porcComision)}%` : ""}`;
+  }
   if (payment?.tipo !== "COMPENSACION") return currentAccountDueDetailText(movement);
   const summary = compensationSummary(payment);
   const method = payment.medio ? ` - ${payment.medio}` : "";
@@ -3439,6 +7226,8 @@ async function saveExternalCurrentAccountMovement() {
         baseComision: numberValue("#cc-external-commission-base"),
         porcComision: percentValue("#cc-external-commission-percent"),
         importeComision: numberValue("#cc-external-commission-amount"),
+        cuentaAsociada: $("#cc-external-associated-account").value,
+        tipoOrigen: $("#cc-external-origin-type").value,
         observacion: $("#cc-external-notes").value
       })
     });
@@ -3455,6 +7244,7 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   const popup = window.open("", "_blank", "width=900,height=800");
   if (!popup) return;
   const isCompensation = payment.tipo === "COMPENSACION";
+  const isFund = payment.tipo === "FONDO";
   const instruments = payment.instrumentos?.length
     ? payment.instrumentos
     : isCompensation
@@ -3489,47 +7279,119 @@ function printCurrentAccountReceipt(payment, autoPrint = false) {
   const paidTotal = paidImputations.reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const discountTotal = discountImputations.reduce((sum, item) => sum + Number(item.importe || 0), 0);
   const instrumentTotal = instruments.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const instrumentExpenseTotal = instruments
+    .filter((item) => item.aplicacion === "GASTO")
+    .reduce((sum, item) => sum + Number(item.importe || 0), 0);
+  const instrumentClientTotal = instrumentTotal - instrumentExpenseTotal;
   const controlNet = paidTotal - discountTotal;
+  const balanceCredit = Math.abs(Number(payment.saldoFavor || 0));
   const compensation = compensationSummary(payment);
-  const receiptKind = payment.tipo === "COMPENSACION" ? "Compensacion" : payment.tipo === "PAGO" ? "Pago" : "Cobro";
+  const receiptKind = isFund ? "Fondos disponibles" : payment.tipo === "COMPENSACION" ? "Compensacion" : payment.tipo === "PAGO" ? "Pago" : "Cobro";
   const receiptTitle = safePdfTitle(payment.id, receiptKind, payment.cliente, payment.fecha);
+  const imputationOriginalAmount = (item) => {
+    const original = Number(item.importeOriginal ?? 0);
+    if (original) return Math.abs(original);
+    const applied = Math.abs(Number(item.importe || 0));
+    const pending = Math.abs(Number(item.saldoPendiente || 0));
+    return applied + pending;
+  };
+  const paymentsForDeliveryHistory = [...(state.cuenta?.pagos || [])];
+  if (payment.id && !paymentsForDeliveryHistory.some((row) => String(row.id || "") === String(payment.id || ""))) {
+    paymentsForDeliveryHistory.push(payment);
+  }
+  const imputationDeliveries = (item) => {
+    const movementId = String(item.movementId || "");
+    if (!movementId) return [];
+    return paymentsForDeliveryHistory
+      .filter((row) => !row.anulado)
+      .flatMap((row) => (row.imputaciones || [])
+        .filter((imputation) => String(imputation.movementId || "") === movementId)
+        .map((imputation) => ({
+          fecha: row.fecha || "",
+          recibo: row.id || "-",
+          medio: row.medio || "",
+          referencia: row.referencia || "",
+          importe: Number(imputation.importe || 0),
+          actual: String(row.id || "") === String(payment.id || "")
+        })))
+      .filter((row) => row.importe)
+      .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || String(a.recibo).localeCompare(String(b.recibo)));
+  };
+  const deliveryHistoryRows = (rows) => rows
+    .map((item) => {
+      const deliveries = imputationDeliveries(item);
+      const shouldShow = deliveries.length > 1 || Number(item.saldoPendiente || 0) > 0;
+      if (!shouldShow) return "";
+      const totalDelivered = deliveries.reduce((sum, row) => sum + Number(row.importe || 0), 0);
+      return `<tr class="history-title"><td colspan="5">${escapeHtml(item.comprobante || "-")} · ${escapeHtml(item.concepto || item.movementId || "-")}</td></tr>
+        ${deliveries.map((row) => `<tr${row.actual ? ' class="current-delivery"' : ""}>
+          <td>${escapeHtml(row.fecha || "-")}</td>
+          <td>${escapeHtml(row.recibo || "-")}</td>
+          <td>${escapeHtml([row.medio, row.referencia].filter(Boolean).join(" - ") || "-")}</td>
+          <td class="amount">${moneyValue(row.importe)}</td>
+          <td>${row.actual ? "Este recibo" : "Anterior"}</td>
+        </tr>`).join("")}
+        <tr class="history-total"><td colspan="3">Total entregado a cuenta</td><td class="amount">${moneyValue(totalDelivered)}</td><td>Saldo: ${moneyValue(item.saldoPendiente || 0)}</td></tr>`;
+    })
+    .filter(Boolean)
+    .join("");
   const imputationRows = (rows, emptyText) => rows.length
-    ? rows.map((item) => `<tr><td>${escapeHtml(item.vencimiento || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td>${escapeHtml(item.concepto || item.movementId)}</td><td class="amount">${moneyValue(item.importe)}</td><td class="amount">${moneyValue(item.saldoPendiente)}</td></tr>`).join("")
-    : `<tr><td colspan="5">${emptyText}</td></tr>`;
+    ? rows.map((item) => `<tr><td>${escapeHtml(item.vencimiento || "-")}</td><td>${escapeHtml(item.comprobante || "-")}</td><td>${escapeHtml(item.concepto || item.movementId)}</td><td class="amount">${moneyValue(imputationOriginalAmount(item))}</td><td class="amount">${moneyValue(item.importe)}</td><td class="amount">${moneyValue(item.saldoPendiente)}</td></tr>`).join("")
+    : `<tr><td colspan="6">${emptyText}</td></tr>`;
+  const paidDeliveryHistory = deliveryHistoryRows(paidImputations);
+  const hasDollarInstrument = instruments.some((item) => Number(item.dolarCantidad || 0) || Number(item.dolarCotizacion || 0) || isDollarInstrumentMethod(item.medio));
+  const instrumentHeader = hasDollarInstrument
+    ? `<tr><th>Medio</th><th>Aplicacion</th><th>Fecha</th><th>Referencia</th><th>Dolares</th><th>Cotizacion</th><th>Importe</th></tr>`
+    : `<tr><th>Medio</th><th>Aplicacion</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr>`;
+  const instrumentRows = instruments.map((item) => hasDollarInstrument
+    ? `<tr><td>${escapeHtml(item.medio)}</td><td>${item.aplicacion === "GASTO" ? "Pago de gasto / tercero" : "Entrega al cliente"}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td>${item.dolarCantidad ? `USD ${plainNumberValue(item.dolarCantidad)}` : "-"}</td><td>${item.dolarCotizacion ? moneyValue(item.dolarCotizacion) : "-"}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`
+    : `<tr><td>${escapeHtml(item.medio)}</td><td>${item.aplicacion === "GASTO" ? "Pago de gasto / tercero" : "Entrega al cliente"}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("");
   popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(receiptTitle)}</title><style>
-    body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px} img{width:76px;height:76px;object-fit:contain;background:#173632;padding:6px} h1{font-size:18px;margin:0} h2{font-size:13px;margin-top:14px} p{margin:3px 0;font-size:11px} table{width:100%;border-collapse:collapse;font-size:10px} th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top} th{background:#edf3f1} .amount{text-align:right;font-weight:700;white-space:nowrap}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}.discount th{background:#f8ebe5}.discount-total{background:#fff3e8;font-weight:700}.net-total{background:#eaf2ff;font-weight:700} button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}button{display:none}body{margin:0}}
+    body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px} img{width:76px;height:76px;object-fit:contain;background:#173632;padding:6px} h1{font-size:18px;margin:0} h2{font-size:13px;margin-top:14px} p{margin:3px 0;font-size:11px} table{width:100%;border-collapse:collapse;font-size:10px} th,td{border:1px solid #cbd7d4;padding:5px;text-align:left;vertical-align:top} th{background:#edf3f1} .amount{text-align:right;font-weight:700;white-space:nowrap}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}.discount th{background:#f8ebe5}.discount-total{background:#fff3e8;font-weight:700}.net-total{background:#eaf2ff;font-weight:700}.history-title td{background:#edf3f1;font-weight:700}.history-total{background:#f8fbfa;font-weight:700}.current-delivery{background:#fff8ed} button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:9mm}button{display:none}body{margin:0}}
   </style></head><body>
-  <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${payment.tipo === "COMPENSACION" ? "Comprobante de compensacion / aplicacion de saldo disponible" : payment.tipo === "PAGO" ? "Comprobante de pago" : "Comprobante de cobro"}</h1><p><strong>${escapeHtml(payment.id)}</strong></p><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p></div></header>
+  <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${isFund ? "Comprobante de fondos disponibles del cliente" : payment.tipo === "COMPENSACION" ? "Comprobante de aplicacion de saldo disponible" : payment.tipo === "PAGO" ? "Comprobante de pago" : "Comprobante de cobro"}</h1><p><strong>${escapeHtml(payment.id)}</strong></p><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p></div></header>
   ${payment.anulado ? `<p><strong>COMPROBANTE ANULADO</strong></p>` : ""}
-  <p><strong>Cliente:</strong> ${escapeHtml(payment.cliente)}</p><p><strong>Fecha:</strong> ${escapeHtml(payment.fecha)}</p><p><strong>Importe:</strong> ${moneyValue(payment.importe)}</p><p><strong>${payment.tipo === "COMPENSACION" ? "Medio externo informado" : "Referencia"}:</strong> ${escapeHtml(payment.tipo === "COMPENSACION" ? `${payment.medio || "-"}${payment.referencia ? ` - ${payment.referencia}` : ""}` : payment.referencia || "-")}</p>
+  <p><strong>Cliente:</strong> ${escapeHtml(payment.cliente)}</p><p><strong>Fecha:</strong> ${escapeHtml(payment.fecha)}</p><p><strong>Importe:</strong> ${moneyValue(payment.importe)}</p><p><strong>${payment.tipo === "COMPENSACION" ? "Medio utilizado" : isFund ? "Origen / referencia" : "Referencia"}:</strong> ${escapeHtml(payment.tipo === "COMPENSACION" ? `${payment.medio || "-"}${payment.referencia ? ` - ${payment.referencia}` : ""}` : payment.referencia || "-")}</p>
+  ${payment.cuentaAsociada || payment.tipoOrigen ? `<p><strong>Cuenta asociada:</strong> ${escapeHtml(payment.cuentaAsociada || "-")} &nbsp; <strong>Tipo de origen:</strong> ${escapeHtml(payment.tipoOrigen || "-")}</p>` : ""}
   <div class="summary">
-    <div><span>${payment.tipo === "COMPENSACION" ? "Saldo disponible cobrado por fuera" : payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
-    <div><span>${payment.tipo === "COMPENSACION" ? "Liquidacion aplicada" : "Vencimientos aplicados"}</span><strong>${moneyValue(paidTotal)}</strong></div>
+    <div><span>${isFund ? "Fondos recibidos directamente" : payment.tipo === "COMPENSACION" ? "Saldo disponible aplicado" : payment.tipo === "PAGO" && instrumentExpenseTotal ? "Total instrumentos emitidos" : payment.tipo === "PAGO" ? "Importe pagado" : "Importe cobrado"}</span><strong>${moneyValue(instrumentTotal || payment.importe)}</strong></div>
+    ${payment.tipo === "PAGO" && instrumentExpenseTotal ? `<div><span>Entrega al cliente</span><strong>${moneyValue(instrumentClientTotal)}</strong></div>` : ""}
+    <div><span>${isFund ? "Aplicado en este comprobante" : payment.tipo === "COMPENSACION" ? "Liquidacion aplicada" : "Vencimientos aplicados"}</span><strong>${moneyValue(paidTotal)}</strong></div>
     <div><span>Descuentos / gastos / comisiones</span><strong>${moneyValue(discountTotal)}</strong></div>
-    <div><span>${payment.tipo === "COMPENSACION" ? compensation?.label || "Saldo resultante informado" : "Control neto"}</span><strong>${moneyValue(payment.tipo === "COMPENSACION" ? Math.abs(compensation?.runningBalance ?? compensation?.saldo ?? controlNet) : controlNet)}</strong></div>
+    ${balanceCredit ? `<div><span>${payment.tipo === "PAGO" ? "Adelanto a recuperar" : "Saldo a favor / anticipo"}</span><strong>${moneyValue(balanceCredit)}</strong></div>` : ""}
+    <div><span>${isFund ? "Saldo disponible de este origen" : payment.tipo === "COMPENSACION" ? compensation?.label || "Saldo resultante informado" : "Control neto"}</span><strong>${moneyValue(isFund ? compensationRunningBalance(payment) : payment.tipo === "COMPENSACION" ? Math.abs(compensation?.runningBalance ?? compensation?.saldo ?? controlNet) : controlNet)}</strong></div>
   </div>
-  ${payment.tipo === "COMPENSACION" ? `<p><strong>Nota:</strong> La venta/liquidacion fue cobrada directamente por el cliente o aplicada por fuera. Este comprobante deja constancia de que esos gastos se pagan con plata disponible de esa venta; no representa un pago realizado por Gonzalo Espinosa ni plata adicional puesta por el cliente.</p>` : `<h2>Detalle de instrumentos</h2><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>${instruments.map((item) => `<tr><td>${escapeHtml(item.medio)}</td><td>${escapeHtml(item.fecha)}</td><td>${escapeHtml(item.referencia || "-")}</td><td class="amount">${moneyValue(item.importe)}</td></tr>`).join("")}</tbody></table>`}
+  ${payment.tipo === "COMPENSACION" ? `<p><strong>Nota:</strong> Este comprobante deja constancia de que los gastos se pagan con fondos disponibles del cliente; no representa un pago realizado por Gonzalo Espinosa ni plata personal adicional del cliente.</p>` : isFund ? `<p><strong>Nota:</strong> Este importe ya formaba parte del pago ${escapeHtml(payment.sourcePaymentId || "registrado")}. Se controla como dinero depositado directamente al cliente y no duplica el cobro ni modifica nuevamente su cuenta corriente.</p><h2>Instrumento recibido por el cliente</h2><table><thead>${instrumentHeader}</thead><tbody>${instrumentRows}</tbody></table>` : `<h2>Detalle de instrumentos</h2><table><thead>${instrumentHeader}</thead><tbody>${instrumentRows}</tbody></table>`}
   <h2>${payment.tipo === "COMPENSACION" ? "Liquidaciones / saldos aplicados" : payment.tipo === "PAGO" ? "Importes pagados / vencimientos cancelados" : "Importes cobrados / vencimientos cancelados"}</h2>
-  <table><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe aplicado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(paidImputations, "Sin vencimientos liquidados en este comprobante.")}</tbody></table>
+  <table><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe original</th><th>Importe aplicado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(paidImputations, "Sin vencimientos liquidados en este comprobante.")}</tbody></table>
+  ${paidDeliveryHistory ? `<h2>Entregas realizadas a cuenta</h2><table><thead><tr><th>Fecha</th><th>Recibo</th><th>Medio / referencia</th><th>Importe</th><th>Estado</th></tr></thead><tbody>${paidDeliveryHistory}</tbody></table>` : ""}
   <h2>Descuentos aplicados</h2>
-  <table class="discount"><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe descontado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(discountImputations, "Sin descuentos aplicados.")}<tr class="discount-total"><td colspan="3">Total descuentos / comisiones</td><td class="amount">${moneyValue(discountTotal)}</td><td></td></tr><tr class="net-total"><td colspan="3">Neto del comprobante</td><td class="amount">${moneyValue(instrumentTotal || payment.importe)}</td><td></td></tr></tbody></table>
-  <button onclick="window.print()">Imprimir / guardar PDF</button>${autoPrint ? `<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),250));</script>` : ""}</body></html>`);
-  popup.document.close();
+  <table class="discount"><thead><tr><th>Vencimiento</th><th>Comprobante</th><th>Concepto</th><th>Importe original</th><th>Importe descontado</th><th>Saldo pendiente</th></tr></thead><tbody>${imputationRows(discountImputations, "Sin descuentos aplicados.")}<tr class="discount-total"><td colspan="4">Total descuentos / comisiones</td><td class="amount">${moneyValue(discountTotal)}</td><td></td></tr><tr class="net-total"><td colspan="4">${instrumentExpenseTotal ? "Total instrumentos emitidos" : "Neto del comprobante"}</td><td class="amount">${moneyValue(instrumentTotal || payment.importe)}</td><td></td></tr></tbody></table>
+  <button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
+  finishPrintPopup(popup, autoPrint);
 }
 
 function getCurrentAccountReportFilters() {
   const query = normalizeSearch($("#cc-client-search").value);
+  const keyword = normalizeSearch($("#cc-keyword-filter")?.value || "");
+  const associatedAccount = normalizeSearch($("#cc-associated-account-filter")?.value || "");
+  const originType = normalizeSearch($("#cc-origin-type-filter")?.value || "");
   const viewMode = $("#cc-view-mode").value;
   return {
     viewMode,
     query,
     words: query.split(" ").filter(Boolean),
+    keyword,
+    keywordWords: keyword.split(" ").filter(Boolean),
+    associatedAccount,
+    originType,
     exactClient: viewMode === "CLIENTE" ? getExactCurrentAccountClient(query) : "",
     exactConsignee: viewMode === "CONSIGNATARIA" ? getExactCurrentAccountConsignee(query) : "",
     exactCommissionist: viewMode === "COMISIONISTA" ? getExactCurrentAccountCommissionist(query) : "",
     statusFilter: $("#cc-status-filter").value,
     dueFilter: $("#cc-due-filter").value,
     conceptFilter: $("#cc-concept-filter").value,
+    operationTypeFilter: $("#cc-operation-type-filter")?.value || "TODOS",
     dateFrom: parseInputDate($("#cc-date-from").value),
     dateTo: parseInputDate($("#cc-date-to").value),
     dateFromText: $("#cc-date-from").value,
@@ -3545,13 +7407,17 @@ function matchesCurrentAccountReportFilters(movement, filters, includeDueFilter 
       : matchesCurrentAccountClientSearch(movement, filters.words, filters.exactClient);
   return matchesEntity
     && (filters.conceptFilter !== "COMISION" || isCommissionPendingMovement(movement, filters.viewMode))
-    && (!includeStatusFilter || filters.statusFilter === "TODOS" || String(movement.estado || "").toUpperCase() === filters.statusFilter)
+    && matchesCurrentAccountOperationType(movement, filters.operationTypeFilter)
+    && matchesCurrentAccountKeyword(movement, filters.keywordWords || [])
+    && (!filters.associatedAccount || normalizeSearch(movement.cuentaAsociada || "").includes(filters.associatedAccount))
+    && (!filters.originType || normalizeSearch(movement.tipoOrigen || "").includes(filters.originType))
+    && (!includeStatusFilter || filters.statusFilter === "TODOS" || currentAccountMovementStatusFilterValue(movement, filters.viewMode) === filters.statusFilter)
     && matchesCurrentAccountDateRange(movement, filters.dateFrom, filters.dateTo)
     && (!includeDueFilter || matchesCurrentAccountDueFilter(movement, filters.dueFilter));
 }
 
 function currentAccountReportStyles() {
-  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.due-date-row td{background:#dfecea;font-weight:700}.due-compact td{font-size:8.2px}.subtle-line{display:block;color:#52706b;font-size:7.6px;margin-top:2px}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-subtotals{display:grid;grid-template-columns:repeat(2,minmax(170px,1fr));gap:6px;margin:6px 0}.commissionist-subtotals div{border:1px solid #cbd7d4;background:#fff;padding:6px}.commissionist-subtotals span{font-size:8px;text-transform:uppercase}.commissionist-subtotals strong{display:block;font-size:11px}.commissionist-subtotals small{display:block;color:#52706b}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.cc-compensation-detail td{background:#f7fbf9}.cc-compensation-box{padding:5px 7px;border-left:3px solid #173632}.cc-compensation-box strong{display:block;margin-bottom:3px}.cc-compensation-box span{display:inline-block;margin-right:12px;color:#52706b}.cc-compensation-box .positive{color:#0f6b43;font-weight:700}.cc-compensation-box .negative{color:#9b1c1c;font-weight:700}.compact{max-width:720px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
+  return `body{font-family:Arial,sans-serif;margin:10mm;color:#173632} header{display:flex;align-items:center;gap:16px;border-bottom:2px solid #173632;padding-bottom:10px} img{width:84px;height:84px;object-fit:contain;background:#173632;padding:6px} h1{font-size:20px;margin:0} h2{font-size:14px;margin:18px 0 0} p{margin:4px 0}.summary{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.summary div{border:1px solid #cbd7d4;padding:7px 9px;min-width:150px}.summary .net-card{background:#edf7f1;border-color:#0f6b43}.summary span{display:block;color:#52706b;font-size:10px}.summary strong{font-size:14px}.summary .net-card strong{font-size:17px}table{width:100%;border-collapse:collapse;font-size:8.5px;margin-top:9px;table-layout:auto}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;font-weight:700;white-space:nowrap}.negative{color:#9b1c1c}.positive{color:#0f6b43}.movement-cash td{font-style:italic}.due-date-row td{background:#dfecea;font-weight:700}.due-compact td{font-size:8.2px}.subtle-line{display:block;color:#52706b;font-size:7.6px;margin-top:2px}.allocation-row td{background:#f8fbfa;color:#52706b;font-size:8px}.allocation-label{padding-left:16px!important}.commissionist-detail-cell{background:#f8fbfa}.commissionist-detail-box{padding:6px}.commissionist-detail-box strong{display:block;margin-bottom:3px}.commissionist-detail-box span{display:block;color:#52706b;margin-bottom:5px}.commissionist-subtotals{display:grid;grid-template-columns:repeat(2,minmax(170px,1fr));gap:6px;margin:6px 0}.commissionist-subtotals div{border:1px solid #cbd7d4;background:#fff;padding:6px}.commissionist-subtotals span{font-size:8px;text-transform:uppercase}.commissionist-subtotals strong{display:block;font-size:11px}.commissionist-subtotals small{display:block;color:#52706b}.commissionist-detail-box table{font-size:8px;margin-top:4px}.status{font-weight:700}.cc-compensation-detail td{background:#f7fbf9}.cc-compensation-box{padding:5px 7px;border-left:3px solid #173632}.cc-compensation-box strong{display:block;margin-bottom:3px}.cc-compensation-box span{display:inline-block;margin-right:12px;color:#52706b}.cc-compensation-box .positive{color:#0f6b43;font-weight:700}.cc-compensation-box .negative{color:#9b1c1c;font-weight:700}.compact{max-width:820px}button{margin-top:18px;padding:9px 14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}}`;
 }
 
 function currentAccountImputationsByMovement() {
@@ -3572,6 +7438,35 @@ function currentAccountImputationsByMovement() {
     });
   });
   return result;
+}
+
+function currentAccountImputationRowsHtml(movement, imputations, colspan = 9) {
+  if (!imputations?.length) return "";
+  const original = Math.abs(Number(movement.importe || 0));
+  const imputed = Math.abs(Number(movement.importeImputado || 0));
+  const pending = Math.abs(Number(movement.importePendiente ?? original));
+  const rows = imputations.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.fecha || "-")}</td>
+      <td>${escapeHtml(item.paymentId || "-")}</td>
+      <td>${escapeHtml([item.tipo, item.medio].filter(Boolean).join(" ") || "-")}</td>
+      <td>${escapeHtml(item.referencia || item.comprobante || "-")}</td>
+      <td class="amount">${moneyValue(item.importe)}</td>
+    </tr>
+  `).join("");
+  return `
+    <tr class="cc-detail-row cc-internal-row">
+      <td colspan="${colspan}">
+        <details>
+          <summary>Control interno: ver imputaciones (${imputations.length}) <span>Original ${moneyValue(original)} | Imputado ${moneyValue(imputed)} | Saldo ${moneyValue(pending)}</span></summary>
+          <table class="nested-table">
+            <thead><tr><th>Fecha</th><th>Comprobante</th><th>Tipo / medio</th><th>Referencia</th><th>Importe imputado</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </details>
+      </td>
+    </tr>
+  `;
 }
 
 function commissionistDetailReportRow(detail) {
@@ -3595,29 +7490,62 @@ function commissionistDetailReportRow(detail) {
 
 function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode = "CLIENTE") {
   if (!rows.length) return `<tr><td colspan="10">Sin movimientos para los filtros aplicados.</td></tr>`;
+  const renderedCommissionistGroups = new Set();
   return rows.map((movement) => {
+    const detail = commissionistDetailFromObservation(movement.observacion);
+    const groupId = detail?.liquidacionId || "";
+    if (groupId) {
+      if (renderedCommissionistGroups.has(groupId)) return "";
+      const grouped = rows.filter((candidate) => commissionistDetailFromObservation(candidate.observacion)?.liquidacionId === groupId);
+      if (grouped.length > 1) {
+        renderedCommissionistGroups.add(groupId);
+        const details = grouped.map((candidate) => commissionistDetailFromObservation(candidate.observacion)).filter(Boolean);
+        const items = details.flatMap((item) => Array.isArray(item.items) ? item.items : [])
+          .sort((a, b) => (parseDisplayDate(a.fecha)?.getTime() || 0) - (parseDisplayDate(b.fecha)?.getTime() || 0)
+            || String(a.vendedor || "").localeCompare(String(b.vendedor || ""), "es")
+            || Number(isCashDetailRow(a)) - Number(isCashDetailRow(b)));
+        const mergedDetail = {
+          ...details[0],
+          tipoComision: "MIXTA",
+          base: items.reduce((sum, item) => sum + Number(item.base || 0), 0),
+          comision: items.reduce((sum, item) => sum + Number(item.comision || 0), 0),
+          items
+        };
+        const original = grouped.reduce((sum, item) => sum + Number(item.importe || 0), 0);
+        const imputed = grouped.reduce((sum, item) => sum + Math.sign(Number(item.importe || 0)) * Number(item.importeImputado || 0), 0);
+        const pending = grouped.reduce((sum, item) => sum + Math.sign(Number(item.importe || 0)) * Number(item.importePendiente ?? Math.abs(Number(item.importe || 0))), 0);
+        const statuses = grouped.map((item) => String(item.estado || "PENDIENTE").toUpperCase());
+        const status = statuses.every((item) => item === "IMPUTADO") ? "IMPUTADO" : statuses.every((item) => item === "PENDIENTE") ? "PENDIENTE" : "PARCIAL";
+        const period = `${mergedDetail.periodoDesde || "inicio"} a ${mergedDetail.periodoHasta || "fin"}`;
+        return `<tr>
+          <td>${escapeHtml(movement.fecha || "-")}</td>
+          <td>${escapeHtml(movement.vencimiento || "-")}</td>
+          <td>${escapeHtml(movement.cliente || "-")}</td>
+          <td>${escapeHtml(`Comisionista ${mergedDetail.porcentaje || 0}% periodo ${period}`)}</td>
+          <td>${escapeHtml(`COMISIONISTA ${mergedDetail.periodoDesde || ""}/${mergedDetail.periodoHasta || ""}`)}</td>
+          <td>-</td>
+          <td class="amount ${original < 0 ? "negative" : "positive"}">${moneyValue(original)}</td>
+          <td class="amount">${moneyValue(imputed)}</td>
+          <td class="amount ${pending < 0 ? "negative" : "positive"}">${moneyValue(pending)}</td>
+          <td class="status">${escapeHtml(status)}</td>
+        </tr>${commissionistDetailReportRow(mergedDetail)}`;
+      }
+    }
     const isPayment = Boolean(movement.paymentId);
     const payment = isPayment ? (state.cuenta.pagos || []).find((item) => item.id === movement.paymentId) : null;
+    const commissionistReference = viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
     const original = Number(movement.importe || 0);
-    const imputed = isPayment ? null : Math.sign(original) * Number(movement.importeImputado || 0);
-    const pending = isPayment ? null : Math.sign(original) * Number(movement.importePendiente ?? Math.abs(original));
+    const imputed = isPayment || commissionistReference ? null : Math.sign(original) * Number(movement.importeImputado || 0);
+    const pending = isPayment || commissionistReference ? null : Math.sign(original) * Number(movement.importePendiente ?? Math.abs(original));
     const amountDisplay = currentAccountMovementAmountForDisplay(movement, payment);
     const conceptDisplay = payment?.tipo === "COMPENSACION"
       ? currentAccountMovementConceptForDisplay(movement, payment)
       : currentAccountConceptText(movement, viewMode);
-    const imputations = imputationsByMovement.get(String(movement.id)) || [];
-    const allocationRows = imputations.map((item) => `
-      <tr class="allocation-row">
-        <td>${escapeHtml(item.fecha || "-")}</td>
-        <td></td>
-        <td colspan="4" class="allocation-label">Imputacion ${escapeHtml(item.paymentId)} - ${escapeHtml(item.tipo || "")} ${escapeHtml(item.medio || "")}${item.referencia ? ` - ${escapeHtml(item.referencia)}` : ""}</td>
-        <td></td>
-        <td class="amount">${moneyValue(item.importe)}</td>
-        <td></td>
-        <td></td>
-      </tr>`).join("");
-    const cashClass = isCashMovement(movement) ? "movement-cash" : "";
-    return `<tr class="${cashClass}">
+    const rowClass = [
+      isCashMovement(movement) ? "movement-cash" : "",
+      isPriceDifferenceCommissionAdjustment(movement) ? "movement-adjustment" : ""
+    ].filter(Boolean).join(" ");
+    return `<tr class="${rowClass}">
       <td>${escapeHtml(movement.fecha || "-")}</td>
       <td>${escapeHtml(movement.vencimiento || "-")}</td>
       <td>${escapeHtml(movement.cliente || "-")}</td>
@@ -3627,13 +7555,40 @@ function currentAccountReportMovementRows(rows, imputationsByMovement, viewMode 
       <td class="amount ${amountDisplay.value < 0 ? "negative" : "positive"}">${amountDisplay.text}</td>
       <td class="amount">${imputed === null ? "-" : moneyValue(imputed)}</td>
       <td class="amount ${pending !== null && pending < 0 ? "negative" : "positive"}">${pending === null ? "-" : moneyValue(pending)}</td>
-      <td class="status">${escapeHtml(movement.estado || "-")}</td>
-    </tr>${compensationSummaryTableRow(payment, 10)}${commissionistDetailReportRow(commissionistDetailFromObservation(movement.observacion))}${allocationRows}`;
+      <td class="status">${escapeHtml(currentAccountMovementStatusForDisplay(movement, viewMode))}</td>
+    </tr>${compensationSummaryTableRow(payment, 10)}${commissionPriceAdjustmentBreakdownRow(movement, 10)}${commissionistDetailReportRow(detail)}`;
   }).join("");
 }
 
 function pendingSignedAmount(movement) {
   return Math.sign(Number(movement.importe || 0)) * Number(movement.importePendiente ?? Math.abs(Number(movement.importe || 0)));
+}
+
+function currentAccountClientNetSummary(rows) {
+  return (rows || []).filter((movement) => !movement.paymentId).reduce((summary, movement) => {
+    const signed = pendingSignedAmount(movement);
+    if (signed < -0.01) summary.toCollect += Math.abs(signed);
+    if (signed > 0.01) summary.discounts += signed;
+    summary.net = summary.toCollect - summary.discounts;
+    return summary;
+  }, { toCollect: 0, discounts: 0, net: 0 });
+}
+
+function currentAccountExpenseSummaryRows(rows) {
+  const byConcept = new Map();
+  (rows || []).forEach((movement) => {
+    if (movement.paymentId) return;
+    const signed = pendingSignedAmount(movement);
+    if (signed <= 0.01) return;
+    const concept = currentAccountConceptText(movement, "CLIENTE") || "Gastos / descuentos";
+    const row = byConcept.get(concept) || { concept, count: 0, total: 0 };
+    row.count += 1;
+    row.total += signed;
+    byConcept.set(concept, row);
+  });
+  return [...byConcept.values()]
+    .filter((row) => Math.abs(row.total) > 0.01)
+    .sort((a, b) => Math.abs(b.total) - Math.abs(a.total) || a.concept.localeCompare(b.concept, "es"));
 }
 
 function printCurrentAccountReport(forcedType = "") {
@@ -3645,21 +7600,27 @@ function printCurrentAccountReport(forcedType = "") {
   const allMovements = state.cuenta.movimientos || [];
   const rows = allMovements
     .filter((movement) => filters.statusFilter === "ANULADO" ? movement.estado === "ANULADO" : movement.estado !== "ANULADO")
-    .filter((movement) => type === "SALDOS" || (!movement.paymentId && movement.estado !== "IMPUTADO"))
+    .filter((movement) => {
+      if (type === "SALDOS") return true;
+      const commissionistSource = filters.viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
+      if (commissionistSource) return !isCommissionistSourceLiquidated(movement);
+      return !movement.paymentId && movement.estado !== "IMPUTADO";
+    })
     .filter((movement) => matchesCurrentAccountReportFilters(movement, filters, type === "VENCIMIENTOS" || filters.dueFilter !== "TODOS", filters.statusFilter !== "TODOS"))
     .sort((a, b) => {
       const dateA = parseDisplayDate(type === "SALDOS" ? a.fecha : a.vencimiento)?.getTime() || 0;
       const dateB = parseDisplayDate(type === "SALDOS" ? b.fecha : b.vencimiento)?.getTime() || 0;
       return dateA - dateB;
     });
-  const pendingBalance = rows.filter((movement) => !movement.paymentId)
+  const reportBalanceRows = currentAccountBalanceMovements(rows, filters.viewMode);
+  const pendingBalance = reportBalanceRows.filter((movement) => !movement.paymentId)
     .reduce((sum, movement) => sum + Math.sign(movement.importe) * Number(movement.importePendiente ?? Math.abs(movement.importe)), 0);
   const accountBalance = filters.viewMode === "CONSIGNATARIA"
-    ? rows
-      .filter((movement) => isConsigneeOwnCharge(movement) || movementCommissionistAccountKey(movement))
-      .reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
+    ? reportBalanceRows.reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
+    : filters.viewMode === "COMISIONISTA"
+      ? reportBalanceRows.reduce((sum, movement) => sum + pendingSignedAmount(movement), 0)
     : pendingBalance;
-  const applied = rows.filter((movement) => !movement.paymentId)
+  const applied = reportBalanceRows.filter((movement) => !movement.paymentId)
     .reduce((sum, movement) => sum + Number(movement.importeImputado || 0), 0);
   const imputationsByMovement = currentAccountImputationsByMovement();
   const balances = new Map();
@@ -3672,6 +7633,8 @@ function printCurrentAccountReport(forcedType = "") {
   const commissionTotals = commissionSplitTotals(commissionRows);
   const commissionByClient = new Map(commissionRows.map((row) => [row.cliente, row]));
   const commissionTotal = commissionTotals.total;
+  const clientNetSummary = currentAccountClientNetSummary(rows);
+  const expenseRows = filters.viewMode === "CLIENTE" ? currentAccountExpenseSummaryRows(rows) : [];
   const balanceRows = [...balances.entries()]
     .map(([cliente, saldo]) => {
       const commission = commissionByClient.get(cliente) || { facturado: 0, efectivo: 0, total: 0 };
@@ -3679,19 +7642,33 @@ function printCurrentAccountReport(forcedType = "") {
     })
     .filter((item) => Math.abs(item.saldo) > 0.01 || Math.abs(item.total) > 0.01)
     .sort((a, b) => Math.abs(b.total || 0) - Math.abs(a.total || 0) || Math.abs(b.saldo) - Math.abs(a.saldo));
-  const balancesTable = type === "SALDOS" ? `<h2>Saldo por cliente</h2><table class="compact"><thead><tr><th>Cliente</th><th>Saldo</th><th>Comision s/facturado</th><th>Comision s/efectivo</th><th>Total comision</th></tr></thead><tbody>${balanceRows.length ? balanceRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td><td class="amount ${item.facturado < 0 ? "negative" : "positive"}">${Math.abs(item.facturado) > 0.01 ? moneyValue(item.facturado) : "-"}</td><td class="amount ${item.efectivo < 0 ? "negative" : "positive"}">${Math.abs(item.efectivo) > 0.01 ? moneyValue(item.efectivo) : "-"}</td><td class="amount ${item.total < 0 ? "negative" : "positive"}">${Math.abs(item.total) > 0.01 ? moneyValue(item.total) : "-"}</td></tr>`).join("") : `<tr><td colspan="5">Sin saldos para los filtros aplicados.</td></tr>`}</tbody></table>` : "";
+  const balancesTable = type === "SALDOS" ? `<h2>Saldo por cliente</h2><table class="compact"><thead><tr><th>Cliente</th><th>Saldo interno</th><th>Disponible a cobrar</th><th>Comision s/facturado</th><th>Comision s/efectivo</th><th>Total comision</th></tr></thead><tbody>${balanceRows.length ? balanceRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.saldo < 0 ? "negative" : "positive"}">${moneyValue(item.saldo)}</td><td class="amount positive">${item.saldo < -0.01 ? moneyValue(Math.abs(item.saldo)) : "-"}</td><td class="amount ${item.facturado < 0 ? "negative" : "positive"}">${Math.abs(item.facturado) > 0.01 ? moneyValue(item.facturado) : "-"}</td><td class="amount ${item.efectivo < 0 ? "negative" : "positive"}">${Math.abs(item.efectivo) > 0.01 ? moneyValue(item.efectivo) : "-"}</td><td class="amount ${item.total < 0 ? "negative" : "positive"}">${Math.abs(item.total) > 0.01 ? moneyValue(item.total) : "-"}</td></tr>`).join("") : `<tr><td colspan="6">Sin saldos para los filtros aplicados.</td></tr>`}</tbody></table>` : "";
   const commissionsTable = commissionRows.length ? `<h2>Comisiones pendientes</h2><table class="compact"><thead><tr><th>Cliente / productor</th><th>Sobre facturado</th><th>Sobre efectivo</th><th>Total pendiente</th></tr></thead><tbody>${commissionRows.map((item) => `<tr><td>${escapeHtml(item.cliente)}</td><td class="amount ${item.facturado < 0 ? "negative" : "positive"}">${Math.abs(item.facturado) > 0.01 ? moneyValue(item.facturado) : "-"}</td><td class="amount ${item.efectivo < 0 ? "negative" : "positive"}">${Math.abs(item.efectivo) > 0.01 ? moneyValue(item.efectivo) : "-"}</td><td class="amount ${item.total < 0 ? "negative" : "positive"}">${moneyValue(item.total)}</td></tr>`).join("")}<tr><th>Total comisiones</th><th class="amount ${commissionTotals.facturado < 0 ? "negative" : "positive"}">${moneyValue(commissionTotals.facturado)}</th><th class="amount ${commissionTotals.efectivo < 0 ? "negative" : "positive"}">${moneyValue(commissionTotals.efectivo)}</th><th class="amount ${commissionTotal < 0 ? "negative" : "positive"}">${moneyValue(commissionTotal)}</th></tr></tbody></table>` : "";
+  const expensesTable = type === "SALDOS" && filters.viewMode === "CLIENTE" && expenseRows.length ? `<h2>Gastos / descuentos incluidos</h2><table class="compact"><thead><tr><th>Concepto</th><th>Cantidad</th><th>Total descontado</th></tr></thead><tbody>${expenseRows.map((item) => `<tr><td>${escapeHtml(item.concept)}</td><td>${item.count}</td><td class="amount negative">-${moneyValue(item.total)}</td></tr>`).join("")}<tr><th colspan="2">Total gastos / descuentos</th><th class="amount negative">-${moneyValue(clientNetSummary.discounts)}</th></tr></tbody></table>` : "";
 
-  const filterLabel = $("#cc-client-search").value.trim() || (filters.viewMode === "COMISIONISTA" ? "Todos los comisionistas" : filters.viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos los clientes");
+  const baseFilterLabel = $("#cc-client-search").value.trim() || (filters.viewMode === "COMISIONISTA" ? "Todos los comisionistas" : filters.viewMode === "CONSIGNATARIA" ? "Todas las consignatarias" : "Todos los clientes");
+  const filterDetails = [
+    $("#cc-keyword-filter")?.value.trim(),
+    $("#cc-associated-account-filter")?.value.trim() ? `Cuenta: ${$("#cc-associated-account-filter").value.trim()}` : "",
+    $("#cc-origin-type-filter")?.value.trim() ? `Origen: ${$("#cc-origin-type-filter").value.trim()}` : ""
+  ].filter(Boolean);
+  const filterLabel = filterDetails.length ? `${baseFilterLabel} / ${filterDetails.join(" / ")}` : baseFilterLabel;
   const periodLabel = `${filters.dateFrom ? formatDisplayDate(filters.dateFrom) : "inicio"} a ${filters.dateTo ? formatDisplayDate(filters.dateTo) : "fin"}`;
-  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${currentAccountReportStyles()}</style></head><body>
-  <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${escapeHtml(title)}</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
-  <div class="summary"><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Periodo</span><strong>${escapeHtml(periodLabel)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Comisiones pendientes" : "Saldo pendiente real"}</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Vencimientos informativos" : "Saldo pendiente"}</span><strong>${moneyValue(pendingBalance)}</strong></div><div><span>Comisiones pendientes</span><strong>${moneyValue(commissionTotal)}</strong></div></div>
+  const issuedAt = new Date();
+  const issuedFileDate = `${issuedAt.getFullYear()}-${String(issuedAt.getMonth() + 1).padStart(2, "0")}-${String(issuedAt.getDate()).padStart(2, "0")}`;
+  const pdfTitle = safePdfTitle(title, filterLabel, issuedFileDate);
+  const clientSummaryCards = type === "SALDOS" && filters.viewMode === "CLIENTE"
+    ? `<div><span>A cobrar por ventas</span><strong class="positive">${moneyValue(clientNetSummary.toCollect)}</strong></div><div><span>Gastos / descuentos</span><strong class="negative">-${moneyValue(clientNetSummary.discounts)}</strong></div><div class="net-card"><span>Disponible neto</span><strong class="${clientNetSummary.net >= 0 ? "positive" : "negative"}">${moneyValue(clientNetSummary.net)}</strong></div>`
+    : `<div><span>${filters.viewMode === "CONSIGNATARIA" ? "Comisiones pendientes" : "Saldo pendiente real"}</span><strong>${moneyValue(accountBalance)}</strong></div><div><span>${filters.viewMode === "CONSIGNATARIA" ? "Vencimientos informativos" : "Saldo pendiente"}</span><strong>${moneyValue(pendingBalance)}</strong></div>`;
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(pdfTitle)}</title><style>${currentAccountReportStyles()}</style></head><body>
+  <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>${escapeHtml(title)}</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(issuedAt.toLocaleDateString("es-AR"))}</p></div></header>
+  <div class="summary"><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Periodo</span><strong>${escapeHtml(periodLabel)}</strong></div>${clientSummaryCards}<div><span>Total imputado</span><strong>${moneyValue(applied)}</strong></div><div><span>Comisiones pendientes</span><strong>${moneyValue(commissionTotal)}</strong></div></div>
   ${balancesTable}
+  ${expensesTable}
   ${commissionsTable}
-  <h2>Detalle de movimientos e imputaciones</h2>
-  <table><thead><tr><th>Fecha</th><th>Vencimiento</th><th>Cliente</th><th>Concepto</th><th>Comprobante</th><th>Operacion</th><th>Importe original</th><th>Imputado</th><th>Saldo pendiente</th><th>Estado</th></tr></thead><tbody>${currentAccountReportMovementRows(rows, imputationsByMovement, filters.viewMode)}</tbody></table><button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
-  popup.document.close();
+  <h2>Detalle de movimientos</h2>
+  <table><thead><tr><th>Fecha</th><th>Vencimiento</th><th>Cliente</th><th>Concepto</th><th>Comprobante</th><th>Operacion</th><th>Importe original</th><th>Imputado</th><th>Saldo pendiente</th><th>Estado</th></tr></thead><tbody>${currentAccountReportMovementRows(rows, imputationsByMovement, filters.viewMode)}</tbody></table><button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
+  finishPrintPopup(popup);
 }
 
 function dueDateInRange(movement, from, to) {
@@ -3711,8 +7688,20 @@ function getCurrentAccountDuePanelRange() {
   };
 }
 
+function getDashboardDueReportRange() {
+  return {
+    from: parseInputDate($("#dashboard-due-from")?.value || ""),
+    to: parseInputDate($("#dashboard-due-to")?.value || "")
+  };
+}
+
 function currentAccountDuePanelRangeLabel(range) {
   if (!range.from && !range.to) return "";
+  return `${range.from ? formatDisplayDate(range.from) : "inicio"} a ${range.to ? formatDisplayDate(range.to) : "fin"}`;
+}
+
+function dueReportRangeLabel(range) {
+  if (!range?.from && !range?.to) return "";
   return `${range.from ? formatDisplayDate(range.from) : "inicio"} a ${range.to ? formatDisplayDate(range.to) : "fin"}`;
 }
 
@@ -3740,6 +7729,29 @@ function dueReportQuickRange(mode) {
   return {};
 }
 
+function dueReportAbsMoney(value) {
+  return moneyValue(Math.abs(Number(value || 0)));
+}
+
+function dueReportDirection(value) {
+  const amount = Number(value || 0);
+  if (amount < -0.01) return { label: "A pagar", className: "payable" };
+  if (amount > 0.01) return { label: "A cobrar", className: "receivable" };
+  return { label: "Sin saldo", className: "" };
+}
+
+function dueReportClientRole(row) {
+  const pieces = [];
+  if (row.vendedor && normalizeSearch(row.vendedor) === normalizeSearch(row.cliente)) pieces.push("Vendedor");
+  if (row.comprador && normalizeSearch(row.comprador) === normalizeSearch(row.cliente)) pieces.push("Comprador");
+  if (row.consignataria && normalizeSearch(row.consignataria) === normalizeSearch(row.cliente)) pieces.push("Consignataria");
+  return pieces.length ? pieces.join(" / ") : "";
+}
+
+function dueReportExecutiveStyles() {
+  return `body{font-family:Arial,sans-serif;margin:9mm;color:#173632}header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #173632;padding-bottom:8px;margin-bottom:8px}img{width:72px;height:72px;object-fit:contain;background:#173632;padding:6px}h1{font-size:18px;margin:0}h2{font-size:13px;margin:10px 0 5px}p{margin:2px 0;font-size:10.5px}.summary{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin:7px 0 9px}.summary div{border:1px solid #cbd7d4;background:#f8fbfa;padding:6px}.summary span{display:block;color:#52706b;font-size:9px}.summary strong{font-size:12px}table{width:100%;border-collapse:collapse;font-size:9.4px;table-layout:fixed}th,td{border:1px solid #cbd7d4;padding:4px 5px;text-align:left;vertical-align:top}th{background:#edf3f1}.date-row td{background:#173632;color:#fff;font-weight:700;font-size:10.5px}.client strong{display:block;font-size:10px}.muted{color:#52706b;font-size:8.5px}.business{font-size:9px}.amount{text-align:right;font-weight:700;white-space:nowrap}.receivable{color:#0f6b43}.payable{color:#9b1c1c}.cash-row td{font-style:italic}.direction{font-weight:700}.small{font-size:8.5px;color:#52706b}button{margin-top:12px;padding:8px 12px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}button{display:none}tr{break-inside:avoid}h2{break-after:avoid}}`;
+}
+
 function printCurrentAccountDueReport(options = {}) {
   const currentFilters = getCurrentAccountReportFilters();
   const filters = options.all
@@ -3748,6 +7760,10 @@ function printCurrentAccountDueReport(options = {}) {
         viewMode: "CLIENTE",
         query: "",
         words: [],
+        keyword: "",
+        keywordWords: [],
+        associatedAccount: "",
+        originType: "",
         exactClient: "",
         exactConsignee: "",
         exactCommissionist: "",
@@ -3757,20 +7773,26 @@ function printCurrentAccountDueReport(options = {}) {
     : currentFilters;
   const quickRange = dueReportQuickRange(options.range);
   const hasForcedRange = Boolean(quickRange.dateFrom || quickRange.dateTo);
+  const customRange = options.customRange || {};
+  const hasCustomRange = Boolean(customRange.from || customRange.to);
   const panelRange = getCurrentAccountDuePanelRange();
   const hasPanelRange = Boolean(panelRange.from || panelRange.to);
   const effectiveFilters = {
     ...filters,
-    dateFrom: quickRange.dateFrom || panelRange.from || filters.dateFrom,
-    dateTo: quickRange.dateTo || panelRange.to || filters.dateTo,
-    dueFilter: (hasForcedRange || hasPanelRange) ? "TODOS" : filters.dueFilter === "TODOS" && !filters.dateFrom && !filters.dateTo ? "7" : filters.dueFilter
+    dateFrom: quickRange.dateFrom || customRange.from || panelRange.from || filters.dateFrom,
+    dateTo: quickRange.dateTo || customRange.to || panelRange.to || filters.dateTo,
+    dueFilter: (hasForcedRange || hasCustomRange || hasPanelRange) ? "TODOS" : filters.dueFilter === "TODOS" && !filters.dateFrom && !filters.dateTo ? "7" : filters.dueFilter
   };
   const baseFilters = { ...effectiveFilters, dateFrom: null, dateTo: null };
   const rows = (state.cuenta.movimientos || [])
     .filter((movement) => movement.estado !== "ANULADO")
-    .filter((movement) => !movement.paymentId && movement.estado !== "IMPUTADO")
-    .filter((movement) => Math.abs(signedPendingAmount(movement)) > 0.01)
+    .filter((movement) => {
+      const commissionistSource = filters.viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
+      if (commissionistSource) return !isCommissionistSourceLiquidated(movement) && Math.abs(Number(movement.importeComision || 0)) > 0.01;
+      return !movement.paymentId && movement.estado !== "IMPUTADO" && Math.abs(signedPendingAmount(movement)) > 0.01;
+    })
     .filter((movement) => String(movement.origen || "").toUpperCase() !== "COMISION")
+    .filter((movement) => filters.viewMode !== "COMISIONISTA" || !isCommissionistSourceOperation(movement) || !isCommissionistSourceLiquidated(movement))
     .filter((movement) => matchesCurrentAccountReportFilters(movement, baseFilters, true, filters.statusFilter !== "TODOS"))
     .filter((movement) => dueDateInRange(movement, effectiveFilters.dateFrom, effectiveFilters.dateTo))
     .sort((a, b) => {
@@ -3803,13 +7825,14 @@ function printCurrentAccountDueReport(options = {}) {
       });
     }
     const item = groups.get(key);
-    const amount = signedPendingAmount(movement);
-    item.conceptos.add(dueReportBusinessLabel(movement));
+    const commissionistSource = filters.viewMode === "COMISIONISTA" && isCommissionistSourceOperation(movement);
+    const amount = commissionistSource ? Number(movement.importeComision || 0) : signedPendingAmount(movement);
+    item.conceptos.add(commissionistSource ? currentAccountConceptText(movement, filters.viewMode) : dueReportBusinessLabel(movement));
     if (movement.vendedor) item.contrapartes.add(`V: ${movement.vendedor}`);
     if (movement.comprador) item.contrapartes.add(`C: ${movement.comprador}`);
     if (movement.consignataria) item.contrapartes.add(`Consig.: ${movement.consignataria}`);
     if (movement.comprobante) item.comprobantes.add(movement.comprobante);
-    if (isCashMovement(movement)) item.efectivo += amount;
+    if (commissionistSource ? commissionKind(movement) === "efectivo" : isCashMovement(movement)) item.efectivo += amount;
     else item.factura += amount;
   });
   const dueRows = Array.from(groups.values()).map((row) => ({
@@ -3821,15 +7844,21 @@ function printCurrentAccountDueReport(options = {}) {
   const totals = dueRows.reduce((acc, row) => {
     acc.factura += Number(row.factura || 0);
     acc.efectivo += Number(row.efectivo || 0);
-    acc.total += Number(row.factura || 0) + Number(row.efectivo || 0);
+    const total = Number(row.factura || 0) + Number(row.efectivo || 0);
+    acc.total += total;
+    if (total > 0) acc.cobrar += total;
+    if (total < 0) acc.pagar += Math.abs(total);
     return acc;
-  }, { factura: 0, efectivo: 0, total: 0 });
-  const filterLabel = options.all ? "Todos" : $("#cc-client-search").value.trim() || "Todos";
+  }, { factura: 0, efectivo: 0, total: 0, cobrar: 0, pagar: 0 });
+  const baseFilterLabel = options.all ? "Todos" : $("#cc-client-search").value.trim() || "Todos";
+  const keywordLabel = options.all ? "" : $("#cc-keyword-filter")?.value.trim();
+  const filterLabel = keywordLabel ? `${baseFilterLabel} / ${keywordLabel}` : baseFilterLabel;
   const panelPeriodLabel = currentAccountDuePanelRangeLabel(panelRange);
+  const customPeriodLabel = dueReportRangeLabel(customRange);
   const periodLabel = effectiveFilters.dateFrom || effectiveFilters.dateTo
     ? `${effectiveFilters.dateFrom ? formatDisplayDate(effectiveFilters.dateFrom) : "inicio"} a ${effectiveFilters.dateTo ? formatDisplayDate(effectiveFilters.dateTo) : "fin"}`
     : effectiveFilters.dueFilter === "7" ? "Proximos 7 dias" : $("#cc-due-filter option:checked").textContent;
-  const finalPeriodLabel = quickRange.label || panelPeriodLabel || periodLabel;
+  const finalPeriodLabel = quickRange.label || customPeriodLabel || panelPeriodLabel || periodLabel;
   const rowsByDate = new Map();
   dueRows.forEach((row) => {
     const key = row.vencimiento || "Sin fecha";
@@ -3839,27 +7868,46 @@ function printCurrentAccountDueReport(options = {}) {
   const dueRowsHtml = rowsByDate.size
     ? Array.from(rowsByDate.entries()).map(([date, dateRows]) => {
         const dateTotals = dateRows.reduce((acc, row) => {
-          acc.factura += Number(row.factura || 0);
-          acc.efectivo += Number(row.efectivo || 0);
-          acc.total += Number(row.factura || 0) + Number(row.efectivo || 0);
-          return acc;
-        }, { factura: 0, efectivo: 0, total: 0 });
-        return `<tr class="due-date-row"><td colspan="7">${escapeHtml(date)} - Total del dia ${moneyValue(dateTotals.total)}</td></tr>${dateRows.map((row) => {
-          const rowClass = row.efectivo ? "movement-cash due-compact" : "due-compact";
           const total = Number(row.factura || 0) + Number(row.efectivo || 0);
-          return `<tr class="${rowClass}"><td>${escapeHtml(row.cliente || "-")}</td><td>${escapeHtml(row.concepto || "-")}<br><span class="subtle-line">${escapeHtml(row.contraparte || "-")}</span></td><td>${escapeHtml(row.comprobante || "-")}</td><td class="amount ${row.factura < 0 ? "negative" : "positive"}">${row.factura ? moneyValue(row.factura) : "-"}</td><td class="amount ${row.efectivo < 0 ? "negative" : "positive"}">${row.efectivo ? moneyValue(row.efectivo) : "-"}</td><td class="amount ${total < 0 ? "negative" : "positive"}">${moneyValue(total)}</td><td>${escapeHtml(row.operacion || "-")}</td></tr>`;
+          if (total > 0) acc.cobrar += total;
+          if (total < 0) acc.pagar += Math.abs(total);
+          return acc;
+        }, { cobrar: 0, pagar: 0 });
+        const dateSummary = [
+          dateTotals.cobrar ? `A cobrar ${moneyValue(dateTotals.cobrar)}` : "",
+          dateTotals.pagar ? `A pagar ${moneyValue(dateTotals.pagar)}` : ""
+        ].filter(Boolean).join(" | ") || "Sin saldo";
+        return `<tr class="date-row"><td colspan="6">${escapeHtml(date)} - ${escapeHtml(dateSummary)}</td></tr>${dateRows.map((row) => {
+          const rowClass = row.efectivo ? "cash-row" : "";
+          const total = Number(row.factura || 0) + Number(row.efectivo || 0);
+          const direction = dueReportDirection(total);
+          const role = dueReportClientRole(row);
+          const business = [
+            row.concepto || "-",
+            row.vendedor ? `V: ${row.vendedor}` : "",
+            row.comprador ? `C: ${row.comprador}` : "",
+            row.consignataria ? `Consig.: ${row.consignataria}` : ""
+          ].filter(Boolean).join(" | ");
+          return `<tr class="${rowClass}">
+            <td class="client"><strong>${escapeHtml(row.cliente || "-")}</strong>${role ? `<span class="muted">${escapeHtml(role)}</span>` : ""}</td>
+            <td class="business">${escapeHtml(business)}${row.operacion ? `<br><span class="small">Operacion ${escapeHtml(row.operacion)}</span>` : ""}</td>
+            <td class="amount">${row.factura ? dueReportAbsMoney(row.factura) : "-"}</td>
+            <td class="amount">${row.efectivo ? dueReportAbsMoney(row.efectivo) : "-"}</td>
+            <td class="amount ${direction.className}"><span class="direction">${escapeHtml(direction.label)}</span><br>${dueReportAbsMoney(total)}</td>
+            <td>${escapeHtml(row.comprobante || "-")}</td>
+          </tr>`;
         }).join("")}`;
       }).join("")
-    : `<tr><td colspan="7">Sin vencimientos para el periodo.</td></tr>`;
+    : `<tr><td colspan="6">Sin vencimientos para el periodo.</td></tr>`;
   const popup = window.open("", "_blank", "width=1100,height=850");
   if (!popup) return;
-  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(safePdfTitle("Vencimientos", finalPeriodLabel))}</title><style>${currentAccountReportStyles()}</style></head><body>
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(safePdfTitle("Vencimientos", finalPeriodLabel))}</title><style>${dueReportExecutiveStyles()}</style></head><body>
   <header><img src="${window.location.origin}/logo-espinosa-blanco.png"><div><h1>Reporte de vencimientos</h1><p>Gonzalo Espinosa - Hacienda y Liquidaciones</p><p>Emitido: ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div></header>
-  <div class="summary"><div><span>Periodo</span><strong>${escapeHtml(finalPeriodLabel)}</strong></div><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>Total facturado</span><strong>${moneyValue(totals.factura)}</strong></div><div><span>Total efectivo</span><strong>${moneyValue(totals.efectivo)}</strong></div><div><span>Total general</span><strong>${moneyValue(totals.total)}</strong></div></div>
-  <h2>Agenda de vencimientos</h2>
-  <table><thead><tr><th>Cliente</th><th>Negocio</th><th>Comprobante</th><th>Facturado</th><th>Efectivo</th><th>Total</th><th>Op.</th></tr></thead><tbody>${dueRowsHtml}</tbody></table>
-  <button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
-  popup.document.close();
+  <div class="summary"><div><span>Periodo</span><strong>${escapeHtml(finalPeriodLabel)}</strong></div><div><span>Filtro</span><strong>${escapeHtml(filterLabel)}</strong></div><div><span>A cobrar</span><strong class="receivable">${moneyValue(totals.cobrar)}</strong></div><div><span>A pagar</span><strong class="payable">${moneyValue(totals.pagar)}</strong></div><div><span>Movimientos</span><strong>${dueRows.length}</strong></div></div>
+  <h2>Agenda resumida</h2>
+  <table><thead><tr><th style="width:18%">Cliente</th><th style="width:35%">Negocio</th><th style="width:11%">Facturado</th><th style="width:11%">Efectivo</th><th style="width:12%">Total</th><th style="width:13%">Comprobante</th></tr></thead><tbody>${dueRowsHtml}</tbody></table>
+  <button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
+  finishPrintPopup(popup);
 }
 
 function dueReportBusinessLabel(movement) {
@@ -3950,6 +7998,8 @@ function dateToInputValue(date) {
 
 function escapeIcsText(value) {
   return String(value || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
     .replace(/\\/g, "\\\\")
     .replace(/\r?\n/g, "\\n")
     .replace(/,/g, "\\,")
@@ -3958,24 +8008,45 @@ function escapeIcsText(value) {
 
 function foldIcsLine(line) {
   const text = String(line || "");
+  if (text.length <= 70) return text;
   const chunks = [];
-  for (let index = 0; index < text.length; index += 72) {
-    chunks.push(`${index ? " " : ""}${text.slice(index, index + 72)}`);
+  chunks.push(text.slice(0, 70));
+  for (let index = 70; index < text.length; index += 69) {
+    chunks.push(` ${text.slice(index, index + 69)}`);
   }
   return chunks.join("\r\n");
+}
+
+function calendarPlainMoney(value) {
+  const amount = Number(value || 0);
+  const sign = amount < 0 ? "-" : "";
+  return `${sign}$ ${Math.abs(amount).toLocaleString("es-AR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+
+function safeCalendarUid(value, fallback) {
+  const text = String(value || fallback || Date.now())
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 90);
+  return text || `vencimiento-${Date.now()}`;
 }
 
 function calendarEventSummary(movement) {
   const kind = currentAccountDueKind(movement);
   const label = kind === "COMISION" ? "COMISION" : kind === "EFECTIVO" ? "EFECTIVO" : "VTO";
-  return `${label} - ${movement.cliente || "Sin cliente"} - ${moneyValue(signedPendingAmount(movement))}`;
+  return `${label} - ${movement.cliente || "Sin cliente"} - ${calendarPlainMoney(signedPendingAmount(movement))}`;
 }
 
 function calendarEventDescription(movement) {
   return [
     `Cliente: ${movement.cliente || "-"}`,
     `Concepto: ${currentAccountDueDetailText(movement)}`,
-    `Importe pendiente: ${moneyValue(signedPendingAmount(movement))}`,
+    `Importe pendiente: ${calendarPlainMoney(signedPendingAmount(movement))}`,
     `Comprobante: ${movement.comprobante || "-"}`,
     `Operacion: ${movement.operacion || "-"}`,
     `Vendedor: ${movement.vendedor || "-"}`,
@@ -4030,16 +8101,20 @@ function exportCurrentAccountCalendar() {
     const date = parseDisplayDate(movement.vencimiento);
     if (!date) return;
     const endDate = addDateDays(date, 1);
-    const uid = `${movement.id || index}-${dateToIcsDate(date)}@gonzalo-espinosa-hacienda`;
+    const uid = `${safeCalendarUid(movement.id, index)}-${dateToIcsDate(date)}@gonzalo-espinosa-hacienda`;
     lines.push(
       "BEGIN:VEVENT",
-      foldIcsLine(`UID:${escapeIcsText(uid)}`),
+      `UID:${uid}`,
       `DTSTAMP:${now}`,
+      `CREATED:${now}`,
+      `LAST-MODIFIED:${now}`,
       `DTSTART;VALUE=DATE:${dateToIcsDate(date)}`,
       `DTEND;VALUE=DATE:${dateToIcsDate(endDate)}`,
       foldIcsLine(`SUMMARY:${escapeIcsText(calendarEventSummary(movement))}`),
       foldIcsLine(`DESCRIPTION:${escapeIcsText(calendarEventDescription(movement))}`),
       foldIcsLine(`CATEGORIES:${escapeIcsText(currentAccountDueKind(movement))}`),
+      "TRANSP:TRANSPARENT",
+      "STATUS:CONFIRMED",
       "END:VEVENT"
     );
   });
@@ -4050,13 +8125,89 @@ function exportCurrentAccountCalendar() {
   message.className = "form-message ok";
 }
 
+function escapeCsvValue(value) {
+  const text = String(value ?? "").replace(/\u00a0/g, " ");
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function dateToGoogleCsvDate(date) {
+  const value = dateOnly(date);
+  return `${String(value.getMonth() + 1).padStart(2, "0")}/${String(value.getDate()).padStart(2, "0")}/${value.getFullYear()}`;
+}
+
+function exportCurrentAccountCalendarCsv() {
+  if (!state.cuenta) return;
+  const { movements, range } = calendarFilteredDueMovements();
+  const message = $("#cc-calendar-message");
+  if (!movements.length) {
+    message.textContent = "No hay vencimientos para exportar con esas opciones.";
+    message.className = "form-message error";
+    return;
+  }
+  const rows = [
+    ["Subject", "Start Date", "Start Time", "End Date", "End Time", "All Day Event", "Description", "Location", "Private"]
+  ];
+  movements.forEach((movement) => {
+    const date = parseDisplayDate(movement.vencimiento);
+    if (!date) return;
+    rows.push([
+      calendarEventSummary(movement),
+      dateToGoogleCsvDate(date),
+      "",
+      dateToGoogleCsvDate(date),
+      "",
+      "True",
+      calendarEventDescription(movement).replace(/\n/g, " | "),
+      "",
+      "False"
+    ]);
+  });
+  const content = rows.map((row) => row.map(escapeCsvValue).join(",")).join("\r\n");
+  const filename = `vencimientos_google_${String(range.label || "calendario").replace(/[^a-zA-Z0-9_-]/g, "_")}.csv`;
+  downloadTextFile(filename, `${content}\r\n`, "text/csv;charset=utf-8");
+  message.textContent = `CSV generado con ${movements.length} vencimiento/s. Usalo en Google Calendar si el .ics no importa.`;
+  message.className = "form-message ok";
+}
+
 async function saveCurrentAccountPayment(printReceipt = false) {
   try {
     const amount = numberValue("#cc-payment-amount");
-    const selectedSignedTotal = $all("[data-cc-impute]:checked, [data-cc-impute-group]:checked")
-      .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccSignedPending || 0), 0);
     const paymentType = $("#cc-payment-type").value;
-    const compensationOrigin = paymentType === "COMPENSACION" ? selectedCompensationOrigin() : null;
+    const selectedRows = selectedCurrentAccountImputationRows("[data-cc-impute]:checked, [data-cc-impute-group]:checked");
+    const expenseInstrumentTotal = paymentType === "PAGO"
+      ? currentPaymentInstruments.filter((item) => item.aplicacion === "GASTO").reduce((sum, item) => sum + Number(item.importe || 0), 0)
+      : 0;
+    const selectedExpenseTotal = selectedRows
+      .filter((item) => Number(item.signedPending || 0) > 0)
+      .reduce((sum, item) => sum + Number(item.pending || 0), 0);
+    if (expenseInstrumentTotal && Math.abs(expenseInstrumentTotal - selectedExpenseTotal) > 0.01) {
+      throw new Error(`Los instrumentos aplicados a gastos suman ${moneyValue(expenseInstrumentTotal)}, pero los gastos seleccionados suman ${moneyValue(selectedExpenseTotal)}.`);
+    }
+    const accountImpactAmount = paymentType === "PAGO" ? amount - expenseInstrumentTotal : amount;
+    if (accountImpactAmount < -0.01) throw new Error("Los instrumentos aplicados a gastos no pueden superar el total del pago.");
+    const selectedSignedTotal = paymentType === "COMPENSACION"
+      ? compensationAppliedSignedTotal(selectedRows)
+      : selectedRows.reduce((sum, row) => sum + Number(row.signedPending || 0), 0);
+    const fundSource = paymentType === "FONDO" ? selectedFundSource() : null;
+    if (paymentType === "FONDO" && !fundSource) {
+      throw new Error("Seleccione la transferencia o instrumento que recibio directamente el cliente.");
+    }
+    const compensationOrigin = paymentType === "COMPENSACION"
+      ? selectedCompensationOrigin()
+      : paymentType === "FONDO"
+        ? {
+            id: `FONDO:${fundSource.paymentId}:${fundSource.instrumentId}`,
+            label: $("#cc-fund-origin-label").value.trim() || `${fundSource.label} - ${fundSource.method}`
+          }
+        : null;
+    const balanceCredit = confirmCurrentAccountPaymentDifference(accountImpactAmount, selectedRows, paymentType);
+    if (balanceCredit === null) return;
+    let counterpartyBalanceCredit = 0;
+    if ($("#cc-counterparty-enabled").checked) {
+      const counterpartyRows = selectedCurrentAccountImputationRows("[data-cc-counterparty-impute]:checked");
+      counterpartyBalanceCredit = confirmCurrentAccountPaymentDifference(amount, counterpartyRows, $("#cc-counterparty-type").value);
+      if (counterpartyBalanceCredit === null) return;
+    }
     const response = await fetchJson("/api/cuenta-corriente/pagos-cobros", {
       method: "POST",
       body: JSON.stringify({
@@ -4064,17 +8215,23 @@ async function saveCurrentAccountPayment(printReceipt = false) {
         cliente: $("#cc-payment-client").value,
         fecha: $("#cc-payment-date").value,
         importe: amount,
-        importeFirmado: paymentType === "COMPENSACION" ? -selectedSignedTotal : undefined,
+        importeFirmado: paymentType === "COMPENSACION" ? -selectedSignedTotal : paymentType === "PAGO" && expenseInstrumentTotal ? accountImpactAmount : undefined,
         medio: $("#cc-payment-method").value,
         referencia: $("#cc-payment-reference").value,
         observacion: $("#cc-payment-notes").value,
+        saldoFavor: balanceCredit,
+        cuentaAsociada: $("#cc-payment-associated-account").value,
+        tipoOrigen: $("#cc-payment-origin-type").value,
         compensationOriginId: compensationOrigin?.id,
         compensationOriginLabel: compensationOrigin?.label,
+        sourcePaymentId: fundSource?.paymentId,
+        sourceInstrumentId: fundSource?.instrumentId,
         instrumentos: currentPaymentInstruments,
-        imputaciones: collectSelectedCurrentAccountImputations("[data-cc-impute]:checked, [data-cc-impute-group]:checked", amount, paymentType),
+        imputaciones: paymentType === "FONDO" ? [] : collectSelectedCurrentAccountImputations("[data-cc-impute]:checked, [data-cc-impute-group]:checked", amount, paymentType),
         contrapartida: $("#cc-counterparty-enabled").checked ? {
           tipo: $("#cc-counterparty-type").value,
           cliente: $("#cc-counterparty-client").value,
+          saldoFavor: counterpartyBalanceCredit,
           imputaciones: collectSelectedCurrentAccountImputations("[data-cc-counterparty-impute]:checked", amount, $("#cc-counterparty-type").value)
         } : null
       })
@@ -4125,11 +8282,27 @@ function operationCommissionistKey(detail) {
   );
 }
 
+function operationHasConsigneeCommission(detail = {}) {
+  const draft = detail.draftData || {};
+  const liq = detail.liquidacion || draft.liquidacion || {};
+  return [
+    draft.porcComisionConsignataria,
+    draft.comisionConsignataria,
+    draft.ajusteConsignataria,
+    draft.totalCobrarConsignataria,
+    liq.porcComisionConsignataria,
+    liq.comisionConsignataria,
+    liq.ajusteConsignataria,
+    liq.totalCobrarConsignataria
+  ].some((value) => Math.abs(parseMoneyInput(value)) > 0.01);
+}
+
 function operationCommissionistKeys(detail) {
-  return Array.from(new Set([
-    operationCommissionistKey(detail),
-    normalizeSearch(detail.consignataria || detail.draftData?.consignataria || "")
-  ].filter(Boolean)));
+  const keys = [operationCommissionistKey(detail)];
+  if (operationHasConsigneeCommission(detail)) {
+    keys.push(normalizeSearch(detail.consignataria || detail.draftData?.consignataria || ""));
+  }
+  return Array.from(new Set(keys.filter(Boolean)));
 }
 
 function liquidatedCommissionistItemIds(commissionist) {
@@ -4143,6 +8316,25 @@ function liquidatedCommissionistItemIds(commissionist) {
     });
   });
   return ids;
+}
+
+function liquidatedCommissionistExternalReceipts(commissionist) {
+  const key = normalizeSearch(commissionist);
+  const receipts = new Set();
+  (state.cuenta?.movimientos || []).forEach((movement) => {
+    const detail = commissionistDetailFromObservation(movement.observacion);
+    if (!detail || normalizeSearch(detail.comisionista) !== key) return;
+    (Array.isArray(detail.items) ? detail.items : []).forEach((item) => {
+      if (normalizeSearch(item.origen || "") === "movimiento externo" && item.comprobante) {
+        receipts.add([
+          normalizeSearch(item.comprobante),
+          normalizeSearch(item.vendedor || ""),
+          normalizeSearch(item.fecha || "")
+        ].join("|"));
+      }
+    });
+  });
+  return receipts;
 }
 
 function commissionistAccountMovementApplies(movement, commissionist) {
@@ -4211,6 +8403,9 @@ function pendingCommissionistAccountRows(commissionist, from, to, alreadyLiquida
     .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
     .map((movement) => {
       const amount = Math.abs(signedPendingAmount(movement));
+      const kind = commissionKind(movement);
+      const detail = commissionistDetailFromObservation(movement.observacion);
+      const sourceReceipts = Array.from(new Set((detail?.items || []).map((item) => item.comprobante).filter(Boolean)));
       return {
         id: movement.id,
         operacion: movement.operacion || movement.id,
@@ -4224,15 +8419,16 @@ function pendingCommissionistAccountRows(commissionist, from, to, alreadyLiquida
         detalle: movement.concepto || "-",
         vendedor: movement.cliente || commissionist,
         comprador: operationBusinessText(movement) || movement.concepto || "-",
-        comprobante: movement.comprobante || "",
+        comprobante: sourceReceipts.join(" / ") || movement.comprobante || "",
         base: amount,
         porcentaje: 0,
         comisionManual: amount,
         selected: false,
-        invoiceSelected: true,
-        invoiceCandidate: true,
+        commissionKind: kind,
+        invoiceSelected: kind === "facturado",
+        invoiceCandidate: kind === "facturado",
         noGenerate: true,
-        note: "Lista para facturar"
+        note: kind === "facturado" ? "Lista para facturar" : "Pendiente sobre efectivo"
       };
     });
 }
@@ -4241,31 +8437,76 @@ function renderCommissionistRows() {
   const percent = percentValue("#commissionist-percent");
   const selectedRows = state.commissionistRows.filter((row) => row.selected && !row.noGenerate);
   const invoiceRows = state.commissionistRows.filter((row) => row.invoiceSelected && row.invoiceCandidate);
+  const invoiceCandidateRows = state.commissionistRows.filter((row) => row.invoiceCandidate);
+  const operationListRows = state.commissionistRows.filter((row) => !row.noGenerate);
   const selectedBase = selectedRows.reduce((sum, row) => sum + Number(row.base || 0), 0);
   const selectedCommission = selectedRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
   const invoiceTotal = invoiceRows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
+  const operationTotals = commissionistRowsSplitTotals(operationListRows, percent);
+  const selectedTotals = commissionistRowsSplitTotals(selectedRows, percent);
+  const page = pageItems(operationListRows || [], state.commissionistPage);
+  state.commissionistPage = page.current;
+  if ($("#commissionist-invoice-summary")) {
+    $("#commissionist-invoice-summary").textContent = invoiceCandidateRows.length
+      ? `${invoiceRows.length}/${invoiceCandidateRows.length} seleccionada/s - ${moneyValue(invoiceTotal)}`
+      : "Sin comisiones listas para facturar";
+  }
+  if ($("#commissionist-invoice-body")) {
+    $("#commissionist-invoice-body").innerHTML = invoiceCandidateRows.length
+      ? invoiceCandidateRows.map((row) => {
+          const commission = commissionistRowCommission(row, percent);
+          return `<tr>
+            <td><input type="checkbox" data-commissionist-invoice-row="${escapeHtml(row.id)}" ${row.invoiceSelected ? "checked" : ""}></td>
+            <td>${escapeHtml(row.fecha || "-")}</td>
+            <td>${escapeHtml(row.comprobante || "-")}</td>
+            <td>${escapeHtml([row.clienteLiquidado || row.vendedor, commissionistRowKindLabel(row), row.contraparteOperacion || row.comprador].filter(Boolean).join(" / ") || "-")}</td>
+            <td>${moneyValue(commission)}</td>
+          </tr>`;
+        }).join("")
+      : `<tr><td colspan="5">Sin comisiones de cuenta corriente listas para facturar.</td></tr>`;
+  }
   $("#commissionist-summary").textContent = selectedRows.length
-    ? `${selectedRows.length} item/s - importe bruto ${moneyValue(selectedBase)} - comision ${moneyValue(selectedCommission)}`
-    : invoiceRows.length
-      ? `${invoiceRows.length} comision/es listas para facturar - total ${moneyValue(invoiceTotal)}`
-      : state.commissionistRows.length ? "Seleccione operaciones para liquidar o facturar." : "Sin operaciones seleccionadas";
-  $("#commissionist-body").innerHTML = state.commissionistRows.length
-    ? state.commissionistRows.map((row) => {
+    ? `${selectedRows.length} item/s - base ${moneyValue(selectedBase)} - facturado ${moneyValue(selectedTotals.facturado)} - efectivo ${moneyValue(selectedTotals.efectivo)} - total ${moneyValue(selectedCommission)}`
+    : operationListRows.length ? `Pendiente: facturado ${moneyValue(operationTotals.facturado)} - efectivo ${moneyValue(operationTotals.efectivo)} - total ${moneyValue(operationTotals.total)}` : "Sin operaciones pendientes para generar.";
+  $("#commissionist-body").innerHTML = page.total
+    ? page.items.map((row) => {
         const commission = commissionistRowCommission(row, percent);
         return `<tr>
           <td><input type="checkbox" data-commissionist-row="${escapeHtml(row.id)}" ${row.selected ? "checked" : ""} ${row.noGenerate ? "disabled" : ""}></td>
-          <td><input type="checkbox" data-commissionist-invoice-row="${escapeHtml(row.id)}" ${row.invoiceSelected ? "checked" : ""} ${row.invoiceCandidate ? "" : "disabled"}></td>
+          <td>-</td>
           <td>${escapeHtml(row.fecha || "-")}</td>
           <td>${escapeHtml(row.operacion || row.id)}</td>
           <td>${escapeHtml(row.cuenta || row.vendedor || "-")}</td>
           <td>${escapeHtml(row.liquidoA || "-")}</td>
           <td>${escapeHtml(row.clienteLiquidado || row.vendedor || "-")}</td>
           <td>${escapeHtml(row.contraparteOperacion || row.comprador || "-")}</td>
+          <td>${escapeHtml(commissionistRowKindLabel(row))}</td>
           <td>${escapeHtml(row.comprobante || "-")}</td>
           <td>${moneyValue(commission)}${row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="10">Busque operaciones y movimientos externos por periodo.</td></tr>`;
+    : `<tr><td colspan="11">Sin operaciones o movimientos externos pendientes para generar en este periodo.</td></tr>`;
+  renderPagination("#commissionist-pagination", page, "commissionist");
+}
+
+function commissionistRowKind(row) {
+  if (row?.commissionKind) return row.commissionKind;
+  const text = normalizeSearch(`${row?.contraparteOperacion || ""} ${row?.comprador || ""} ${row?.comprobante || ""} ${row?.detalle || ""}`);
+  return text.includes("efectivo") ? "efectivo" : "facturado";
+}
+
+function commissionistRowKindLabel(row) {
+  return commissionistRowKind(row) === "efectivo" ? "Sobre efectivo" : "Sobre facturado";
+}
+
+function commissionistRowsSplitTotals(rows, fallbackPercent) {
+  return (rows || []).reduce((totals, row) => {
+    const amount = commissionistRowCommission(row, fallbackPercent);
+    if (commissionistRowKind(row) === "efectivo") totals.efectivo += amount;
+    else totals.facturado += amount;
+    totals.total += amount;
+    return totals;
+  }, { facturado: 0, efectivo: 0, total: 0 });
 }
 
 function commissionistRowCommission(row, fallbackPercent) {
@@ -4274,9 +8515,26 @@ function commissionistRowCommission(row, fallbackPercent) {
   return Number(row.base || 0) * percent / 100;
 }
 
+function handleCommissionistSelectionChange(event) {
+  const checkbox = event.target.closest("[data-commissionist-row]");
+  const invoiceCheckbox = event.target.closest("[data-commissionist-invoice-row]");
+  if (!checkbox && !invoiceCheckbox) return;
+  if (checkbox) {
+    const row = state.commissionistRows.find((item) => String(item.id) === String(checkbox.dataset.commissionistRow));
+    if (row && !row.noGenerate) row.selected = checkbox.checked;
+  }
+  if (invoiceCheckbox) {
+    const row = state.commissionistRows.find((item) => String(item.id) === String(invoiceCheckbox.dataset.commissionistInvoiceRow));
+    if (row && row.invoiceCandidate) row.invoiceSelected = invoiceCheckbox.checked;
+  }
+  renderCommissionistRows();
+}
+
 async function loadCommissionistOperations() {
   const from = $("#commissionist-from").value ? parseInputDate($("#commissionist-from").value) : null;
   const to = $("#commissionist-to").value ? parseInputDate($("#commissionist-to").value) : null;
+  const fromText = $("#commissionist-from").value || "";
+  const toText = $("#commissionist-to").value || "";
   const selectedCommissionist = $("#commissionist-client").value.trim();
   if (!selectedCommissionist) {
     $("#commissionist-message").textContent = "Seleccione un comisionista.";
@@ -4286,35 +8544,50 @@ async function loadCommissionistOperations() {
   $("#commissionist-message").textContent = "Buscando operaciones...";
   $("#commissionist-message").className = "form-message";
   const alreadyLiquidatedIds = liquidatedCommissionistItemIds(selectedCommissionist);
+  const alreadyLiquidatedExternalReceipts = liquidatedCommissionistExternalReceipts(selectedCommissionist);
   const accountCommissionOperationIds = commissionistAccountOperationIds(selectedCommissionist);
-  const candidates = state.operaciones
-    .filter((operation) => operation.estado !== "ANULADA")
-    .filter((operation) => commissionistDateInRange(operation, from, to));
-  const details = await Promise.all(candidates.map((operation) => fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`).then((response) => response.item).catch(() => null)));
-  state.commissionistRows = details
-    .filter(Boolean)
-    .filter((detail) => detail.liquidacion)
+  let operationRows = [];
+  try {
+    const query = new URLSearchParams({
+      cliente: selectedCommissionist,
+      desde: fromText,
+      hasta: toText
+    });
+    const response = await fetchJson(`/api/comisionistas/operaciones?${query.toString()}`);
+    operationRows = Array.isArray(response.items) ? response.items : [];
+  } catch (error) {
+    const selectedKey = normalizeSearch(selectedCommissionist);
+    const candidates = state.operaciones
+      .filter((operation) => operation.estado !== "ANULADA")
+      .filter((operation) => commissionistDateInRange(operation, from, to))
+      .filter((operation) => operationCommissionistKeys(operation).includes(selectedKey));
+    const details = await Promise.all(candidates.map((operation) => fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`).then((response) => response.item).catch(() => null)));
+    operationRows = details
+      .filter(Boolean)
+      .filter((detail) => detail.liquidacion)
+      .filter((detail) => operationCommissionistKeys(detail).includes(selectedKey))
+      .map((detail) => {
+        const liq = detail.liquidacion || {};
+        return {
+          id: detail.id,
+          operacion: detail.id,
+          fecha: detail.fecha,
+          origen: "Operacion",
+          cuenta: selectedCommissionist,
+          liquidoA: "Operacion a liquidar",
+          clienteLiquidado: detail.vendedor,
+          contraparteOperacion: detail.comprador,
+          vendedor: detail.vendedor,
+          comprador: detail.comprador,
+          comprobante: liq.comprobanteProd || liq.comprobanteComp || "",
+          base: commissionistOperationBase(detail),
+          selected: true
+        };
+      });
+  }
+  state.commissionistRows = operationRows
     .filter((detail) => !alreadyLiquidatedIds.has(String(detail.id)))
     .filter((detail) => !accountCommissionOperationIds.has(String(detail.id)))
-    .filter((detail) => operationCommissionistKeys(detail).includes(normalizeSearch(selectedCommissionist)))
-    .map((detail) => {
-      const liq = detail.liquidacion || {};
-      return {
-        id: detail.id,
-        operacion: detail.id,
-        fecha: detail.fecha,
-        origen: "Operacion",
-        cuenta: selectedCommissionist,
-        liquidoA: "Operacion a liquidar",
-        clienteLiquidado: detail.vendedor,
-        contraparteOperacion: detail.comprador,
-        vendedor: detail.vendedor,
-        comprador: detail.comprador,
-        comprobante: liq.comprobanteProd || liq.comprobanteComp || "",
-        base: commissionistOperationBase(detail),
-        selected: true
-      };
-    })
     .filter((row) => Number(row.base || 0) > 0);
   const externalRows = (state.cuenta?.movimientos || [])
     .filter((movement) => String(movement.origen || "").toUpperCase() === "EXTERNO")
@@ -4322,6 +8595,11 @@ async function loadCommissionistOperations() {
     .filter((movement) => String(movement.tipoDesglose || "").toUpperCase() !== "IVA_FISCAL")
     .filter((movement) => normalizeSearch(movement.comisionista) === normalizeSearch(selectedCommissionist))
     .filter((movement) => !alreadyLiquidatedIds.has(String(movement.id)))
+    .filter((movement) => !alreadyLiquidatedExternalReceipts.has([
+      normalizeSearch(movement.comprobante || ""),
+      normalizeSearch(movement.cliente || ""),
+      normalizeSearch(movement.fecha || movement.vencimiento || "")
+    ].join("|")))
     .filter((movement) => commissionistDateInRange({ fecha: movement.fecha || movement.vencimiento }, from, to))
     .map((movement) => ({
       id: movement.id,
@@ -4338,12 +8616,16 @@ async function loadCommissionistOperations() {
       base: Number(movement.baseComision || 0) || Math.abs(Number(movement.importe || 0)),
       porcentaje: Number(movement.porcComision || 0),
       comisionManual: Number(movement.importeComision || 0),
+      commissionKind: commissionKind(movement),
       selected: true
     }))
     .filter((row) => Number(row.base || 0) > 0);
-  const accountRows = pendingCommissionistAccountRows(selectedCommissionist, from, to, alreadyLiquidatedIds);
+  // La facturacion toma todas las comisiones ya generadas y pendientes en cuenta
+  // corriente. El rango se usa solo para buscar operaciones nuevas del periodo.
+  const accountRows = pendingCommissionistAccountRows(selectedCommissionist, null, null, alreadyLiquidatedIds);
   state.commissionistRows = [...state.commissionistRows, ...accountRows, ...externalRows]
     .sort((a, b) => (parseDisplayDate(a.fecha)?.getTime() || 0) - (parseDisplayDate(b.fecha)?.getTime() || 0));
+  state.commissionistPage = 1;
   renderCommissionistRows();
   $("#commissionist-message").textContent = state.commissionistRows.length
     ? "Operaciones listas para revisar. Se excluyen las ya liquidadas al comisionista."
@@ -4355,8 +8637,8 @@ async function generateCommissionistMovement() {
   const client = $("#commissionist-client").value.trim();
   const percent = percentValue("#commissionist-percent");
   const selected = state.commissionistRows.filter((row) => row.selected && !row.noGenerate);
-  const base = selected.reduce((sum, row) => sum + Number(row.base || 0), 0);
-  const amount = selected.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
+  const totals = commissionistRowsSplitTotals(selected, percent);
+  const amount = totals.total;
   if (!client || !selected.length || !amount) {
     $("#commissionist-message").textContent = "Falta comisionista, operaciones seleccionadas o porcentaje.";
     $("#commissionist-message").className = "form-message error";
@@ -4364,44 +8646,58 @@ async function generateCommissionistMovement() {
   }
   const fromText = $("#commissionist-from").value || "inicio";
   const toText = $("#commissionist-to").value || "fin";
-  const operations = selected.map((row) => row.id).join(", ");
-  const detail = {
-    tipo: "COMISIONISTA",
-    comisionista: client,
-    periodoDesde: fromText,
-    periodoHasta: toText,
-    porcentaje: percent,
-    base,
-      comision: amount,
-      items: selected.map((row) => ({
-      id: row.id,
-      fecha: row.fecha,
-      origen: row.origen,
-      vendedor: row.vendedor,
-      comprador: row.comprador,
-        comprobante: row.comprobante,
-        base: Number(row.base || 0),
-        porcentaje: Number(row.porcentaje || percent || 0),
-        comision: commissionistRowCommission(row, percent)
-      }))
-  };
+  const settlementId = `COMISIONISTA-${Date.now()}`;
+  const groups = ["facturado", "efectivo"]
+    .map((kind) => {
+      const rows = selected.filter((row) => commissionistRowKind(row) === kind);
+      const groupAmount = rows.reduce((sum, row) => sum + commissionistRowCommission(row, percent), 0);
+      const base = rows.reduce((sum, row) => sum + Number(row.base || 0), 0);
+      return { kind, rows, amount: groupAmount, base };
+    })
+    .filter((group) => group.rows.length && group.amount > 0.01);
   try {
-    await fetchJson("/api/cuenta-corriente/movimientos-externos", {
-      method: "POST",
-      body: JSON.stringify({
-        cliente: client,
-        direccion: "PAGAR",
-        concepto: `Comisionista ${percent}% periodo ${fromText} a ${toText}`,
-        comprobante: `COMISIONISTA ${fromText}/${toText}`,
-        fechaVenta: new Date().toISOString().slice(0, 10),
-        vencimiento: $("#commissionist-due").value || new Date().toISOString().slice(0, 10),
-        importe: amount,
-        observacion: `COMISIONISTA_DETALLE:${JSON.stringify(detail)}`
-      })
-    });
+    for (const group of groups) {
+      const kindLabel = group.kind === "efectivo" ? "sobre efectivo" : "sobre facturado";
+      const detail = {
+        tipo: "COMISIONISTA",
+        tipoComision: group.kind.toUpperCase(),
+        liquidacionId: settlementId,
+        comisionista: client,
+        periodoDesde: fromText,
+        periodoHasta: toText,
+        porcentaje: percent,
+        base: group.base,
+        comision: group.amount,
+        items: group.rows.map((row) => ({
+          id: row.id,
+          fecha: row.fecha,
+          origen: row.origen,
+          vendedor: row.vendedor,
+          comprador: row.comprador,
+          comprobante: row.comprobante,
+          tipoComision: group.kind.toUpperCase(),
+          base: Number(row.base || 0),
+          porcentaje: Number(row.porcentaje || percent || 0),
+          comision: commissionistRowCommission(row, percent)
+        }))
+      };
+      await fetchJson("/api/cuenta-corriente/movimientos-externos", {
+        method: "POST",
+        body: JSON.stringify({
+          cliente: client,
+          direccion: "PAGAR",
+          concepto: `Comisionista ${kindLabel} ${percent}% periodo ${fromText} a ${toText}`,
+          comprobante: `COMISIONISTA ${group.kind.toUpperCase()} ${fromText}/${toText}`,
+          fechaVenta: new Date().toISOString().slice(0, 10),
+          vencimiento: $("#commissionist-due").value || new Date().toISOString().slice(0, 10),
+          importe: group.amount,
+          observacion: `COMISIONISTA_DETALLE:${JSON.stringify(detail)}`
+        })
+      });
+    }
     await reloadCurrentAccount();
     renderCommissionistStatus();
-    $("#commissionist-message").textContent = `Movimiento generado por ${moneyValue(amount)}.`;
+    $("#commissionist-message").textContent = `Cuenta corriente generada: sobre facturado ${moneyValue(totals.facturado)} - sobre efectivo ${moneyValue(totals.efectivo)} - total ${moneyValue(amount)}.`;
     $("#commissionist-message").className = "form-message ok";
   } catch (error) {
     $("#commissionist-message").textContent = error.message;
@@ -4445,9 +8741,42 @@ async function generateCommissionistInvoice() {
   }
 }
 
-function collectSelectedCurrentAccountImputations(selector, availableAmount, paymentType = "") {
-  const selected = $all(selector);
-  const rows = selected.flatMap((checkbox) => {
+async function generateClientCommissionInvoice() {
+  const client = $("#cc-client-search").value.trim();
+  const number = $("#cc-commission-invoice-number").value.trim();
+  const selected = $all("[data-cc-commission-invoice-row]:checked");
+  const message = $("#cc-commission-invoice-message");
+  if (!client || !number || !selected.length) {
+    message.textContent = "Falta cliente, numero de factura o comisiones seleccionadas.";
+    message.className = "form-message error";
+    return;
+  }
+  try {
+    const response = await fetchJson("/api/comisiones/facturas", {
+      method: "POST",
+      body: JSON.stringify({
+        cliente: client,
+        numero: number,
+        fecha: $("#cc-commission-invoice-date").value || new Date().toISOString().slice(0, 10),
+        observacion: $("#cc-commission-invoice-note").value,
+        movimientos: selected.map((checkbox) => ({ movementId: checkbox.dataset.ccCommissionInvoiceRow }))
+      })
+    });
+    await reloadCurrentAccount();
+    renderCuentaCorriente();
+    const saved = response.item || {};
+    message.textContent = `Factura registrada: ${saved.numero || number} por ${moneyValue(saved.total || 0)}. No se duplico cuenta corriente.`;
+    message.className = "form-message ok";
+    $("#cc-commission-invoice-number").value = "";
+    $("#cc-commission-invoice-note").value = "";
+  } catch (error) {
+    message.textContent = error.message;
+    message.className = "form-message error";
+  }
+}
+
+function selectedCurrentAccountImputationRows(selector) {
+  return $all(selector).flatMap((checkbox) => {
     if (checkbox.dataset.ccGroupItems) {
       try {
         return JSON.parse(decodeURIComponent(checkbox.dataset.ccGroupItems)).map((item) => ({
@@ -4465,9 +8794,52 @@ function collectSelectedCurrentAccountImputations(selector, availableAmount, pay
       signedPending: Number(checkbox.dataset.ccSignedPending || 0)
     }];
   }).filter((item) => item.movementId && item.pending > 0);
+}
+
+function allocateCurrentAccountRows(rows, budget) {
+  let remaining = Math.abs(Number(budget || 0));
+  return rows.map((item) => {
+    const importe = Math.min(item.pending, remaining);
+    remaining -= importe;
+    return { movementId: item.movementId, importe };
+  }).filter((item) => item.importe > 0);
+}
+
+function compensationOffsetAmount(rows = []) {
+  const positiveTotal = rows
+    .filter((item) => item.signedPending > 0)
+    .reduce((sum, item) => sum + item.pending, 0);
+  const negativeTotal = rows
+    .filter((item) => item.signedPending < 0)
+    .reduce((sum, item) => sum + item.pending, 0);
+  if (positiveTotal && negativeTotal) return Math.min(positiveTotal, negativeTotal);
+  return Math.abs(rows.reduce((sum, item) => sum + Number(item.signedPending || 0), 0));
+}
+
+function compensationImputationRows(rows = []) {
   const hasPositive = rows.some((item) => item.signedPending > 0);
   const hasNegative = rows.some((item) => item.signedPending < 0);
-  if (paymentType === "COMPENSACION") return rows.map((item) => ({ movementId: item.movementId, importe: item.pending }));
+  if (!hasPositive || !hasNegative) return rows.map((item) => ({ movementId: item.movementId, importe: item.pending }));
+  const offset = compensationOffsetAmount(rows);
+  return [
+    ...allocateCurrentAccountRows(rows.filter((item) => item.signedPending > 0), offset),
+    ...allocateCurrentAccountRows(rows.filter((item) => item.signedPending < 0), offset)
+  ];
+}
+
+function compensationAppliedSignedTotal(rows = []) {
+  const source = new Map(rows.map((item) => [String(item.movementId), item]));
+  return compensationImputationRows(rows).reduce((sum, item) => {
+    const row = source.get(String(item.movementId));
+    return sum + Math.sign(Number(row?.signedPending || 0)) * Number(item.importe || 0);
+  }, 0);
+}
+
+function collectSelectedCurrentAccountImputations(selector, availableAmount, paymentType = "") {
+  const rows = selectedCurrentAccountImputationRows(selector);
+  const hasPositive = rows.some((item) => item.signedPending > 0);
+  const hasNegative = rows.some((item) => item.signedPending < 0);
+  if (paymentType === "COMPENSACION") return compensationImputationRows(rows);
   const discountOnly = selector.includes("data-cc-impute") && paymentType === "PAGO" && $("#cc-discount-only")?.checked;
   if (hasPositive && hasNegative) {
     if (discountOnly) {
@@ -4490,15 +8862,45 @@ function collectSelectedCurrentAccountImputations(selector, availableAmount, pay
     return rows.map((item) => ({ movementId: item.movementId, importe: item.pending }));
   }
   let remaining = Math.abs(Number(availableAmount || 0));
-  return rows.map((item) => {
-    const importe = Math.min(item.pending, remaining);
-    remaining -= importe;
-    return { movementId: item.movementId, importe };
-  }).filter((item) => item.importe > 0);
+  return allocateCurrentAccountRows(rows, remaining);
+}
+
+function currentAccountSelectedImputationLimit(rows, paymentType = "") {
+  if (paymentType === "COMPENSACION") return Math.abs(compensationAppliedSignedTotal(rows));
+  const hasPositive = rows.some((item) => item.signedPending > 0);
+  const hasNegative = rows.some((item) => item.signedPending < 0);
+  const discountOnly = paymentType === "PAGO" && $("#cc-discount-only")?.checked;
+  if (hasPositive && hasNegative) {
+    if (discountOnly) {
+      return rows
+        .filter((item) => item.signedPending > 0)
+        .reduce((sum, item) => sum + Number(item.pending || 0), 0);
+    }
+    return Math.abs(rows.reduce((sum, item) => sum + Number(item.signedPending || 0), 0));
+  }
+  return rows.reduce((sum, item) => sum + Number(item.pending || 0), 0);
+}
+
+function currentAccountPaymentDifference(amount, rows, paymentType = "") {
+  if (!rows.length || paymentType === "COMPENSACION") return 0;
+  const limit = currentAccountSelectedImputationLimit(rows, paymentType);
+  if (Number(amount || 0) > limit + 0.01) {
+    return Math.round((Number(amount || 0) - limit) * 100) / 100;
+  }
+  return 0;
+}
+
+function confirmCurrentAccountPaymentDifference(amount, rows, paymentType = "") {
+  const difference = currentAccountPaymentDifference(amount, rows, paymentType);
+  if (difference <= 0.01) return 0;
+  const label = String(paymentType || "").toUpperCase() === "PAGO" ? "adelanto a recuperar" : "saldo a favor / anticipo";
+  const confirmed = window.confirm(`El importe cargado (${moneyValue(amount)}) supera lo seleccionado para imputar por ${moneyValue(difference)}.\n\nSi continua, esa diferencia quedara marcada como ${label}. Para identificarla por negocio, complete Cuenta asociada y Tipo de origen. ¿Guardar de todos modos?`);
+  if (!confirmed) return null;
+  return difference;
 }
 
 function renderClientes() {
-  const query = $("#client-search").value.trim().toLowerCase();
+  const query = $("#client-search").value.trim();
   const hasFilter = Boolean(query);
   $("#client-list-hint").textContent = hasFilter
     ? "Resultados de la busqueda."
@@ -4508,10 +8910,7 @@ function renderClientes() {
     $("#clientes-body").innerHTML = `<tr><td colspan="4">La lista se mostrara cuando busque un cliente.</td></tr>`;
     return;
   }
-  const rows = state.clientes.filter((client) => {
-    const haystack = `${client.nombre} ${client.cuit} ${client.tipo}`.toLowerCase();
-    return haystack.includes(query);
-  });
+  const rows = state.clientes.filter((client) => matchesClientLookup(client, query));
 
   $("#clientes-body").innerHTML = rows
     .map((client) => `
@@ -4577,18 +8976,68 @@ function renderClientNameSuggestions() {
 
 function renderOperaciones() {
   $("#operaciones-body").innerHTML = state.operaciones
-    .map((operation) => `
-      <tr>
+    .map((operation) => {
+      const statusInfo = operationSearchStatusInfo(operation);
+      return `
+      <tr class="${statusInfo.annulled ? "movement-cancelled" : ""}">
         <td>${escapeHtml(operation.id)}</td>
         <td>${escapeHtml(operation.fecha || "-")}</td>
         <td>${escapeHtml(operationTypeLabel(operation))}</td>
         <td>${escapeHtml(operation.vendedor || "-")}</td>
         <td>${escapeHtml(operation.comprador || operation.consignataria || "-")}</td>
         <td>${escapeHtml(operation.total || "-")}</td>
-        <td><button type="button" class="small-button" data-open-sale="${escapeHtml(operation.id)}">Continuar</button></td>
+        <td>${escapeHtml(statusInfo.label.toUpperCase())}</td>
+        <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? `<div class="operation-row-actions"><span class="subtle">Registro comercial</span><button type="button" class="operation-action-button operation-action-reactivate" data-reactivate-operation="${escapeHtml(operation.id)}" title="Reactivar operacion" aria-label="Reactivar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8634;</span></button></div>` : `<div class="operation-row-actions"><button type="button" class="operation-action-button operation-action-open" data-open-sale="${escapeHtml(operation.id)}" title="Continuar operacion" aria-label="Continuar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8594;</span></button>${statusInfo.pending ? `<button type="button" class="operation-action-button operation-action-derive" data-derive-operation="${escapeHtml(operation.id)}" title="Derivar a movimiento externo" aria-label="Derivar operacion ${escapeHtml(operation.id)} a movimiento externo"><span aria-hidden="true">&#8599;</span></button>` : ""}</div>`}</td>
       </tr>
-    `)
+    `;})
     .join("");
+}
+
+function handleClientSearchInput() {
+  const query = $("#client-search").value.trim();
+  const selected = state.clientes.find((client) => String(client.id) === String(state.selectedClientId));
+  if (selected && normalizeSearch(query) !== normalizeSearch(selected.nombre)) {
+    resetClientForm();
+  }
+  renderClientes();
+}
+
+async function deriveOperationToExternal(operationId) {
+  const operation = state.operaciones.find((item) => String(item.id) === String(operationId));
+  if (!operation) return;
+  const confirmed = window.confirm(`La operacion ${operation.id} quedara registrada como venta derivada a movimiento externo. No generara cuenta corriente desde Operaciones. Solo se permite si no tiene liquidacion ni imputaciones. ¿Continuar?`);
+  if (!confirmed) return;
+  try {
+    await fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}/derivar-externo`, {
+      method: "POST",
+      body: JSON.stringify({ motivo: "Operacion comercial registrada; liquidacion cargada como movimiento externo" })
+    });
+    const response = await fetchJson("/api/operaciones");
+    state.operaciones = response.items || [];
+    renderOperaciones();
+    renderMetrics();
+    setOperationMessage(`Operacion ${operation.id} conservada como registro comercial y derivada a movimiento externo.`, "ok");
+  } catch (error) {
+    setOperationMessage(error.message, "error");
+  }
+}
+
+async function reactivateDerivedOperation(operationId) {
+  const operation = state.operaciones.find((item) => String(item.id) === String(operationId));
+  if (!operation) return;
+  const confirmed = window.confirm(`La operacion ${operation.id} volvera a Pendiente y se podra completar normalmente. ¿Continuar?`);
+  if (!confirmed) return;
+  try {
+    await fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}/reactivar`, { method: "POST" });
+    const response = await fetchJson("/api/operaciones");
+    state.operaciones = response.items || [];
+    renderOperaciones();
+    renderOperationSearch();
+    renderMetrics();
+    setOperationMessage(`Operacion ${operation.id} reactivada. Ya se puede abrir y completar.`, "ok");
+  } catch (error) {
+    setOperationMessage(error.message, "error");
+  }
 }
 
 function renderCategories() {
@@ -4673,7 +9122,7 @@ async function saveCategory(original, value) {
 
 async function deleteCategory(category) {
   try {
-    const confirmed = window.confirm(`Se quitara "${category}" del listado de categorias. Las ventas ya cargadas no se modifican. Â¿Continuar?`);
+    const confirmed = window.confirm(`Se quitará "${category}" del listado de categorías. Las ventas ya cargadas no se modifican. ¿Continuar?`);
     if (!confirmed) return;
     await fetchJson(`/api/categorias/${encodeURIComponent(category)}`, { method: "DELETE" });
     await reloadCategories();
@@ -4913,6 +9362,36 @@ function moneyValue(value) {
   return currency.format(Number(value || 0));
 }
 
+function pageItems(items, page, pageSize = TABLE_PAGE_SIZE) {
+  const total = items.length;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const current = Math.min(Math.max(1, Number(page || 1)), pages);
+  const start = (current - 1) * pageSize;
+  return {
+    items: items.slice(start, start + pageSize),
+    current,
+    pages,
+    start,
+    total
+  };
+}
+
+function renderPagination(containerSelector, info, actionName) {
+  const node = $(containerSelector);
+  if (!node) return;
+  if (!info.total) {
+    node.innerHTML = "";
+    return;
+  }
+  const from = info.start + 1;
+  const to = Math.min(info.start + TABLE_PAGE_SIZE, info.total);
+  node.innerHTML = `
+    <button type="button" class="small-button" data-page-action="${actionName}" data-page-direction="prev" ${info.current <= 1 ? "disabled" : ""}>Anterior</button>
+    <span>Mostrando ${from}-${to} de ${info.total} | Pagina ${info.current} de ${info.pages}</span>
+    <button type="button" class="small-button" data-page-action="${actionName}" data-page-direction="next" ${info.current >= info.pages ? "disabled" : ""}>Siguiente</button>
+  `;
+}
+
 function parseMoneyInput(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   const raw = String(value || "");
@@ -5095,9 +9574,14 @@ function parseDisplayDate(value) {
 }
 
 function parseAnyLocalDate(value) {
-  const text = String(value || "");
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+  const text = String(value || "").trim();
   const inputMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (inputMatch) return new Date(Number(inputMatch[1]), Number(inputMatch[2]) - 1, Number(inputMatch[3]));
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+  if (isoMatch) return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
   return parseDisplayDate(text);
 }
 
@@ -5158,7 +9642,7 @@ function renderDueGrid(calc) {
   const groups = [
     { title: "Facturado vendedor", plan: $("#liq-plan-fact-prod").value, base: calc.netoLiquidacionProd },
     { title: "Facturado comprador", plan: $("#liq-plan-fact-comp").value, base: calc.netoLiquidacionComp },
-    { title: "Efectivo vendedor", plan: $("#liq-plan-cash-prod").value, base: calc.cashWithIvaProd - calc.cashExpenseProd },
+    { title: sellerComplementaryAmountLabel(), plan: $("#liq-plan-cash-prod").value, base: calc.cashWithIvaProd - calc.cashExpenseProd },
     { title: "Efectivo comprador", plan: $("#liq-plan-cash-comp").value, base: calc.efectivoComp }
   ];
   $("#liq-operation-date").value = date || "";
@@ -5187,9 +9671,22 @@ function syncLiquidationPanels() {
   const direct = isDirectOperation();
   const consigned = isConsignedOperation();
   const frigo = isFrigorificoIvaOperation();
+  const anticipated = isAnticipatedOperation();
   $all(".direct-only").forEach((element) => { element.hidden = !direct; });
   $all(".consigned-only").forEach((element) => { element.hidden = !consigned; });
   $all(".frigo-only").forEach((element) => { element.hidden = !frigo; });
+  [
+    "#liq-cash-mode",
+    "#liq-cash-percent",
+    "#liq-cash-prod-treatment",
+    "#liq-plan-cash-prod",
+    "#liq-plan-cash-comp",
+    "#liq-efectivo-prod",
+    "#liq-efectivo-comp"
+  ].forEach((selector) => {
+    const element = $(selector);
+    if (element) element.disabled = anticipated;
+  });
   $("#liq-buyer-expenses").hidden = !buyerExpensesApply();
   syncLiquidationReceipts();
 }
@@ -5257,6 +9754,50 @@ function isCommissionEnabled(selector) {
   return Boolean(input && input.checked);
 }
 
+function sellerCashIsCommissionAdjustment() {
+  return String($("#liq-cash-prod-treatment")?.value || "EFECTIVO").toUpperCase() === "AJUSTE_COMISION";
+}
+
+function sellerComplementaryAmountLabel() {
+  return sellerCashIsCommissionAdjustment()
+    ? "Ajuste de precio a cargo de la consignataria"
+    : "Efectivo vendedor";
+}
+
+function sellerCommissionBaseMode() {
+  return String($("#liq-comision-fact-prod-base-mode")?.value || "FACTURADO").toUpperCase();
+}
+
+function sellerCommissionBaseAmount(facturado = numberValue("#liq-facturado")) {
+  const mode = sellerCommissionBaseMode();
+  if (mode === "BRUTO_VENDEDOR") return numberValue("#liq-bruto-vend");
+  if (mode === "MANUAL") return numberValue("#liq-comision-fact-prod-base");
+  return Number(facturado || 0);
+}
+
+function syncSellerCashTreatment() {
+  const adjustment = sellerCashIsCommissionAdjustment();
+  const checkbox = $("#liq-comision-efect-prod-enabled");
+  if (checkbox) {
+    if (adjustment) checkbox.checked = false;
+    checkbox.disabled = adjustment;
+  }
+  if ($("#liq-cash-prod-title")) {
+    $("#liq-cash-prod-title").textContent = adjustment
+      ? "Diferencia de precio asumida por la consignataria"
+      : "Importe complementario vendedor";
+  }
+  if ($("#liq-cash-prod-amount-label")) {
+    $("#liq-cash-prod-amount-label").textContent = adjustment
+      ? "Importe del ajuste reconocido al vendedor"
+      : "Importe efectivo sin IVA si aplica";
+  }
+  const summary = $("#liq-commission-adjustment-summary");
+  if (summary) summary.hidden = !adjustment;
+  const baseInput = $("#liq-comision-fact-prod-base");
+  if (baseInput) baseInput.disabled = sellerCommissionBaseMode() !== "MANUAL";
+}
+
 function commissionPercent(enabledSelector, percentSelector) {
   return isCommissionEnabled(enabledSelector) ? percentValue(percentSelector) : 0;
 }
@@ -5279,18 +9820,25 @@ function calculateLiquidationPreview() {
   const ivaComp = numberValue("#liq-iva-comp");
   const frigo = isFrigorificoIvaOperation();
   const frigoCalc = frigo ? getFrigorificoCalc() : null;
-  const efectivoProd = normalizeFrigorificoCashInput(numberValue("#liq-efectivo-prod"));
-  const efectivoComp = frigoCalc ? frigoCalc.efectivoComp : numberValue("#liq-efectivo-comp");
+  const anticipated = isAnticipatedOperation();
+  const cashValues = liquidationCashValues(frigoCalc);
+  const efectivoProd = anticipated ? 0 : cashValues.prod;
+  const efectivoComp = anticipated ? 0 : cashValues.comp;
   const cashExpenseProd = numberValue("#liq-cash-exp-prod");
   const expenses = getSellerExpenses();
   const buyerExpenses = getBuyerExpenses();
   const consigned = isConsignedOperation();
-  const comFactProd = facturado * commissionPercent("#liq-comision-fact-prod-enabled", "#liq-comision-fact-prod-pct") / 100;
+  const sellerCommissionBase = sellerCommissionBaseAmount(facturado);
+  const comFactProd = sellerCommissionBase * commissionPercent("#liq-comision-fact-prod-enabled", "#liq-comision-fact-prod-pct") / 100;
   const comFactComp = facturado * commissionPercent("#liq-comision-fact-comp-enabled", "#liq-comision-fact-comp-pct") / 100;
   const consigneeCommission = facturado * percentValue("#liq-consignee-commission-pct") / 100;
   const consigneeAdjustment = numberValue("#liq-consignee-adjustment");
   const cashWithIvaProd = efectivoProd + (frigo ? efectivoProd * 0.105 : 0);
-  const comEfProd = cashWithIvaProd * commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct") / 100;
+  const sellerAdjustmentApplied = sellerCashIsCommissionAdjustment() ? Math.min(cashWithIvaProd, comFactProd) : 0;
+  const sellerCommissionToInvoice = Math.max(comFactProd - sellerAdjustmentApplied, 0);
+  const comEfProd = sellerCashIsCommissionAdjustment()
+    ? 0
+    : cashWithIvaProd * commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct") / 100;
   const comEfComp = efectivoComp * commissionPercent("#liq-comision-efect-comp-enabled", "#liq-comision-efect-comp-pct") / 100;
   const expenseBase = expenses.comision + expenses.fondoGarantia + expenses.controlEntrega + expenses.fondoCompGastos + expenses.otrosGastos;
   const netoGravadoProd = consigned ? Math.max(facturado - expenseBase, 0) : facturado;
@@ -5317,6 +9865,9 @@ function calculateLiquidationPreview() {
     efectivoComp,
     cashWithIvaProd,
     cashExpenseProd,
+    sellerCommissionBase,
+    sellerAdjustmentApplied,
+    sellerCommissionToInvoice,
     comFactProd,
     comFactComp,
     consigneeCommission,
@@ -5333,14 +9884,76 @@ function calculateLiquidationPreview() {
   };
 }
 
-function syncLiquidationCashFromFacturado() {
+function automaticLiquidationFacturadoFromCashPercent() {
+  const percent = Math.min(Math.max(percentValue("#liq-cash-percent"), 0), 100);
+  const brutoVend = numberValue("#liq-bruto-vend");
+  const frigo = isFrigorificoIvaOperation() ? getFrigorificoCalc() : null;
+  const baseProd = frigo ? Number(frigo.brutoSinIva || 0) : brutoVend;
+  return Math.max(baseProd * (100 - percent) / 100, 0);
+}
+
+function syncLiquidationFacturadoFromCashPercent() {
+  if (String($("#liq-cash-mode")?.value || "").toUpperCase() !== "PORCENTAJE") return false;
+  if (isAnticipatedOperation()) return false;
+  if (document.activeElement === $("#liq-facturado")) return false;
+  setMoneyInput("#liq-facturado", automaticLiquidationFacturadoFromCashPercent());
+  state.liquidationFacturadoTouched = false;
+  return true;
+}
+
+function liquidationCashValues(frigoCalc = null) {
+  const mode = String($("#liq-cash-mode")?.value || "MONTO").toUpperCase();
+  const percent = percentValue("#liq-cash-percent");
+  const brutoVend = numberValue("#liq-bruto-vend");
+  const brutoComp = numberValue("#liq-bruto-comp");
+  const frigo = frigoCalc || (isFrigorificoIvaOperation() ? getFrigorificoCalc() : null);
+  if (mode === "PORCENTAJE") {
+    const baseProd = frigo ? Number(frigo.brutoSinIva || 0) : brutoVend;
+    const baseComp = frigo ? Number(frigo.brutoComp || 0) : brutoComp;
+    return {
+      prod: Math.max(baseProd * percent / 100, 0),
+      comp: Math.max(baseComp * percent / 100, 0)
+    };
+  }
+  return {
+    prod: normalizeFrigorificoCashInput(numberValue("#liq-efectivo-prod")),
+    comp: frigo ? Number(frigo.efectivoComp || 0) : numberValue("#liq-efectivo-comp")
+  };
+}
+
+function automaticFixedLiquidationCashValues() {
   const facturado = numberValue("#liq-facturado");
   const brutoVend = numberValue("#liq-bruto-vend");
   const brutoComp = numberValue("#liq-bruto-comp");
-  const frigoCalc = isFrigorificoIvaOperation() ? getFrigorificoCalc() : null;
-  const brutoBaseProd = frigoCalc ? frigoCalc.brutoSinIva : brutoVend;
-  setMoneyInput("#liq-efectivo-prod", Math.max(brutoBaseProd - facturado, 0));
-  setMoneyInput("#liq-efectivo-comp", frigoCalc ? frigoCalc.efectivoComp : Math.max(brutoComp - facturado, 0));
+  const frigo = isFrigorificoIvaOperation() ? getFrigorificoCalc() : null;
+  const brutoBaseProd = frigo ? Number(frigo.brutoSinIva || 0) : brutoVend;
+  return {
+    prod: Math.max(brutoBaseProd - facturado, 0),
+    comp: frigo ? Number(frigo.efectivoComp || 0) : Math.max(brutoComp - facturado, 0)
+  };
+}
+
+function syncLiquidationCashFromFacturado() {
+  if (isAnticipatedOperation()) {
+    setMoneyInput("#liq-efectivo-prod", 0);
+    setMoneyInput("#liq-efectivo-comp", 0);
+    state.liquidationCashProdTouched = false;
+    state.liquidationCashCompTouched = false;
+    return;
+  }
+  if (String($("#liq-cash-mode")?.value || "").toUpperCase() === "PORCENTAJE") {
+    const values = liquidationCashValues();
+    setMoneyInput("#liq-efectivo-prod", values.prod);
+    setMoneyInput("#liq-efectivo-comp", values.comp);
+    state.liquidationCashProdTouched = false;
+    state.liquidationCashCompTouched = false;
+    return;
+  }
+  const values = automaticFixedLiquidationCashValues();
+  setMoneyInput("#liq-efectivo-prod", values.prod);
+  setMoneyInput("#liq-efectivo-comp", values.comp);
+  state.liquidationCashProdTouched = false;
+  state.liquidationCashCompTouched = false;
 }
 
 function currentAutomaticFacturado(operation = state.currentOperation) {
@@ -5367,10 +9980,10 @@ function automaticLiquidationIvaValues() {
   };
 }
 
-function syncAutomaticLiquidationIva() {
+function syncAutomaticLiquidationIva(force = false) {
   const iva = automaticLiquidationIvaValues();
-  if (!state.liquidationIvaProdTouched) setMoneyInput("#liq-iva-prod", iva.prod);
-  if (!state.liquidationIvaCompTouched) setMoneyInput("#liq-iva-comp", iva.comp);
+  if ((force || !state.liquidationIvaProdTouched) && document.activeElement !== $("#liq-iva-prod")) setMoneyInput("#liq-iva-prod", iva.prod);
+  if ((force || !state.liquidationIvaCompTouched) && document.activeElement !== $("#liq-iva-comp")) setMoneyInput("#liq-iva-comp", iva.comp);
 }
 
 function normalizeFrigorificoCashInput(value, operation = state.currentOperation) {
@@ -5384,18 +9997,28 @@ function normalizeFrigorificoCashInput(value, operation = state.currentOperation
 }
 
 function renderLiquidationTotals() {
+  syncSellerCashTreatment();
   syncCommissionToggles();
+  const percentageCashMode = String($("#liq-cash-mode")?.value || "").toUpperCase() === "PORCENTAJE";
+  if (percentageCashMode) syncLiquidationFacturadoFromCashPercent();
+  if (percentageCashMode) syncAutomaticLiquidationIva(true);
   const calc = calculateLiquidationPreview();
-  if (isFrigorificoIvaOperation() && document.activeElement !== $("#liq-efectivo-prod")) {
+  if (sellerCommissionBaseMode() !== "MANUAL" && document.activeElement !== $("#liq-comision-fact-prod-base")) {
+    setMoneyInput("#liq-comision-fact-prod-base", calc.sellerCommissionBase);
+  }
+  if ((percentageCashMode || isFrigorificoIvaOperation()) && document.activeElement !== $("#liq-efectivo-prod")) {
     setMoneyInput("#liq-efectivo-prod", calc.efectivoProd);
   }
-  if (isFrigorificoIvaOperation()) {
+  if (percentageCashMode || isFrigorificoIvaOperation()) {
     setMoneyInput("#liq-efectivo-comp", calc.efectivoComp);
   }
   setMoneyInput("#liq-comision-fact-prod", calc.comFactProd);
   setMoneyInput("#liq-comision-fact-comp", calc.comFactComp);
   setMoneyInput("#liq-comision-efect-prod", calc.comEfProd);
   setMoneyInput("#liq-comision-efect-comp", calc.comEfComp);
+  if ($("#liq-adjustment-commission-total")) $("#liq-adjustment-commission-total").textContent = moneyValue(calc.comFactProd);
+  if ($("#liq-adjustment-price-total")) $("#liq-adjustment-price-total").textContent = moneyValue(calc.cashWithIvaProd);
+  if ($("#liq-adjustment-invoice-difference")) $("#liq-adjustment-invoice-difference").textContent = moneyValue(calc.sellerCommissionToInvoice);
   if ($("#liq-cash-iva-prod")) $("#liq-cash-iva-prod").value = moneyValue(calc.cashWithIvaProd - calc.efectivoProd);
   if ($("#liq-cash-with-iva-prod")) $("#liq-cash-with-iva-prod").value = moneyValue(calc.cashWithIvaProd);
   $("#liq-consignee-commission").value = moneyValue(calc.consigneeCommission);
@@ -5431,15 +10054,35 @@ function fillLiquidationForm(liquidacion) {
   const netoFinalFrigo = Number(liquidacion.netoFinalFrigorificoComp || draft.netoFinalFrigorificoComp || liquidacion.brutoVend || 0);
   state.frigoBrutoSinIvaTouched = Boolean(liquidacion.brutoSinIvaFrigorificoManual || draft.brutoSinIvaFrigorificoManual);
   setMoneyInput("#frigo-bruto-sin-iva", storedBrutoSinIvaFrigo || (netoFinalFrigo ? netoFinalFrigo / 1.105 : 0));
-  setMoneyInput("#liq-efectivo-prod", normalizeFrigorificoCashInput(liquidacion.efectivoProd));
-  setMoneyInput("#liq-efectivo-comp", isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : liquidacion.efectivoComp);
+  $("#liq-cash-mode").value = liquidacion.efectivoModo || draft.efectivoModo || "MONTO";
+  $("#liq-cash-percent").value = liquidacion.efectivoPorc || draft.efectivoPorc || "";
+  $("#liq-cash-prod-treatment").value = liquidacion.efectivoProdTratamiento || draft.efectivoProdTratamiento || "EFECTIVO";
+  const storedSellerCommissionBaseMode = liquidacion.comisionFacturadoProdBaseModo || draft.comisionFacturadoProdBaseModo;
+  $("#liq-comision-fact-prod-base-mode").value = storedSellerCommissionBaseMode
+    || (sellerCashIsCommissionAdjustment() ? "BRUTO_VENDEDOR" : "FACTURADO");
+  setMoneyInput("#liq-comision-fact-prod-base", liquidacion.comisionFacturadoProdBase || draft.comisionFacturadoProdBase || 0);
+  const automaticCash = automaticFixedLiquidationCashValues();
+  const storedCashProd = normalizeFrigorificoCashInput(liquidacion.efectivoProd);
+  const storedCashComp = isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : Number(liquidacion.efectivoComp || 0);
+  const hasCashProdManualFlag = Object.prototype.hasOwnProperty.call(liquidacion, "efectivoProdManual");
+  const hasCashCompManualFlag = Object.prototype.hasOwnProperty.call(liquidacion, "efectivoCompManual");
+  const cashManualVersion = Number(liquidacion.efectivoManualVersion || 0);
+  const legacyZeroCashProd = cashManualVersion < 1 && Math.abs(storedCashProd) <= 0.01 && automaticCash.prod > 0.01;
+  const legacyZeroCashComp = cashManualVersion < 1 && Math.abs(storedCashComp) <= 0.01 && automaticCash.comp > 0.01;
+  state.liquidationCashProdTouched = legacyZeroCashProd ? false : hasCashProdManualFlag
+    ? Boolean(liquidacion.efectivoProdManual)
+    : Math.abs(storedCashProd) > 0.01 && Math.abs(storedCashProd - automaticCash.prod) > 0.01;
+  state.liquidationCashCompTouched = legacyZeroCashComp ? false : hasCashCompManualFlag
+    ? Boolean(liquidacion.efectivoCompManual)
+    : Math.abs(storedCashComp) > 0.01 && Math.abs(storedCashComp - automaticCash.comp) > 0.01;
+  const percentageCashMode = String($("#liq-cash-mode").value || "").toUpperCase() === "PORCENTAJE";
+  setMoneyInput("#liq-efectivo-prod", !percentageCashMode && !state.liquidationCashProdTouched ? automaticCash.prod : storedCashProd);
+  setMoneyInput("#liq-efectivo-comp", !percentageCashMode && !state.liquidationCashCompTouched ? automaticCash.comp : storedCashComp);
   setMoneyInput("#liq-comision-fact-prod", liquidacion.comisionFacturadoProd);
   setMoneyInput("#liq-comision-fact-comp", liquidacion.comisionFacturadoComp);
   setMoneyInput("#liq-comision-efect-prod", liquidacion.comisionEfectivoProd);
   setMoneyInput("#liq-comision-efect-comp", liquidacion.comisionEfectivoComp);
   $("#liq-consignee-settled-party").value = liquidacion.liquidacionConsignatariaA || draft.liquidacionConsignatariaA || "VENDEDOR";
-  $("#liq-cash-mode").value = liquidacion.efectivoModo || draft.efectivoModo || "MONTO";
-  $("#liq-cash-percent").value = liquidacion.efectivoPorc || draft.efectivoPorc || "";
   $("#liq-plan-fact-prod").value = liquidacion.planFacturadoProd || draft.planFacturadoProd || "30";
   $("#liq-plan-fact-comp").value = liquidacion.planFacturadoComp || draft.planFacturadoComp || "30";
   $("#liq-plan-cash-prod").value = liquidacion.planEfectivoProd || draft.planEfectivoProd || "0";
@@ -5598,7 +10241,18 @@ function renderSpecialOperationPanels() {
   }
   if (!isFrigo && $("#frigo-buyer-calc-box")) $("#frigo-buyer-calc-box").hidden = true;
 
-  anticipatedBox.hidden = !isAnticipatedOperation(operation);
+  const anticipated = isAnticipatedOperation(operation);
+  anticipatedBox.hidden = !anticipated;
+  if (anticipated) {
+    const facturado = numberValue("#liq-facturado");
+    const brutoVend = numberValue("#liq-bruto-vend");
+    const brutoComp = numberValue("#liq-bruto-comp");
+    const pendingVend = Math.max(brutoVend - facturado, 0);
+    const pendingComp = Math.max(brutoComp - facturado, 0);
+    if ($("#anticipada-liquidado")) $("#anticipada-liquidado").textContent = moneyValue(facturado);
+    if ($("#anticipada-pendiente-vend")) $("#anticipada-pendiente-vend").textContent = moneyValue(pendingVend);
+    if ($("#anticipada-pendiente-comp")) $("#anticipada-pendiente-comp").textContent = moneyValue(pendingComp);
+  }
 }
 
 function buildDetailFromSaleLines() {
@@ -5819,10 +10473,13 @@ async function fillOperationForm(operation) {
 
   $("#operation-seller-name").value = operation.vendedor || "";
   $("#operation-seller-id").value = vendedor ? vendedor.id : "";
+  $("#operation-seller-name").dataset.clientId = vendedor ? vendedor.id : "";
   $("#operation-buyer-name").value = operation.comprador || "";
   $("#operation-buyer-id").value = comprador ? comprador.id : "";
+  $("#operation-buyer-name").dataset.clientId = comprador ? comprador.id : "";
   $("#operation-consignee-name").value = operation.consignataria || "";
   $("#operation-consignee-id").value = consignataria ? consignataria.id : "";
+  $("#operation-consignee-name").dataset.clientId = consignataria ? consignataria.id : "";
 
   if (vendedor) {
     const est = await fetchJson(`/api/clientes/${encodeURIComponent(vendedor.id)}/establecimientos`);
@@ -5846,6 +10503,9 @@ function resetOperationForm() {
   showOperationWorkspace();
   closeSuggestions();
   $("#operation-form").reset();
+  ["#operation-seller-name", "#operation-buyer-name", "#operation-consignee-name"].forEach((selector) => {
+    $(selector).dataset.clientId = "";
+  });
   $("#sale-form").reset();
   $("#liquidation-form").reset();
   $("#operation-id").value = "";
@@ -5861,7 +10521,7 @@ function resetOperationForm() {
   $("#report-sheet").innerHTML = "";
   $("#sale-desbaste-vend").value = "0";
   $("#sale-desbaste-comp").value = "0";
-  $("#sale-line-save").textContent = "Agregar linea";
+  setSaleLineSaveText("Agregar linea");
   $("#sale-line-cancel-edit").hidden = true;
   syncSaleMode();
   setSelectOptions("#operation-renspa-origin-select", [], "Elegir RENSPA origen");
@@ -5882,18 +10542,16 @@ function resetOperationForm() {
 
 function renderPartySuggestions(inputId, suggestionsId, hiddenId) {
   const node = $(suggestionsId);
-  const query = normalizeSearch($(inputId).value);
+  $(hiddenId).value = "";
+  $(inputId).dataset.clientId = "";
+  const query = $(inputId).value;
   if (query.length < 3) {
     node.hidden = true;
     node.innerHTML = "";
     return;
   }
-  const words = query.split(" ").filter(Boolean);
   const matches = state.clientes
-    .filter((client) => {
-      const haystack = normalizeSearch(`${client.nombre} ${client.cuit}`);
-      return words.every((word) => haystack.includes(word));
-    })
+    .filter((client) => matchesClientLookup(client, query))
     .slice(0, 6);
 
   node.hidden = false;
@@ -5922,6 +10580,7 @@ async function pickOperationClient(clientId, inputSelector, hiddenSelector) {
   if (!client) return;
   $(inputSelector).value = client.nombre;
   $(hiddenSelector).value = client.id;
+  $(inputSelector).dataset.clientId = client.id;
   closeSuggestions();
 
   const establishments = await fetchJson(`/api/clientes/${encodeURIComponent(client.id)}/establecimientos`);
@@ -5931,6 +10590,7 @@ async function pickOperationClient(clientId, inputSelector, hiddenSelector) {
   if (hiddenSelector === "#operation-buyer-id") {
     setSelectOptions("#operation-renspa-destination-select", establishments.items || [], "Elegir RENSPA destino");
   }
+  $(hiddenSelector).value = client.id;
 }
 
 function syncOperationType() {
@@ -5957,9 +10617,9 @@ async function saveOperation(event) {
     tipo: $("#operation-type").value,
     ventaAnticipada: $("#operation-anticipated").checked,
     destino: $("#operation-destination").value,
-    vendedorId: $("#operation-seller-id").value,
-    compradorId: $("#operation-buyer-id").value,
-    consignatariaId: $("#operation-consignee-id").value,
+    vendedorId: $("#operation-seller-id").value || $("#operation-seller-name").dataset.clientId || "",
+    compradorId: $("#operation-buyer-id").value || $("#operation-buyer-name").dataset.clientId || "",
+    consignatariaId: $("#operation-consignee-id").value || $("#operation-consignee-name").dataset.clientId || "",
     calculoFrigorificoComp: $("#operation-frigo-mode").value,
     renspaOrigen: originManual || $("#operation-renspa-origin-select").value,
     renspaDestino: destinationManual || $("#operation-renspa-destination-select").value,
@@ -6002,7 +10662,7 @@ function syncBuyerDiff() {
 function resetSaleLineForm() {
   state.editingSaleLineId = "";
   $("#sale-form").reset();
-  $("#sale-line-save").textContent = "Agregar linea";
+  setSaleLineSaveText("Agregar linea");
   $("#sale-line-cancel-edit").hidden = true;
   $("#sale-category-suggestions").hidden = true;
   $("#sale-category-suggestions").innerHTML = "";
@@ -6042,7 +10702,7 @@ function fillSaleLineForm(line) {
   $("#sale-final-price-manual-comp").value = line.precioFinalManualComp || "";
   $("#sale-amount-manual-comp").value = line.importeManualComp || "";
 
-  $("#sale-line-save").textContent = "Guardar cambios";
+  setSaleLineSaveText("Guardar cambios");
   $("#sale-line-cancel-edit").hidden = false;
   syncSaleMode();
   syncBuyerDiff();
@@ -6053,7 +10713,7 @@ function fillSaleLineForm(line) {
 
 async function deleteSaleLine(lineId) {
   if (!state.selectedOperationId || !lineId) return;
-  const confirmed = window.confirm("Se quitara solo esta linea de venta. La operacion queda cargada. Â¿Continuar?");
+  const confirmed = window.confirm("Se quitará sólo esta línea de venta. La operación queda cargada. ¿Continuar?");
   if (!confirmed) return;
   setSaleMessage("Quitando linea...");
   try {
@@ -6110,7 +10770,7 @@ async function savePartialBilling() {
 
 async function deletePartialBilling(lineId) {
   if (!state.selectedOperationId || !lineId) return;
-  const confirmed = window.confirm("Se quitara este parcial y su movimiento de cuenta corriente si tenia impacto. Â¿Continuar?");
+  const confirmed = window.confirm("Se quitará este parcial y su movimiento de cuenta corriente si tenía impacto. ¿Continuar?");
   if (!confirmed) return;
   try {
     await fetchJson(`/api/operaciones/${encodeURIComponent(state.selectedOperationId)}/facturacion-parcial/${encodeURIComponent(lineId)}`, {
@@ -6195,28 +10855,37 @@ async function saveLiquidation(event) {
     return;
   }
   setLiquidationMessage("Guardando liquidacion...");
+  syncLiquidationFacturadoFromCashPercent();
+  const calc = calculateLiquidationPreview();
+  const percentageCashMode = String($("#liq-cash-mode")?.value || "").toUpperCase() === "PORCENTAJE";
   const payload = {
-    importeFacturado: parseMoneyInput($("#liq-facturado").value),
-    importeFacturadoManual: Boolean(state.liquidationFacturadoTouched),
+    importeFacturado: percentageCashMode ? calc.facturado : parseMoneyInput($("#liq-facturado").value),
+    importeFacturadoManual: percentageCashMode ? false : Boolean(state.liquidationFacturadoTouched),
     comprobanteProd: $("#liq-comprobante-prod").value,
     comprobanteComp: $("#liq-comprobante-comp").value,
     ivaProd: parseMoneyInput($("#liq-iva-prod").value),
     ivaProdManual: Boolean(state.liquidationIvaProdTouched),
     ivaComp: parseMoneyInput($("#liq-iva-comp").value),
     ivaCompManual: Boolean(state.liquidationIvaCompTouched),
-    efectivoProd: normalizeFrigorificoCashInput(parseMoneyInput($("#liq-efectivo-prod").value)),
-    efectivoComp: isFrigorificoIvaOperation() ? getFrigorificoCalc().efectivoComp : parseMoneyInput($("#liq-efectivo-comp").value),
+    efectivoProd: isAnticipatedOperation() ? 0 : calc.efectivoProd,
+    efectivoComp: isAnticipatedOperation() ? 0 : calc.efectivoComp,
+    efectivoProdManual: Boolean(state.liquidationCashProdTouched),
+    efectivoProdTratamiento: $("#liq-cash-prod-treatment").value,
+    efectivoCompManual: Boolean(state.liquidationCashCompTouched),
+    efectivoManualVersion: 1,
     comisionFacturadoProd: parseMoneyInput($("#liq-comision-fact-prod").value),
+    comisionFacturadoProdBaseModo: sellerCommissionBaseMode(),
+    comisionFacturadoProdBase: sellerCommissionBaseAmount(calc.facturado),
     comisionFacturadoComp: parseMoneyInput($("#liq-comision-fact-comp").value),
     comisionEfectivoProd: parseMoneyInput($("#liq-comision-efect-prod").value),
     comisionEfectivoComp: parseMoneyInput($("#liq-comision-efect-comp").value),
     aplicaComisionFacturadoProd: isCommissionEnabled("#liq-comision-fact-prod-enabled"),
     aplicaComisionFacturadoComp: isCommissionEnabled("#liq-comision-fact-comp-enabled"),
-    aplicaComisionEfectivoProd: isCommissionEnabled("#liq-comision-efect-prod-enabled"),
+    aplicaComisionEfectivoProd: !sellerCashIsCommissionAdjustment() && isCommissionEnabled("#liq-comision-efect-prod-enabled"),
     aplicaComisionEfectivoComp: isCommissionEnabled("#liq-comision-efect-comp-enabled"),
     comisionFacturadoProdPct: commissionPercent("#liq-comision-fact-prod-enabled", "#liq-comision-fact-prod-pct"),
     comisionFacturadoCompPct: commissionPercent("#liq-comision-fact-comp-enabled", "#liq-comision-fact-comp-pct"),
-    comisionEfectivoProdPct: commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct"),
+    comisionEfectivoProdPct: sellerCashIsCommissionAdjustment() ? 0 : commissionPercent("#liq-comision-efect-prod-enabled", "#liq-comision-efect-prod-pct"),
     comisionEfectivoCompPct: commissionPercent("#liq-comision-efect-comp-enabled", "#liq-comision-efect-comp-pct"),
     liquidacionConsignatariaA: $("#liq-consignee-settled-party").value,
     efectivoModo: $("#liq-cash-mode").value,
@@ -6378,8 +11047,8 @@ function printReportParty(party) {
     .report-table th,.report-table td{border:1px solid #cbd7d4;padding:3px 4px;text-align:left;vertical-align:top}
     .report-total{background:#edf3f1;font-weight:bold}.seller-net{background:#eaf2ff}.buyer-net{background:#fff0e6}
     button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:6mm}body{margin:0}button{display:none}}
-  </style></head><body>${clone.outerHTML}<button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
-  popup.document.close();
+  </style></head><body>${clone.outerHTML}<button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
+  finishPrintPopup(popup);
   popup.focus();
 }
 
@@ -6408,8 +11077,8 @@ function printReportSheet() {
     .report-table th,.report-table td{border:1px solid #cbd7d4;padding:3px 4px;text-align:left;vertical-align:top}
     .report-total{background:#edf3f1;font-weight:bold}.seller-net{background:#eaf2ff}.buyer-net{background:#fff0e6}
     button{margin-top:14px;padding:8px 12px}@media print{@page{size:A4 portrait;margin:6mm}body{margin:0}button{display:none}}
-  </style></head><body>${clone.innerHTML}<button onclick="window.print()">Imprimir / guardar PDF</button></body></html>`);
-  popup.document.close();
+  </style></head><body>${clone.innerHTML}<button type="button" data-print-popup>Imprimir / guardar PDF</button></body></html>`);
+  finishPrintPopup(popup);
   popup.focus();
 }
 
@@ -6504,7 +11173,7 @@ function renderReport() {
 
   const sellerDueRows = dueRows([
     { title: "Liquidacion / facturado", plan: $("#liq-plan-fact-prod").value, base: calc.netoLiquidacionProd },
-    { title: "Efectivo", plan: $("#liq-plan-cash-prod").value, base: calc.cashWithIvaProd - calc.cashExpenseProd }
+    { title: sellerComplementaryAmountLabel(), plan: $("#liq-plan-cash-prod").value, base: calc.cashWithIvaProd - calc.cashExpenseProd }
   ]);
   const buyerDueRows = dueRows([
     { title: "Liquidacion / facturado", plan: $("#liq-plan-fact-comp").value, base: calc.netoLiquidacionComp },
@@ -6639,7 +11308,7 @@ function renderReport() {
       <tr><th>Importe facturado</th><td>${moneyValue(calc.facturado)}</td><th>IVA liquidacion</th><td>${moneyValue(calc.ivaProd)}</td></tr>
     </tbody></table></div>
     ${sellerExpensesReport}
-    ${calc.comFactProd ? `<div class="report-line"><span>Comision sobre facturado</span><strong>${moneyValue(calc.comFactProd)}</strong></div>` : ""}
+    ${calc.comFactProd ? `<div class="report-line"><span>${sellerCashIsCommissionAdjustment() ? "Comision total sobre base seleccionada" : "Comision sobre facturado"}</span><strong>${moneyValue(calc.comFactProd)}</strong></div>` : ""}
     <div class="report-net seller-net"><span>NETO LIQUIDACION</span><strong>${moneyValue(calc.netoLiquidacionProd)}</strong></div>
   `;
   const buyerLiquidationSummary = hasPartialBilling ? `
@@ -6695,8 +11364,10 @@ function renderReport() {
         ${frigoReport}
         ${hasPartialBilling ? "" : dueReport(sellerDueRows)}
         ${sellerLiquidationSummary}
-        ${calc.efectivoProd || calc.cashExpenseProd || calc.comEfProd ? `<div class="report-section"><h3>Efectivo</h3><table class="report-table"><tbody>
-          <tr><th>${frigoCalc ? "Efectivo + IVA" : "Efectivo"}</th><td>${moneyValue(frigoCalc ? calc.cashWithIvaProd : calc.efectivoProd)}</td><th></th><td></td></tr>
+        ${calc.efectivoProd || calc.cashExpenseProd || calc.comEfProd ? `<div class="report-section"><h3>${escapeHtml(sellerComplementaryAmountLabel())}</h3><table class="report-table"><tbody>
+          <tr><th>${sellerCashIsCommissionAdjustment() ? "Diferencia reconocida al vendedor" : frigoCalc ? "Efectivo + IVA" : "Efectivo"}</th><td>${moneyValue(frigoCalc ? calc.cashWithIvaProd : calc.efectivoProd)}</td><th>${sellerCashIsCommissionAdjustment() ? "Tratamiento" : ""}</th><td>${sellerCashIsCommissionAdjustment() ? "A compensar con la comision de la consignataria" : ""}</td></tr>
+          ${sellerCashIsCommissionAdjustment() ? `<tr><th>Base de comision</th><td>${moneyValue(calc.sellerCommissionBase)}</td><th>Comision total</th><td>${moneyValue(calc.comFactProd)}</td></tr>
+          <tr><th>Ajuste aplicado</th><td>${moneyValue(calc.sellerAdjustmentApplied)}</td><th>Diferencia a facturar</th><td>${moneyValue(calc.sellerCommissionToInvoice)}</td></tr>` : ""}
           ${calc.cashExpenseProd ? `<tr><th>Gasto descontado efectivo</th><td>${moneyValue(calc.cashExpenseProd)}</td><th>Concepto</th><td>${escapeHtml($("#liq-cash-exp-concept-prod").value || "-")}</td></tr>` : ""}
         ${calc.comEfProd ? `<tr><th>Comision sobre efectivo</th><td>${moneyValue(calc.comEfProd)}</td><th></th><td></td></tr>` : ""}
         </tbody></table></div>` : ""}
@@ -6724,8 +11395,11 @@ function renderReport() {
 
 function resetClientForm() {
   $("#client-form").reset();
+  $all("#client-type option[data-existing-client-type]").forEach((option) => option.remove());
+  $("#client-type").value = "Cliente";
   $("#client-id").value = "";
   state.selectedClientId = "";
+  resetRenspaForm();
   $("#client-form-title").textContent = "Nuevo cliente";
   $("#client-cancel").hidden = true;
   $("#renspa-panel").hidden = true;
@@ -6739,6 +11413,31 @@ function resetClientForm() {
   setRenspaMessage("");
 }
 
+function setExistingClientType(value) {
+  const select = $("#client-type");
+  const type = String(value || "Cliente").trim() || "Cliente";
+  $all("#client-type option[data-existing-client-type]").forEach((option) => option.remove());
+  const existing = Array.from(select.options).some((option) => option.value === type);
+  if (!existing) {
+    const option = document.createElement("option");
+    option.value = type;
+    option.textContent = type;
+    option.dataset.existingClientType = "1";
+    select.appendChild(option);
+  }
+  select.value = type;
+}
+
+function resetRenspaForm() {
+  state.editingRenspa = "";
+  $("#renspa-name").value = "";
+  $("#renspa-value").value = "";
+  $("#renspa-value").disabled = false;
+  $("#renspa-notes").value = "";
+  $("#renspa-add").textContent = "Agregar RENSPA";
+  $("#renspa-cancel").hidden = true;
+}
+
 async function loadRenspas(clientId) {
   if (!clientId) return;
   const response = await fetchJson(`/api/clientes/${encodeURIComponent(clientId)}/establecimientos`);
@@ -6749,19 +11448,47 @@ async function loadRenspas(clientId) {
           <strong>${escapeHtml(item.renspa)}</strong>
           <span>${escapeHtml(item.nombre || "Establecimiento")}</span>
           ${item.observaciones ? `<span>${escapeHtml(item.observaciones)}</span>` : ""}
+          ${state.usuario?.rol === "CONSULTA" ? "" : `<div class="renspa-actions"><button type="button" class="small-button" data-renspa-edit="${escapeHtml(item.renspa)}" data-renspa-name="${escapeHtml(item.nombre || "")}" data-renspa-notes="${escapeHtml(item.observaciones || "")}">Modificar</button><button type="button" class="small-button danger-button" data-renspa-delete="${escapeHtml(item.renspa)}">Dar de baja</button></div>`}
         </div>
       `).join("")
     : `<div class="renspa-item"><span>Sin RENSPA asociados todavia.</span></div>`;
+}
+
+function editRenspaFromButton(button) {
+  state.editingRenspa = button.dataset.renspaEdit || "";
+  $("#renspa-name").value = button.dataset.renspaName || "";
+  $("#renspa-value").value = state.editingRenspa;
+  $("#renspa-value").disabled = false;
+  $("#renspa-notes").value = button.dataset.renspaNotes || "";
+  $("#renspa-add").textContent = "Guardar cambios";
+  $("#renspa-cancel").hidden = false;
+  setRenspaMessage("Editando RENSPA existente.");
+}
+
+async function deleteRenspa(renspa) {
+  if (!state.selectedClientId || !renspa) return;
+  const confirmed = window.confirm(`¿Dar de baja el RENSPA ${renspa}? No se elimina de operaciones ya cargadas, sólo deja de figurar como vigente en la ficha del cliente.`);
+  if (!confirmed) return;
+  setRenspaMessage("Dando de baja...");
+  try {
+    await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}/establecimientos/${encodeURIComponent(renspa)}`, { method: "DELETE" });
+    if (state.editingRenspa === renspa) resetRenspaForm();
+    await loadRenspas(state.selectedClientId);
+    setRenspaMessage("RENSPA dado de baja correctamente.", "ok");
+  } catch (error) {
+    setRenspaMessage(error.message, "error");
+  }
 }
 
 async function editClient(clientId) {
   const client = state.clientes.find((item) => String(item.id) === String(clientId));
   if (!client) return;
   state.selectedClientId = client.id;
+  $("#client-search").value = client.nombre || "";
   $("#client-id").value = client.id;
   $("#client-name").value = client.nombre || "";
   $("#client-cuit").value = client.cuit || "";
-  $("#client-type").value = client.tipo || "Cliente";
+  setExistingClientType(client.tipo);
   $("#client-notes").value = client.observaciones || "";
   $("#client-name-suggestions").hidden = true;
   $("#client-name-suggestions").innerHTML = "";
@@ -6772,6 +11499,7 @@ async function editClient(clientId) {
   $("#client-maintenance-message").textContent = "";
   $("#client-merge-target").value = "";
   populateClientMergeTargets();
+  renderClientes();
   setClientMessage("Editando cliente existente.");
   setRenspaMessage("");
   await loadRenspas(client.id);
@@ -6793,7 +11521,7 @@ async function applyClientMaintenance() {
       if (!targetName || !target) {
         throw new Error("Indique el cliente correcto de destino.");
       }
-      const confirmed = window.confirm(`Se fusionara "${currentName}" dentro de "${target.nombre}". Las operaciones y cuenta corriente pasaran al cliente correcto. Â¿Continuar?`);
+      const confirmed = window.confirm(`Se fusionará "${currentName}" dentro de "${target.nombre}". Las operaciones y cuenta corriente pasarán al cliente correcto. ¿Continuar?`);
       if (!confirmed) return;
       await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}/fusionar`, {
         method: "POST",
@@ -6801,7 +11529,7 @@ async function applyClientMaintenance() {
       });
       $("#client-search").value = target.nombre;
     } else {
-      const confirmed = window.confirm(`Se intentara eliminar "${currentName}". Solo se permite si no tiene operaciones ni movimientos. Â¿Continuar?`);
+      const confirmed = window.confirm(`Se intentará eliminar "${currentName}". Sólo se permite si no tiene operaciones ni movimientos. ¿Continuar?`);
       if (!confirmed) return;
       await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}`, { method: "DELETE" });
       $("#client-search").value = "";
@@ -6829,15 +11557,26 @@ async function applyClientMaintenance() {
 
 async function saveClient(event) {
   event.preventDefault();
-  setClientMessage("Guardando...");
-
   const id = $("#client-id").value;
+  const editingClient = id
+    ? state.clientes.find((client) => String(client.id) === String(id))
+    : null;
   const payload = {
     nombre: $("#client-name").value,
     cuit: $("#client-cuit").value,
     tipo: $("#client-type").value,
     observaciones: $("#client-notes").value
   };
+
+  if (editingClient && normalizeSearch(editingClient.nombre) !== normalizeSearch(payload.nombre)) {
+    const confirmed = window.confirm(`Está por cambiar la razón social de "${editingClient.nombre}" a "${payload.nombre}". Las operaciones y la cuenta corriente asociadas a este cliente conservarán el vínculo con el nuevo nombre.\n\n¿Confirma este cambio?`);
+    if (!confirmed) {
+      setClientMessage("Cambio de razón social cancelado. El cliente no fue modificado.", "error");
+      return;
+    }
+  }
+
+  setClientMessage("Guardando...");
 
   try {
     const saved = await fetchJson(id ? `/api/clientes/${encodeURIComponent(id)}` : "/api/clientes", {
@@ -6846,10 +11585,12 @@ async function saveClient(event) {
     });
     const clientes = await fetchJson("/api/clientes");
     state.clientes = clientes.items || [];
+    const savedName = saved.item.nombre || payload.nombre;
+    $("#client-search").value = savedName;
+    resetClientForm();
     renderMetrics();
     renderClientes();
-    await editClient(saved.item.id);
-    setClientMessage("Cliente guardado correctamente.", "ok");
+    setClientMessage("Cliente guardado correctamente. El formulario quedó listo para una nueva carga.", "ok");
   } catch (error) {
     setClientMessage(error.message, "error");
   }
@@ -6862,19 +11603,20 @@ async function addRenspa() {
   }
   setRenspaMessage("Guardando...");
   try {
-    await fetchJson(`/api/clientes/${encodeURIComponent(state.selectedClientId)}/establecimientos`, {
-      method: "POST",
+    const editing = state.editingRenspa;
+    await fetchJson(editing
+      ? `/api/clientes/${encodeURIComponent(state.selectedClientId)}/establecimientos/${encodeURIComponent(editing)}`
+      : `/api/clientes/${encodeURIComponent(state.selectedClientId)}/establecimientos`, {
+      method: editing ? "PUT" : "POST",
       body: JSON.stringify({
         nombre: $("#renspa-name").value,
         renspa: $("#renspa-value").value,
         observaciones: $("#renspa-notes").value
       })
     });
-    $("#renspa-name").value = "";
-    $("#renspa-value").value = "";
-    $("#renspa-notes").value = "";
+    resetRenspaForm();
     await loadRenspas(state.selectedClientId);
-    setRenspaMessage("RENSPA agregado correctamente.", "ok");
+    setRenspaMessage(editing ? "RENSPA actualizado correctamente." : "RENSPA agregado correctamente.", "ok");
   } catch (error) {
     setRenspaMessage(error.message, "error");
   }
@@ -6924,10 +11666,11 @@ async function init() {
     renderWeightCalculator();
   });
   ["#period-type-filter", "#period-destination-filter", "#period-category-filter", "#period-client-filter"].forEach((selector) => {
-    $(selector).addEventListener("input", renderPeriodStats);
+    $(selector).addEventListener("input", schedulePeriodStats);
     $(selector).addEventListener("change", renderPeriodStats);
   });
-  ["#operation-search-from", "#operation-search-to", "#operation-search-client", "#operation-search-type", "#operation-search-category", "#operation-search-text"].forEach((selector) => {
+  ["#operation-search-from", "#operation-search-to", "#operation-search-client", "#operation-search-type", "#operation-search-category", "#operation-search-status", "#operation-search-text"].forEach((selector) => {
+    $(selector).addEventListener("input", scheduleOperationSearch);
     $(selector).addEventListener("change", renderOperationSearch);
   });
   $("#commissionist-load").addEventListener("click", loadCommissionistOperations);
@@ -6936,22 +11679,27 @@ async function init() {
   $("#commissionist-percent").addEventListener("input", renderCommissionistRows);
   $("#commissionist-client").addEventListener("input", renderCommissionistStatus);
   $("#commissionist-client").addEventListener("change", renderCommissionistStatus);
-  $("#commissionist-body").addEventListener("change", (event) => {
-    const checkbox = event.target.closest("[data-commissionist-row]");
-    const invoiceCheckbox = event.target.closest("[data-commissionist-invoice-row]");
-    if (!checkbox && !invoiceCheckbox) return;
-    if (checkbox) {
-      const row = state.commissionistRows.find((item) => String(item.id) === String(checkbox.dataset.commissionistRow));
-      if (row && !row.noGenerate) row.selected = checkbox.checked;
+  $("#commissionist-body").addEventListener("change", handleCommissionistSelectionChange);
+  $("#commissionist-invoice-body").addEventListener("change", handleCommissionistSelectionChange);
+  $("#commissionist-status-body").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-commissionist-status-delete]");
+    if (!button) return;
+    const confirmed = window.confirm("Se anulara/eliminara este movimiento de cuenta corriente del comisionista. Si tiene pagos imputados, el sistema no lo va a permitir. ¿Continuar?");
+    if (!confirmed) return;
+    try {
+      await fetchJson(`/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(button.dataset.commissionistStatusDelete)}`, { method: "DELETE" });
+      await reloadCurrentAccount();
+      renderCommissionistStatus();
+      await loadCommissionistOperations();
+      $("#commissionist-message").textContent = "Movimiento de comision anulado correctamente.";
+      $("#commissionist-message").className = "form-message ok";
+    } catch (error) {
+      $("#commissionist-message").textContent = error.message;
+      $("#commissionist-message").className = "form-message error";
     }
-    if (invoiceCheckbox) {
-      const row = state.commissionistRows.find((item) => String(item.id) === String(invoiceCheckbox.dataset.commissionistInvoiceRow));
-      if (row && row.invoiceCandidate) row.invoiceSelected = invoiceCheckbox.checked;
-    }
-    renderCommissionistRows();
   });
 
-  $("#client-search").addEventListener("input", renderClientes);
+  $("#client-search").addEventListener("input", handleClientSearchInput);
   $("#client-show-all").addEventListener("click", () => {
     state.showAllClients = !state.showAllClients;
     renderClientes();
@@ -6961,6 +11709,7 @@ async function init() {
   $("#operation-buyer-name").addEventListener("input", () => renderPartySuggestions("#operation-buyer-name", "#operation-buyer-suggestions", "#operation-buyer-id"));
   $("#operation-consignee-name").addEventListener("input", () => renderPartySuggestions("#operation-consignee-name", "#operation-consignee-suggestions", "#operation-consignee-id"));
   $("#cc-client-search").addEventListener("input", renderCuentaCorriente);
+  $("#cc-keyword-filter")?.addEventListener("input", renderCuentaCorriente);
   $("#cc-view-mode").addEventListener("change", () => {
     const label = document.querySelector("label:has(#cc-client-search)");
     if (label) {
@@ -6971,17 +11720,25 @@ async function init() {
   });
   $("#cc-status-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-concept-filter").addEventListener("change", renderCuentaCorriente);
+  $("#cc-operation-type-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-due-filter").addEventListener("change", renderCuentaCorriente);
   $("#cc-date-from").addEventListener("change", renderCuentaCorriente);
   $("#cc-date-to").addEventListener("change", renderCuentaCorriente);
+  $("#cc-associated-account-filter")?.addEventListener("input", renderCuentaCorriente);
+  $("#cc-origin-type-filter")?.addEventListener("input", renderCuentaCorriente);
   $("#cc-due-date-from").addEventListener("change", renderCuentaCorriente);
   $("#cc-due-date-to").addEventListener("change", renderCuentaCorriente);
+  $("#cc-commission-invoice-save")?.addEventListener("click", generateClientCommissionInvoice);
+  $("#cc-commission-invoice-body")?.addEventListener("change", (event) => {
+    if (event.target.closest("[data-cc-commission-invoice-row]")) refreshClientCommissionInvoiceSummary();
+  });
   $all("[data-cc-tab]").forEach((button) => {
     button.addEventListener("click", () => setCurrentAccountTab(button.dataset.ccTab));
   });
   $("#cc-print-report").addEventListener("click", () => printCurrentAccountReport());
   $("#cc-print-due-report").addEventListener("click", printCurrentAccountDueReport);
   $("#cc-export-calendar").addEventListener("click", exportCurrentAccountCalendar);
+  $("#cc-export-calendar-csv").addEventListener("click", exportCurrentAccountCalendarCsv);
   $("#cc-calendar-range").addEventListener("change", () => {
     const mode = $("#cc-calendar-range").value;
     const range = calendarRangeDates();
@@ -6990,13 +11747,20 @@ async function init() {
       $("#cc-calendar-to").value = range.to ? dateToInputValue(range.to) : "";
     }
   });
-  $("#dashboard-print-next7").addEventListener("click", () => printCurrentAccountDueReport({ range: "NEXT_7", all: true }));
-  $("#dashboard-print-next-week").addEventListener("click", () => printCurrentAccountDueReport({ range: "NEXT_WEEK", all: true }));
+  $("#dashboard-print-due-range")?.addEventListener("click", () => {
+    const range = getDashboardDueReportRange();
+    printCurrentAccountDueReport({ customRange: range, all: true });
+  });
   $("#cash-form").addEventListener("submit", saveCashMovement);
   $("#cash-clear").addEventListener("click", resetCashForm);
   $("#cash-print").addEventListener("click", printCashReport);
   $("#cash-amount").addEventListener("focus", (event) => unformatMoneyInput(event.target));
   $("#cash-amount").addEventListener("blur", (event) => formatMoneyInput(event.target));
+  ["#cash-filter-status", "#cash-filter-source", "#cash-filter-paid-by", "#cash-filter-category"].forEach((selector) => {
+    $(selector)?.addEventListener("input", renderCajaDiaria);
+    $(selector)?.addEventListener("change", renderCajaDiaria);
+  });
+  $("#cash-clear-filters")?.addEventListener("click", clearCashFilters);
   $all("[data-cash-tab]").forEach((button) => {
     button.addEventListener("click", () => setCashTab(button.dataset.cashTab));
   });
@@ -7020,14 +11784,38 @@ async function init() {
   $("#cash-rec-print").addEventListener("click", () => printCashReconciliationReport());
   $("#cash-rec-summary-print").addEventListener("click", printCashReconciliationSummaryReport);
   $("#cash-rec-app-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-cash-rec-app-edit]");
     const removeButton = event.target.closest("[data-cash-rec-app-remove]");
+    if (editButton) {
+      editCashReconciliationApplication(editButton.dataset.cashRecAppEdit);
+      return;
+    }
     if (!removeButton) return;
+    if (String(editingCashReconciliationApplicationId) === String(removeButton.dataset.cashRecAppRemove)) {
+      editingCashReconciliationApplicationId = "";
+      $("#cash-rec-app-add").textContent = "Agregar aplicacion";
+      $("#cash-rec-app-concept").value = "";
+      $("#cash-rec-app-to").value = "";
+      $("#cash-rec-app-amount").value = "";
+    }
     cashReconciliationApplications = cashReconciliationApplications.filter((item) => item.id !== removeButton.dataset.cashRecAppRemove);
     renderCashReconciliationApplications();
   });
   $("#cash-rec-break-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-cash-rec-break-edit]");
     const removeButton = event.target.closest("[data-cash-rec-break-remove]");
+    if (editButton) {
+      editCashReconciliationBreakdown(editButton.dataset.cashRecBreakEdit);
+      return;
+    }
     if (!removeButton) return;
+    if (String(editingCashReconciliationBreakdownId) === String(removeButton.dataset.cashRecBreakRemove)) {
+      editingCashReconciliationBreakdownId = "";
+      $("#cash-rec-break-add").textContent = "Agregar detalle";
+      $("#cash-rec-break-concept").value = "";
+      $("#cash-rec-break-detail").value = "";
+      $("#cash-rec-break-amount").value = "";
+    }
     cashReconciliationBreakdown = cashReconciliationBreakdown.filter((item) => item.id !== removeButton.dataset.cashRecBreakRemove);
     renderCashReconciliationBreakdown();
   });
@@ -7068,20 +11856,48 @@ async function init() {
     const deleteButton = event.target.closest("[data-document-delete]");
     if (deleteButton) deleteDocument(deleteButton.dataset.documentDelete);
   });
+  $all("[data-fields-tab]").forEach((button) => {
+    button.addEventListener("click", () => showFieldsTab(button.dataset.fieldsTab || "contratos"));
+  });
+  $all("[data-fields-tab-go]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.fieldsTabGo === "nuevo") resetFieldContractForm();
+      showFieldsTab(button.dataset.fieldsTabGo || "contratos");
+    });
+  });
   $("#field-contract-form").addEventListener("submit", saveFieldContract);
-  $("#field-contract-clear").addEventListener("click", resetFieldContractForm);
+  $("#field-contract-clear").addEventListener("click", () => {
+    resetFieldContractForm();
+    showFieldsTab("nuevo");
+  });
   $("#field-contract-use").addEventListener("click", () => useFieldContractInCalculation());
   $("#field-contract-pdf-upload").addEventListener("click", uploadFieldContractPdf);
   $("#field-contract-pdf-open").addEventListener("click", () => openFieldContractPdf());
-  $all("#field-contract-form input, #field-contract-form select, #field-contract-form textarea").forEach((node) => {
-    node.addEventListener("input", syncFieldContractFormToActive);
-    node.addEventListener("change", syncFieldContractFormToActive);
+  $("#field-contract-party-add").addEventListener("click", addFieldContractPartyRow);
+  $("#field-contract-line-add").addEventListener("click", addFieldContractLineRow);
+  $("#field-contract-installment-add").addEventListener("click", addFieldContractInstallmentRow);
+  $("#field-contract-installment-cancel").addEventListener("click", () => {
+    clearFieldContractInstallmentInputs();
+    renderFieldContractInstallmentRows();
+    setFieldContractMessage("Edicion de cuota cancelada.");
   });
+  $all("#field-contract-form input, #field-contract-form select, #field-contract-form textarea").forEach((node) => {
+    node.addEventListener("input", () => {
+      syncFieldContractFormToActive();
+      syncFieldContractRuleMode();
+    });
+    node.addEventListener("change", () => {
+      syncFieldContractFormToActive();
+      syncFieldContractRuleMode();
+    });
+  });
+  syncFieldContractRuleMode();
   $("#field-contract-search").addEventListener("input", renderFieldContractSuggestions);
   $("#field-contract-search").addEventListener("change", () => {
     const item = findFieldContractBySearch();
     if (item) {
       fillFieldContractForm(item);
+      showFieldsTab("nuevo");
       useFieldContractInCalculation(item);
     }
   });
@@ -7093,6 +11909,7 @@ async function init() {
     fillFieldContractForm(item);
     $("#field-contract-suggestions").hidden = true;
     $("#field-contract-suggestions").innerHTML = "";
+    showFieldsTab("nuevo");
     useFieldContractInCalculation(item);
   });
   $("#field-contract-body").addEventListener("click", (event) => {
@@ -7108,22 +11925,140 @@ async function init() {
     const item = (state.fieldContracts || []).find((row) => String(row.id) === String(id));
     if (editButton && item) {
       fillFieldContractForm(item);
+      showFieldsTab("nuevo");
       setFieldContractMessage("Contrato cargado para editar.", "ok");
     }
-    if (useButton && item) useFieldContractInCalculation(item);
+    if (useButton && item) {
+      useFieldContractInCalculation(item);
+      showFieldsTab("calculo");
+    }
     if (docButton) openFieldContractPdf(id);
     if (deleteButton) deleteFieldContract(id);
   });
+  $("#field-contract-party-body").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-contract-party-remove]");
+    if (!button) return;
+    state.fieldContractPartyRows = state.fieldContractPartyRows.filter((item) => String(item.id) !== String(button.dataset.fieldContractPartyRemove));
+    renderFieldContractPartyRows();
+    syncFieldContractFormToActive();
+  });
+  $("#field-contract-line-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-field-contract-line-edit]");
+    const removeButton = event.target.closest("[data-field-contract-line-remove]");
+    if (editButton) {
+      editFieldContractLineRow(editButton.dataset.fieldContractLineEdit);
+      return;
+    }
+    if (!removeButton) return;
+    const removedId = String(removeButton.dataset.fieldContractLineRemove);
+    state.fieldContractLineRows = state.fieldContractLineRows.filter((item) => String(item.id) !== removedId);
+    if (String(state.editingFieldContractLineId) === removedId) clearFieldContractLineInputs();
+    renderFieldContractLineRows();
+    syncFieldContractFormToActive();
+  });
+  $("#field-contract-installment-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-field-contract-installment-edit]");
+    const removeButton = event.target.closest("[data-field-contract-installment-remove]");
+    if (editButton) {
+      editFieldContractInstallmentRow(editButton.dataset.fieldContractInstallmentEdit);
+      return;
+    }
+    if (!removeButton) return;
+    const removedId = String(removeButton.dataset.fieldContractInstallmentRemove);
+    state.fieldContractInstallmentRows = state.fieldContractInstallmentRows.filter((item) => String(item.id) !== removedId);
+    if (String(state.editingFieldContractInstallmentId) === removedId) clearFieldContractInstallmentInputs();
+    renderFieldContractInstallmentRows();
+    syncFieldContractFormToActive();
+  });
   $("#field-lease-form").addEventListener("submit", saveFieldLease);
   $("#field-lease-clear").addEventListener("click", resetFieldLeaseForm);
-  $("#field-lease-print").addEventListener("click", printCurrentFieldLeaseReport);
+  $("#field-lease-print-general")?.addEventListener("click", () => printCurrentFieldLeaseReport("GENERAL"));
+  $("#field-lease-receipt-landlord")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDADOR"));
+  $("#field-lease-receipt-tenant")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDATARIO"));
+  $("#field-receipt-tab-landlord")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDADOR"));
+  $("#field-receipt-tab-tenant")?.addEventListener("click", () => printCurrentFieldLeaseReceipt("ARRENDATARIO"));
   $("#field-quote-add").addEventListener("click", addFieldQuoteRow);
+  $("#field-quote-cancel")?.addEventListener("click", () => {
+    clearFieldQuoteInputs();
+    renderFieldQuoteRows();
+    setFieldLeaseMessage("Edicion de cotizacion cancelada.");
+  });
+  $("#field-payment-preset-add")?.addEventListener("click", addSelectedFieldLeasePresetPayments);
+  $("#field-payment-preset-body")?.addEventListener("change", (event) => {
+    if (event.target.closest("[data-field-payment-preset]")) updateSelectedFieldLeasePresetPaymentAmount();
+  });
+  $("#field-payment-add").addEventListener("click", addFieldLeasePaymentRow);
+  $("#field-payment-commission-register")?.addEventListener("click", addFieldLeaseCommissionRow);
+  $("#field-adjustment-add")?.addEventListener("click", addFieldLeaseAdjustmentRow);
+  ["#field-adjustment-original-amount", "#field-adjustment-new-amount", "#field-adjustment-original-commission", "#field-adjustment-new-commission"].forEach((selector) => {
+    $(selector)?.addEventListener("input", syncFieldLeaseAdjustmentDifference);
+    $(selector)?.addEventListener("change", syncFieldLeaseAdjustmentDifference);
+  });
+  $("#field-payment-commission-mode")?.addEventListener("change", syncFieldPaymentCommissionMode);
+  $("#field-payment-commission-add")?.addEventListener("change", () => syncFieldPaymentCommissionShortcut("ADD"));
+  $("#field-payment-commission-deduct")?.addEventListener("change", () => syncFieldPaymentCommissionShortcut("DEDUCT"));
   $("#field-quote-body").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-field-quote-remove]");
-    if (!button) return;
-    state.fieldQuoteRows = state.fieldQuoteRows.filter((item) => String(item.id) !== String(button.dataset.fieldQuoteRemove));
+    const editButton = event.target.closest("[data-field-quote-edit]");
+    if (editButton) {
+      editFieldQuoteRow(editButton.dataset.fieldQuoteEdit);
+      return;
+    }
+    const removeButton = event.target.closest("[data-field-quote-remove]");
+    if (!removeButton) return;
+    const removedId = String(removeButton.dataset.fieldQuoteRemove);
+    state.fieldQuoteRows = state.fieldQuoteRows.filter((item) => String(item.id) !== removedId);
+    if (String(state.editingFieldQuoteId) === removedId) clearFieldQuoteInputs();
     renderFieldQuoteRows();
     syncFieldQuoteAverageToPrice();
+    updateFieldLeasePreview();
+  });
+  $("#field-payment-body").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-payment-remove]");
+    if (!button) return;
+    state.fieldLeasePaymentRows = state.fieldLeasePaymentRows.filter((item) => String(item.id) !== String(button.dataset.fieldPaymentRemove));
+    updateFieldLeasePreview();
+  });
+  $("#field-adjustment-body")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-adjustment-remove]");
+    if (!button) return;
+    state.fieldLeaseAdjustmentRows = state.fieldLeaseAdjustmentRows.filter((item) => String(item.id) !== String(button.dataset.fieldAdjustmentRemove));
+    renderFieldLeaseAdjustmentRows();
+  });
+  $("#field-lease-party-distribution-body")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-party-receipt]");
+    if (!button) return;
+    printCurrentFieldLeasePartyReceipt(button.dataset.fieldPartyReceipt || "");
+  });
+  $("#field-party-receipts-body")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-field-party-receipt]");
+    if (!button) return;
+    printCurrentFieldLeasePartyReceipt(button.dataset.fieldPartyReceipt || "");
+  });
+  $("#field-line-quote-body")?.addEventListener("input", (event) => {
+    if (!event.target.closest("[data-field-line-quote]")) return;
+    updateFieldLeasePreview();
+  });
+  $("#field-product-quote-body")?.addEventListener("input", (event) => {
+    const input = event.target.closest("[data-field-product-quote]");
+    if (!input) return;
+    const product = String(input.dataset.fieldProductQuote || "");
+    if (parseMoneyInput(input.value || 0)) fieldLeaseManualProductQuoteKeys.add(product);
+    else fieldLeaseManualProductQuoteKeys.delete(product);
+    const body = $("#field-line-quote-body");
+    if (body) body.dataset.signature = "";
+    updateFieldLeasePreview();
+  });
+  $("#field-product-quote-body")?.addEventListener("change", (event) => {
+    if (!event.target.closest("[data-field-product-quote-unit]")) return;
+    const body = $("#field-line-quote-body");
+    if (body) body.dataset.signature = "";
+    updateFieldLeasePreview();
+  });
+  $("#field-lease-installment").addEventListener("change", () => {
+    const selected = selectedFieldLeaseInstallment();
+    if (selected?.vencimiento && $("#field-lease-due-date")) {
+      $("#field-lease-due-date").value = formatDateForInput(selected.vencimiento);
+    }
     updateFieldLeasePreview();
   });
   $all("#field-lease-form input, #field-lease-form select, #field-lease-form textarea").forEach((node) => {
@@ -7133,6 +12068,7 @@ async function init() {
   $("#field-lease-body").addEventListener("click", (event) => {
     const openButton = event.target.closest("[data-field-lease-open]");
     const printButton = event.target.closest("[data-field-lease-print]");
+    const receiptButton = event.target.closest("[data-field-lease-receipt]");
     const deleteButton = event.target.closest("[data-field-lease-delete]");
     if (openButton) {
       const item = (state.fieldLeases || []).find((row) => row.id === openButton.dataset.fieldLeaseOpen);
@@ -7140,9 +12076,45 @@ async function init() {
     }
     if (printButton) {
       const item = (state.fieldLeases || []).find((row) => row.id === printButton.dataset.fieldLeasePrint);
-      if (item) printFieldLeaseReport(item);
+      if (item) printFieldLeaseReport(item, printButton.dataset.fieldLeaseAudience || "INTERNO");
+    }
+    if (receiptButton) {
+      const item = (state.fieldLeases || []).find((row) => row.id === receiptButton.dataset.fieldLeaseReceipt);
+      if (item) printFieldLeaseReceipt(item, receiptButton.dataset.fieldLeaseReceiptRole || "ARRENDADOR");
+    }
+    const partyReceiptButton = event.target.closest("[data-field-lease-party-receipt]");
+    if (partyReceiptButton) {
+      const item = (state.fieldLeases || []).find((row) => row.id === partyReceiptButton.dataset.fieldLeasePartyReceipt);
+      if (item) printFieldLeaseReceipt(item, "ARRENDADOR", partyReceiptButton.dataset.fieldPartyKey || "");
     }
     if (deleteButton) deleteFieldLease(deleteButton.dataset.fieldLeaseDelete);
+  });
+  $("#field-due-refresh")?.addEventListener("click", () => {
+    loadFieldModuleData(true).catch((error) => {
+      const node = $("#field-due-message");
+      if (!node) return;
+      node.textContent = error.message;
+      node.className = "form-message error";
+    });
+  });
+  ["#field-due-from", "#field-due-to", "#field-due-status", "#field-due-search"].forEach((selector) => {
+    $(selector)?.addEventListener("input", renderFieldDueAgenda);
+    $(selector)?.addEventListener("change", renderFieldDueAgenda);
+  });
+  $("#field-due-body")?.addEventListener("click", (event) => {
+    const openButton = event.target.closest("[data-field-due-open]");
+    const calcButton = event.target.closest("[data-field-due-calc]");
+    if (openButton) {
+      const item = (state.fieldLeases || []).find((row) => String(row.id) === String(openButton.dataset.fieldDueOpen));
+      if (item) fillFieldLeaseForm(item);
+    }
+    if (calcButton) {
+      openFieldDueCalculation(
+        calcButton.dataset.fieldDueCalc || "",
+        calcButton.dataset.fieldDueDate || "",
+        calcButton.dataset.fieldDueInstallment || ""
+      );
+    }
   });
   $("#cc-open-external").addEventListener("click", () => openCurrentAccountPanel("#cc-external-panel"));
   $("#cc-close-external").addEventListener("click", () => {
@@ -7154,9 +12126,19 @@ async function init() {
   $("#cc-external-multiple-due").addEventListener("change", toggleExternalDuePanel);
   $("#cc-external-due-add").addEventListener("click", addExternalDueRow);
   $("#cc-external-due-body").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-cc-edit-external-due]");
+    if (editButton) {
+      editExternalDueRow(editButton.dataset.ccEditExternalDue);
+      return;
+    }
     const button = event.target.closest("[data-cc-remove-external-due]");
     if (!button) return;
     state.externalDueRows = state.externalDueRows.filter((item) => item.id !== button.dataset.ccRemoveExternalDue);
+    if (state.editingExternalDueRowId === button.dataset.ccRemoveExternalDue) {
+      state.editingExternalDueRowId = "";
+      $("#cc-external-due-add").textContent = "Agregar vencimiento";
+      setMoneyInput("#cc-external-due-amount", 0);
+    }
     renderExternalDueRows();
   });
   $("#cc-external-amount").addEventListener("input", renderExternalDueRows);
@@ -7170,9 +12152,11 @@ async function init() {
   $("#cc-save-payment-receipt").addEventListener("click", () => saveCurrentAccountPayment(true));
   $("#cc-payment-client").addEventListener("input", () => {
     renderCurrentAccountImputations();
+    if ($("#cc-payment-type").value === "FONDO") renderFundSourceOptions();
     renderCompensationBalancePreview();
   });
   $("#cc-comp-origin").addEventListener("change", renderCompensationBalancePreview);
+  $("#cc-fund-source").addEventListener("change", syncSelectedFundSource);
   $("#cc-payment-type").addEventListener("change", () => {
     $("#cc-counterparty-type").value = $("#cc-payment-type").value === "PAGO" ? "COBRO" : "PAGO";
     syncCurrentAccountPaymentMode();
@@ -7186,6 +12170,7 @@ async function init() {
   $("#cc-counterparty-client").addEventListener("input", renderCurrentAccountCounterpartyImputations);
   $("#cc-counterparty-type").addEventListener("change", renderCurrentAccountCounterpartyImputations);
   $("#cc-add-instrument").addEventListener("click", addCurrentAccountInstrument);
+  $("#cc-instrument-method").addEventListener("change", toggleCurrentAccountDollarInstrumentFields);
   $("#cc-instrument-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-cc-remove-instrument]");
     if (!button) return;
@@ -7199,7 +12184,26 @@ async function init() {
   $("#cc-counterparty-body").addEventListener("change", (event) => {
     if (event.target.matches("[data-cc-counterparty-impute]")) refreshCounterpartyImputationSummary();
   });
+  $("#cc-funds-summary-body").addEventListener("click", async (event) => {
+    const receiptButton = event.target.closest("[data-cc-fund-receipt]");
+    if (receiptButton) {
+      const payment = (state.cuenta.pagos || []).find((item) => item.id === receiptButton.dataset.ccFundReceipt);
+      if (payment) printCurrentAccountReceipt(payment);
+      return;
+    }
+    const cancelButton = event.target.closest("[data-cc-fund-cancel]");
+    if (!cancelButton) return;
+    const confirmed = window.confirm("Se anulara este movimiento del fondo disponible. El historial quedara conservado. ¿Continuar?");
+    if (!confirmed) return;
+    await fetchJson(`/api/cuenta-corriente/pagos-cobros/${encodeURIComponent(cancelButton.dataset.ccFundCancel)}/anular`, { method: "POST" });
+    await reloadCurrentAccount();
+  });
   $("#cc-movements-body").addEventListener("click", async (event) => {
+    const quickPaymentButton = event.target.closest("[data-cc-quick-payment]");
+    if (quickPaymentButton) {
+      openCurrentAccountQuickPayment(quickPaymentButton.dataset.ccQuickPayment);
+      return;
+    }
     const attachDocumentButton = event.target.closest("[data-document-attach]");
     if (attachDocumentButton) {
       fillDocumentFormFromMovement(JSON.parse(decodeURIComponent(attachDocumentButton.dataset.documentAttach)));
@@ -7224,7 +12228,7 @@ async function init() {
     }
     const cancelButton = event.target.closest("[data-cc-payment-cancel]");
     if (cancelButton) {
-      const confirmed = window.confirm("Se anulara el comprobante y su contrapartida, si existe. Los movimientos imputados volveran a quedar pendientes. Â¿Continuar?");
+      const confirmed = window.confirm("Se anulará el comprobante y su contrapartida, si existe. Los movimientos imputados volverán a quedar pendientes. ¿Continuar?");
       if (!confirmed) return;
       await fetchJson(`/api/cuenta-corriente/pagos-cobros/${encodeURIComponent(cancelButton.dataset.ccPaymentCancel)}/anular`, { method: "POST" });
       await reloadCurrentAccount();
@@ -7243,13 +12247,18 @@ async function init() {
     }
     const deleteExternalButton = event.target.closest("[data-cc-delete-external]");
     if (deleteExternalButton) {
-      const confirmed = window.confirm("Se eliminara este movimiento externo. Si es Venta MAG, tambien se elimina su renglon asociado. Â¿Continuar?");
+      const confirmed = window.confirm("Se eliminará este movimiento externo. Si es Venta MAG, también se elimina su renglón asociado. ¿Continuar?");
       if (!confirmed) return;
       await fetchJson(`/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(deleteExternalButton.dataset.ccDeleteExternal)}`, { method: "DELETE" });
       await reloadCurrentAccount();
     }
   });
   $("#cc-due-body").addEventListener("click", (event) => {
+    const quickPaymentButton = event.target.closest("[data-cc-quick-payment]");
+    if (quickPaymentButton) {
+      openCurrentAccountQuickPayment(quickPaymentButton.dataset.ccQuickPayment);
+      return;
+    }
     const editExternalButton = event.target.closest("[data-cc-edit-external]");
     if (editExternalButton) {
       openExternalMovementEdit(editExternalButton.dataset.ccEditExternal);
@@ -7257,12 +12266,22 @@ async function init() {
     }
     const deleteExternalButton = event.target.closest("[data-cc-delete-external]");
     if (deleteExternalButton) {
-      const confirmed = window.confirm("Se eliminara este movimiento externo. Si es Venta MAG, tambien se elimina su renglon asociado. Â¿Continuar?");
+      const confirmed = window.confirm("Se eliminará este movimiento externo. Si es Venta MAG, también se elimina su renglón asociado. ¿Continuar?");
       if (!confirmed) return;
       fetchJson(`/api/cuenta-corriente/movimientos-externos/${encodeURIComponent(deleteExternalButton.dataset.ccDeleteExternal)}`, { method: "DELETE" })
         .then(reloadCurrentAccount)
         .catch((error) => window.alert(error.message));
     }
+  });
+  $("#dashboard-pending-body")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-dashboard-open-movement]");
+    if (!button || !event.target.closest("button")) return;
+    await openDashboardPendingMovement(button.dataset.dashboardOpenMovement);
+  });
+  $("#dashboard-pending-body")?.addEventListener("dblclick", async (event) => {
+    const row = event.target.closest("[data-dashboard-open-movement]");
+    if (!row) return;
+    await openDashboardPendingMovement(row.dataset.dashboardOpenMovement);
   });
   $("#operation-type").addEventListener("change", syncOperationType);
   $("#operation-destination").addEventListener("change", () => {
@@ -7301,6 +12320,8 @@ async function init() {
     if (button) deletePartialBilling(button.dataset.partialDelete);
   });
   $("#liquidation-form").addEventListener("submit", saveLiquidation);
+  $("#liq-efectivo-prod").addEventListener("input", () => { state.liquidationCashProdTouched = true; });
+  $("#liq-efectivo-comp").addEventListener("input", () => { state.liquidationCashCompTouched = true; });
   $("#sale-buyer-different").addEventListener("change", syncBuyerDiff);
   $("#sale-buyer-different-faena").addEventListener("change", syncBuyerDiff);
   $("#tab-save").addEventListener("click", saveTabRule);
@@ -7329,6 +12350,28 @@ async function init() {
   });
   $all("#liquidation-form input").forEach((input) => {
     input.addEventListener("input", renderLiquidationTotals);
+  });
+  $("#liq-cash-prod-treatment")?.addEventListener("change", () => {
+    if (sellerCashIsCommissionAdjustment() && sellerCommissionBaseMode() === "FACTURADO") {
+      $("#liq-comision-fact-prod-base-mode").value = "BRUTO_VENDEDOR";
+    }
+    renderLiquidationTotals();
+  });
+  ["#liq-cash-mode", "#liq-cash-percent"].forEach((selector) => {
+    $(selector)?.addEventListener("input", () => {
+      syncLiquidationFacturadoFromCashPercent();
+      syncAutomaticLiquidationIva(true);
+      syncLiquidationCashFromFacturado();
+      renderLiquidationDetail(buildDetailFromSaleLines());
+      renderLiquidationTotals();
+    });
+    $(selector)?.addEventListener("change", () => {
+      syncLiquidationFacturadoFromCashPercent();
+      syncAutomaticLiquidationIva(true);
+      syncLiquidationCashFromFacturado();
+      renderLiquidationDetail(buildDetailFromSaleLines());
+      renderLiquidationTotals();
+    });
   });
   $("#liq-facturado").addEventListener("input", () => {
     state.liquidationFacturadoTouched = true;
@@ -7384,10 +12427,15 @@ async function init() {
   });
   document.addEventListener("focusin", (event) => {
     if (!event.target.classList || !event.target.classList.contains("money-input")) return;
+    if (event.target.id === "field-quote-price" && isFieldQuoteWithoutPrice({ cotizacionTexto: event.target.value })) return;
     unformatMoneyInput(event.target);
   });
   document.addEventListener("focusout", (event) => {
     if (!event.target.classList || !event.target.classList.contains("money-input")) return;
+    if (event.target.id === "field-quote-price" && isFieldQuoteWithoutPrice({ cotizacionTexto: event.target.value })) {
+      event.target.value = "s/cotizacion";
+      return;
+    }
     formatMoneyInput(event.target);
     renderLiquidationTotals();
     renderReport();
@@ -7396,21 +12444,75 @@ async function init() {
   $("#client-cancel").addEventListener("click", resetClientForm);
   $("#client-merge").addEventListener("click", applyClientMaintenance);
   $("#renspa-add").addEventListener("click", addRenspa);
+  $("#renspa-cancel").addEventListener("click", () => {
+    resetRenspaForm();
+    setRenspaMessage("");
+  });
+  $("#renspa-list").addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-renspa-edit]");
+    if (editButton) {
+      editRenspaFromButton(editButton);
+      return;
+    }
+    const deleteButton = event.target.closest("[data-renspa-delete]");
+    if (deleteButton) deleteRenspa(deleteButton.dataset.renspaDelete);
+  });
   $("#clientes-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-edit-client]");
     if (!button) return;
     editClient(button.dataset.editClient);
   });
   $("#operaciones-body").addEventListener("click", (event) => {
+    const reactivateButton = event.target.closest("[data-reactivate-operation]");
+    if (reactivateButton) {
+      reactivateDerivedOperation(reactivateButton.dataset.reactivateOperation);
+      return;
+    }
+    const deriveButton = event.target.closest("[data-derive-operation]");
+    if (deriveButton) {
+      deriveOperationToExternal(deriveButton.dataset.deriveOperation);
+      return;
+    }
     const button = event.target.closest("[data-open-sale]");
     if (!button) return;
     openSale(button.dataset.openSale);
   });
   $("#operation-search-body").addEventListener("click", (event) => {
+    const reactivateButton = event.target.closest("[data-reactivate-operation]");
+    if (reactivateButton) {
+      reactivateDerivedOperation(reactivateButton.dataset.reactivateOperation);
+      return;
+    }
     const button = event.target.closest("[data-open-operation-search]");
     if (!button) return;
     setView("operaciones");
     openSale(button.dataset.openOperationSearch);
+  });
+  document.body.addEventListener("click", (event) => {
+    const cashApplicationButton = event.target.closest("[data-cash-rec-edit-app]");
+    if (cashApplicationButton) {
+      event.preventDefault();
+      openCashReconciliationApplicationEdit(cashApplicationButton.dataset.cashRecEditApp, cashApplicationButton.dataset.cashRecAppId);
+      return;
+    }
+    const cashApplicationsButton = event.target.closest("[data-cash-rec-edit-apps]");
+    if (cashApplicationsButton) {
+      event.preventDefault();
+      openCashReconciliationApplicationEdit(cashApplicationsButton.dataset.cashRecEditApps, "");
+      return;
+    }
+    const button = event.target.closest("[data-page-action]");
+    if (!button) return;
+    const direction = button.dataset.pageDirection === "next" ? 1 : -1;
+    if (button.dataset.pageAction === "operation-search") {
+      state.operationSearchPage += direction;
+      renderOperationSearchPage();
+      return;
+    }
+    if (button.dataset.pageAction === "commissionist") {
+      state.commissionistPage += direction;
+      renderCommissionistRows();
+    }
   });
   $("#client-name-suggestions").addEventListener("click", (event) => {
     const button = event.target.closest("[data-suggest-client]");
@@ -7475,6 +12577,7 @@ async function init() {
 
   const health = await fetchJson("/api/health");
   $("#status").textContent = health.modo === "postgres" ? "PostgreSQL conectado" : "Backup local";
+  await loadBackupAutomationStatus();
 
   await reloadAppData();
   setSelectOptions("#operation-renspa-origin-select", [], "Elegir RENSPA origen");
@@ -7490,12 +12593,17 @@ async function init() {
   $("#cash-rec-report-to").value = today;
   $("#cc-calendar-from").value = dateToInputValue(new Date());
   $("#cc-calendar-to").value = dateToInputValue(addDateDays(new Date(), 7));
+  if ($("#dashboard-due-from")) $("#dashboard-due-from").value = dateToInputValue(new Date());
+  if ($("#dashboard-due-to")) $("#dashboard-due-to").value = dateToInputValue(addDateDays(new Date(), 7));
   $("#real-commission-from").value = today.slice(0, 8) + "01";
   $("#real-commission-to").value = today;
   $("#commissionist-from").value = today.slice(0, 8) + "01";
   $("#commissionist-to").value = today;
   $("#commissionist-due").value = today;
   $("#commissionist-invoice-date").value = today;
+  const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  if ($("#field-due-from")) $("#field-due-from").value = dateToInputValue(currentMonthStart);
+  if ($("#field-due-to")) $("#field-due-to").value = dateToInputValue(addFieldMonths(currentMonthStart, 6));
   renderOperationSearch();
   renderRealCommissionSummary();
   renderCommissionistStatus();
@@ -7527,4 +12635,6 @@ bootstrap().catch((error) => {
   $("#status").textContent = error.message;
   $("#status").style.color = "#9b1c1c";
 });
+
+
 

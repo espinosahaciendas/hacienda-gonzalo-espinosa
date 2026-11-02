@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="es">
   <head>
     <meta charset="utf-8">
@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-    <link rel="stylesheet" href="/styles.css?v=20260713-hacienda-campos-separado">
+  <link rel="stylesheet" href="/styles.css?v=20261102-saldos-asociados-v18">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -21,7 +21,7 @@
         <h1>Gonzalo Espinosa</h1>
         <p>Hacienda y Liquidaciones</p>
         <label>Correo<input id="login-email" type="email" autocomplete="username" required></label>
-        <label>ContraseÃ±a<input id="login-password" type="password" autocomplete="current-password" required></label>
+        <label>Contraseña<input id="login-password" type="password" autocomplete="current-password" required></label>
         <button type="submit" class="primary-button">Ingresar</button>
         <p class="form-message" id="login-message"></p>
       </form>
@@ -208,7 +208,9 @@
                   <th>Cliente</th>
                   <th>Concepto</th>
                   <th>Comprobante</th>
+                  <th>Operacion</th>
                   <th>Pendiente</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody id="dashboard-pending-body"></tbody>
@@ -219,22 +221,28 @@
         <div class="panel dashboard-report-panel">
           <div>
             <h2>Reporte para jefatura</h2>
-            <p class="subtle">Agenda clara de vencimientos, separando factura, efectivo y comisiones.</p>
+            <p class="subtle">Agenda clara de vencimientos por rango de fechas, separando factura, efectivo y comisiones.</p>
           </div>
-          <div class="form-actions">
-            <button type="button" class="ghost-button" id="dashboard-print-next7">PDF proximos 7 dias</button>
-            <button type="button" class="ghost-button" id="dashboard-print-next-week">PDF semana proxima</button>
+          <div class="form-grid cc-filters">
+            <label>Desde<input id="dashboard-due-from" type="date"></label>
+            <label>Hasta<input id="dashboard-due-to" type="date"></label>
+            <div class="form-actions inline-actions">
+              <button type="button" class="ghost-button" id="dashboard-print-due-range">PDF vencimientos</button>
+            </div>
           </div>
         </div>
 
         <div class="panel">
           <h2>Sistema operativo</h2>
           <p>
-            GestiÃ³n de operaciones, ventas, liquidaciones, cuenta corriente y vencimientos.
+            Gestión de operaciones, ventas, liquidaciones, cuenta corriente y vencimientos.
           </p>
           <div class="form-actions">
             <button type="button" class="ghost-button" id="download-backup">Descargar backup de datos</button>
           </div>
+          <p class="form-message" id="backup-message"></p>
+          <p class="subtle" id="automatic-backup-status">Backup automático: consultando estado...</p>
+          <p class="subtle" id="restore-test-status">Prueba de restauración: consultando estado...</p>
         </div>
       </section>
 
@@ -307,14 +315,23 @@
           <div class="panel-head">
             <div>
               <h2>Buscador de operaciones</h2>
-              <p class="subtle">Consulta compacta por cliente, tipo, categoria o periodo. Desde cada resultado puede abrir el detalle.</p>
+              <p class="subtle">Consulta compacta por fecha de operacion, cliente, tipo, categoria, estado o periodo. Desde cada resultado puede abrir el detalle.</p>
             </div>
             <div class="form-actions">
-              <label>Desde<input id="operation-search-from" type="date"></label>
-              <label>Hasta<input id="operation-search-to" type="date"></label>
+              <label>Fecha operacion desde<input id="operation-search-from" type="date"></label>
+              <label>Fecha operacion hasta<input id="operation-search-to" type="date"></label>
               <label>Cliente<input id="operation-search-client" list="cc-client-list" autocomplete="off" placeholder="Todos"></label>
               <label>Tipo / destino<input id="operation-search-type" autocomplete="off" placeholder="Ej.: directa, faena"></label>
               <label>Categoria<input id="operation-search-category" autocomplete="off" placeholder="Todas"></label>
+              <label>Estado
+                <select id="operation-search-status">
+                  <option value="TODAS">Todas</option>
+                  <option value="PENDIENTES">Pendientes</option>
+                  <option value="CONFIRMADAS">Confirmadas / cerradas</option>
+                  <option value="DERIVADAS">Derivadas a movimiento externo</option>
+                  <option value="ANULADAS">Anuladas</option>
+                </select>
+              </label>
               <label>Texto<input id="operation-search-text" autocomplete="off" placeholder="Operacion, comprador, consignataria"></label>
               <button type="button" class="ghost-button" id="operation-search-run">Buscar</button>
             </div>
@@ -330,8 +347,9 @@
               <thead>
                 <tr>
                   <th>Operacion</th>
-                  <th>Fecha carga</th>
+                  <th>Fecha operacion</th>
                   <th>Tipo / destino</th>
+                  <th>Estado</th>
                   <th>Vendedor</th>
                   <th>Comprador / consignataria</th>
                   <th>Categorias</th>
@@ -344,6 +362,7 @@
               <tbody id="operation-search-body"></tbody>
             </table>
           </div>
+          <div class="table-pagination" id="operation-search-pagination"></div>
           <p class="form-message" id="operation-search-message"></p>
         </div>
 
@@ -410,6 +429,15 @@
             <p>Base independiente de Hacienda para contratos rurales, cotizaciones, vencimientos y reportes de calculo.</p>
           </div>
         </div>
+        <div class="fields-tabs segmented" role="tablist" aria-label="Navegacion de Campos">
+          <button type="button" class="active" data-fields-tab="contratos">Contratos / busqueda</button>
+          <button type="button" data-fields-tab="nuevo">Nuevo / editar contrato</button>
+          <button type="button" data-fields-tab="calculo">Calculo de cuotas</button>
+          <button type="button" data-fields-tab="recibos">Recibos y pagos</button>
+          <button type="button" data-fields-tab="vencimientos">Vencimientos</button>
+          <button type="button" data-fields-tab="historial">Historial</button>
+        </div>
+        <div class="fields-tab-panel" data-fields-tab-panel="nuevo">
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -420,30 +448,133 @@
           </div>
           <form id="field-contract-form">
             <input id="field-contract-id" type="hidden">
-            <div class="form-grid">
-              <label>Buscar contrato<input id="field-contract-search" autocomplete="off" placeholder="Escriba cliente, campo, arrendatario o referencia"></label>
-              <div class="suggestions" id="field-contract-suggestions" hidden></div>
-              <label>Referencia / nombre contrato<input id="field-contract-name" placeholder="Ej.: LA BALBINA 2026-2029"></label>
-              <label>Arrendador / cliente<input id="field-contract-owner"></label>
-              <label>Arrendatario<input id="field-contract-tenant"></label>
-              <label>Campo / establecimiento<input id="field-contract-farm"></label>
-              <label>Hectareas totales<input id="field-contract-hectares" inputmode="decimal"></label>
-              <label>Inicio contrato<input id="field-contract-start" type="date"></label>
-              <label>Fin contrato<input id="field-contract-end" type="date"></label>
-              <label>Frecuencia base
-                <select id="field-contract-frequency">
-                  <option value="MENSUAL">Mensual</option>
-                  <option value="TRIMESTRAL">Trimestral</option>
-                  <option value="SEMESTRAL">Semestral</option>
-                  <option value="ANUAL">Anual</option>
-                  <option value="UNICO">Unico pago</option>
-                  <option value="MANUAL">Manual / sin vencimiento fijo</option>
-                </select>
-              </label>
-              <label>Vencimiento habitual<input id="field-contract-due-text" placeholder="Ej.: del 5 al 10 de cada mes"></label>
-              <label>Criterio de cotizacion<input id="field-contract-quote-criteria" placeholder="Ej.: promedio semana anterior Quequen"></label>
+            <div class="advanced-subpanel contract-data-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Datos efectivos del contrato</h3>
+                  <p class="subtle">Estos son los datos fijos que quedan guardados y luego se usan para calcular cuotas.</p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>Referencia / nombre contrato<input id="field-contract-name" placeholder="Ej.: LA BALBINA 2026-2029"></label>
+                <label>Campo / establecimiento<input id="field-contract-farm"></label>
+                <label>Arrendador / cliente<input id="field-contract-owner"></label>
+                <label>Arrendatario<input id="field-contract-tenant"></label>
+                <label>Hectareas totales<input id="field-contract-hectares" inputmode="decimal"></label>
+                <label>Criterio de cotizacion<input id="field-contract-quote-criteria" placeholder="Ej.: promedio semana anterior Quequen"></label>
+                <label>Vigencia contrato desde<input id="field-contract-start" type="date"></label>
+                <label>Vigencia contrato hasta<input id="field-contract-end" type="date"></label>
+                <label>Frecuencia base
+                  <select id="field-contract-frequency">
+                    <option value="MENSUAL">Mensual</option>
+                    <option value="TRIMESTRAL">Trimestral</option>
+                    <option value="CUATRIMESTRAL">Cuatrimestral</option>
+                    <option value="SEMESTRAL">Semestral</option>
+                    <option value="ANUAL">Anual</option>
+                    <option value="UNICO">Unico pago</option>
+                    <option value="MANUAL">Manual / sin vencimiento fijo</option>
+                  </select>
+                </label>
+                <label>Vencimiento habitual<input id="field-contract-due-text" placeholder="Ej.: del 5 al 10 de cada mes"></label>
+              </div>
             </div>
-            <div class="field-contract-rules">
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Partes del contrato</h3>
+                  <p class="subtle">Opcional para contratos con varios arrendadores o varios arrendatarios. Si no se cargan partes, se usa el arrendador y arrendatario principal al 100%.</p>
+                </div>
+                <div class="mini-summary">
+                  <span>Arrendadores: <strong id="field-contract-landlord-percent">0%</strong></span>
+                  <span>Arrendatarios: <strong id="field-contract-tenant-percent">0%</strong></span>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>Tipo de parte
+                  <select id="field-contract-party-type">
+                    <option value="ARRENDADOR">Arrendador / cobra</option>
+                    <option value="ARRENDATARIO">Arrendatario / paga</option>
+                  </select>
+                </label>
+                <label>Nombre<input id="field-contract-party-name" placeholder="Nombre de la parte"></label>
+                <label>CUIT<input id="field-contract-party-cuit" placeholder="Opcional"></label>
+                <label>Porcentaje<input id="field-contract-party-percent" inputmode="decimal" placeholder="Ej.: 50"></label>
+                <label class="span-2">Observaciones<input id="field-contract-party-notes" placeholder="Opcional"></label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-contract-party-add">Agregar parte</button>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Tipo</th><th>Nombre</th><th>CUIT</th><th>%</th><th>Observaciones</th><th>Accion</th></tr></thead>
+                  <tbody id="field-contract-party-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Regla de calculo del contrato</h3>
+                  <p class="subtle">Elija regla simple para contratos uniformes, o lineas mixtas cuando haya carne, soja, trigo, efectivo o hectareas diferenciadas.</p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>Tipo de regla
+                  <select id="field-contract-rule-type">
+                    <option value="SIMPLE">Regla simple facturado / efectivo</option>
+                    <option value="MIXTA">Lineas mixtas de calculo</option>
+                  </select>
+                </label>
+                <div class="info-box">
+                  <strong id="field-contract-rule-title">Regla simple</strong>
+                  <span id="field-contract-rule-help">Use los bloques de parte facturada y parte efectivo.</span>
+                </div>
+              </div>
+            </div>
+            <div class="advanced-subpanel" id="field-contract-mixed-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Lineas mixtas de calculo</h3>
+                  <p class="subtle">Opcional. Use esto cuando el contrato tenga varios bloques: carne, soja, trigo, hectareas distintas o bases diferentes.</p>
+                </div>
+                <span class="subtle" id="field-contract-line-summary">Sin lineas mixtas.</span>
+              </div>
+              <div class="form-grid">
+                <label>Aplica a
+                  <select id="field-contract-line-applies">
+                    <option value="FACTURADO">Facturado / contrato</option>
+                    <option value="EFECTIVO">Efectivo</option>
+                    <option value="AMBAS">Ambas partes</option>
+                  </select>
+                </label>
+                <label>Detalle / producto<input id="field-contract-line-label" placeholder="Ej.: 30 has carne / Trigo / Soja"></label>
+                <label>Hectareas<input id="field-contract-line-hectares" inputmode="decimal"></label>
+                <label>Base
+                  <select id="field-contract-line-base">
+                    <option value="KG_CARNE">Kg carne/ha</option>
+                    <option value="KG_SOJA">Kg soja/ha</option>
+                    <option value="KG_TRIGO">Kg trigo/ha</option>
+                    <option value="KG_CEREAL">Kg cereal/ha</option>
+                    <option value="PESOS_HA">Pesos por ha</option>
+                    <option value="DOLARES_HA">Dolares por ha</option>
+                    <option value="IMPORTE_FIJO">Importe fijo</option>
+                  </select>
+                </label>
+                <label>Kg/ha o importe base<input id="field-contract-line-rate" inputmode="decimal"></label>
+                <label>Cotizacion propia opcional<input id="field-contract-line-price" class="money-input" inputmode="decimal" placeholder="Si queda vacio usa el promedio de la cuota"></label>
+                <label class="span-2">Observaciones<input id="field-contract-line-notes" placeholder="Opcional"></label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-contract-line-add">Agregar linea</button>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Aplica</th><th>Detalle</th><th>Has.</th><th>Base</th><th>Kg/ha o importe</th><th>Cotizacion propia</th><th>Observaciones</th><th>Accion</th></tr></thead>
+                  <tbody id="field-contract-line-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="field-contract-rules" id="field-contract-simple-panel">
               <div class="advanced-subpanel">
                 <h3>Parte facturada / contrato</h3>
                 <div class="form-grid">
@@ -493,6 +624,48 @@
                 </div>
               </div>
             </div>
+            <div class="advanced-subpanel" id="field-contract-installment-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Plan manual de cuotas</h3>
+                  <p class="subtle">Opcional para contratos con vencimientos fijos. Si dejas porcentaje, cantidad e importe en blanco, toma el 100% del bloque elegido.</p>
+                </div>
+                <span class="subtle" id="field-contract-installment-summary">Sin cuotas manuales.</span>
+              </div>
+              <p class="subtle" id="field-contract-installment-help"></p>
+              <div class="form-grid">
+                <label>Nro. cuota<input id="field-contract-installment-number" inputmode="numeric" placeholder="Ej.: 1"></label>
+                <label>Vencimiento<input id="field-contract-installment-due" type="date"></label>
+                <label>Tipo de cuota
+                  <select id="field-contract-installment-type">
+                    <option value="FACTURADO">Facturada / contrato</option>
+                    <option value="EFECTIVO">Efectivo</option>
+                    <option value="MIXTA">Mixta</option>
+                    <option value="INFORMATIVA">Informativa / no calcula</option>
+                  </select>
+                </label>
+                <label>Porcentaje del bloque opcional<input id="field-contract-installment-percent" inputmode="decimal" placeholder="Ej.: 25"></label>
+                <label>Cantidad fija kg/tn opcional<input id="field-contract-installment-quantity" inputmode="decimal" placeholder="Ej.: 4213,44"></label>
+                <label>Unidad cantidad
+                  <select id="field-contract-installment-quantity-unit">
+                    <option value="KG">Kg</option>
+                    <option value="TN">Tn</option>
+                  </select>
+                </label>
+                <label>Importe fijo opcional<input id="field-contract-installment-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Detalle<input id="field-contract-installment-notes" placeholder="Ej.: primera cuota efectivo"></label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-contract-installment-add">Agregar cuota</button>
+                <button type="button" class="small-button" id="field-contract-installment-cancel" hidden>Cancelar edicion</button>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Cuota</th><th>Vencimiento</th><th>Tipo</th><th>%</th><th>Cantidad</th><th>Importe fijo</th><th>Detalle</th><th>Accion</th></tr></thead>
+                  <tbody id="field-contract-installment-body"></tbody>
+                </table>
+              </div>
+            </div>
             <label>Condiciones base<textarea id="field-contract-notes" rows="3" placeholder="Ej.: 60 has a 600 kg soja/ha. Pago mensual vto. 05-10 de cada mes."></textarea></label>
             <div class="advanced-subpanel">
               <div class="panel-head">
@@ -517,7 +690,22 @@
             <p class="form-message" id="field-contract-message"></p>
           </form>
         </div>
+        </div>
 
+        <div class="fields-tab-panel active" data-fields-tab-panel="contratos">
+        <div class="panel">
+          <div class="advanced-subpanel contract-search-panel">
+            <div class="panel-head">
+              <div>
+                <h3>Buscar contrato cargado</h3>
+                <p class="subtle">Use este campo para encontrar contratos existentes por referencia, campo, arrendador o arrendatario.</p>
+              </div>
+              <button type="button" class="ghost-button" data-fields-tab-go="nuevo">Cargar contrato nuevo</button>
+            </div>
+            <label class="span-2">Busqueda de contrato existente<input id="field-contract-search" autocomplete="off" placeholder="Escriba cliente, campo, arrendatario o referencia"></label>
+            <div class="suggestions" id="field-contract-suggestions" hidden></div>
+          </div>
+        </div>
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -543,7 +731,9 @@
             </table>
           </div>
         </div>
+        </div>
 
+        <div class="fields-tab-panel" data-fields-tab-panel="calculo">
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -553,15 +743,21 @@
             <button type="button" class="ghost-button" id="field-lease-clear">Nuevo calculo</button>
           </div>
           <form id="field-lease-form">
+            <input type="hidden" id="field-lease-id">
             <div class="form-grid">
               <label>Contrato / referencia<input id="field-lease-contract" placeholder="Ej.: Arrendamiento campo La Esperanza"></label>
               <label>Cliente / arrendador<input id="field-lease-client" autocomplete="off"></label>
               <label>Campo / establecimiento<input id="field-lease-farm" autocomplete="off"></label>
               <label>Fecha de calculo<input id="field-lease-date" type="date"></label>
-              <label>Periodo desde<input id="field-lease-from" type="date"></label>
-              <label>Periodo hasta<input id="field-lease-to" type="date"></label>
+              <label>Periodo de cuota desde<input id="field-lease-from" type="date"></label>
+              <label>Periodo de cuota hasta<input id="field-lease-to" type="date"></label>
               <label>Vencimiento cuota<input id="field-lease-due-date" type="date"></label>
               <label>Proximo vencimiento informativo de la cuota<input id="field-lease-next-due" type="date"></label>
+              <label>Cuota manual a calcular
+                <select id="field-lease-installment">
+                  <option value="">Sin cuota manual / calculo normal</option>
+                </select>
+              </label>
               <label>Producto / indice
                 <input id="field-lease-cereal" placeholder="Ej.: Soja Quequen, Carne, Dolar">
               </label>
@@ -579,13 +775,13 @@
                   <option value="USD">Dolares</option>
                 </select>
               </label>
-              <label>Promedio / cotizacion aplicada<input id="field-lease-price" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+              <label>Cotizacion base general, si aplica<input id="field-lease-price" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
               <label>Tipo de cambio<input id="field-lease-exchange" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
             </div>
             <div class="advanced-subpanel">
               <h3>Comision</h3>
               <div class="form-grid">
-                <label>Aplicar comision sobre
+                <label>Comision general sobre
                   <select id="field-lease-commission-base">
                     <option value="NINGUNA">Sin comision</option>
                     <option value="TOTAL">Total cuota</option>
@@ -593,7 +789,9 @@
                     <option value="EFECTIVO">Efectivo</option>
                   </select>
                 </label>
-                <label>% comision<input id="field-lease-commission-rate" inputmode="decimal" placeholder="Ej.: 3"></label>
+                <label>% comision general<input id="field-lease-commission-rate" inputmode="decimal" placeholder="Opcional"></label>
+                <label>% comision sobre facturado<input id="field-lease-commission-billed-rate" inputmode="decimal" placeholder="Opcional"></label>
+                <label>% comision sobre efectivo<input id="field-lease-commission-cash-rate" inputmode="decimal" placeholder="Opcional"></label>
               </div>
             </div>
             <div class="advanced-subpanel">
@@ -602,13 +800,16 @@
                   <h3>Cotizaciones para promedio</h3>
                   <p class="subtle">Opcional. Si cargas varias cotizaciones, el promedio se aplica automaticamente al calculo de esta cuota.</p>
                 </div>
-                <button type="button" class="ghost-button" id="field-quote-add">Agregar cotizacion</button>
+                <div class="button-row">
+                  <button type="button" class="ghost-button" id="field-quote-cancel" hidden>Cancelar edicion</button>
+                  <button type="button" class="ghost-button" id="field-quote-add">Agregar cotizacion</button>
+                </div>
               </div>
               <div class="form-grid">
                 <label>Fecha cotizacion<input id="field-quote-date" type="date"></label>
                 <label>Mercado<input id="field-quote-market" placeholder="Quequen"></label>
                 <label>Producto<input id="field-quote-product" placeholder="Soja"></label>
-                <label>Cotizacion<input id="field-quote-price" class="money-input" inputmode="decimal"></label>
+                <label>Cotizacion<input id="field-quote-price" class="money-input" inputmode="decimal" placeholder="$ o s/cotizacion"></label>
               </div>
               <div class="table-wrap compact-table">
                 <table>
@@ -617,9 +818,25 @@
                 </table>
               </div>
             </div>
+            <div class="advanced-subpanel" id="field-line-quotes-panel" hidden>
+              <h3>Cotizacion por producto de lineas mixtas</h3>
+              <p class="subtle">Cargue una sola cotizacion por producto. El sistema la aplica a todas las lineas carne, soja, trigo, etc. Si deja un producto vacio, toma el promedio general cargado arriba.</p>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Producto / indice</th><th>Lineas que aplica</th><th>Cotizacion para esta cuota</th><th>Unidad</th></tr></thead>
+                  <tbody id="field-product-quote-body"></tbody>
+                </table>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Bloque</th><th>Detalle</th><th>Base</th><th>Kg/ha o importe</th><th>Cotizacion aplicada</th></tr></thead>
+                  <tbody id="field-line-quote-body"></tbody>
+                </table>
+              </div>
+            </div>
             <label>Observaciones<textarea id="field-lease-notes" rows="3" placeholder="Condiciones, ajustes, cotizacion usada, observaciones del contrato."></textarea></label>
             <div class="cc-grid">
-              <div><span>Promedio aplicado</span><strong id="field-lease-average">$ 0,00</strong></div>
+              <div><span>Cotizacion base / productos</span><strong id="field-lease-average">$ 0,00</strong></div>
               <div><span>Facturado / contrato</span><strong id="field-lease-billed-total">$ 0,00</strong></div>
               <div><span>Efectivo</span><strong id="field-lease-cash-total">$ 0,00</strong></div>
               <div><span>Total cuota</span><strong id="field-lease-total">$ 0,00</strong></div>
@@ -627,14 +844,264 @@
               <div><span>Total con comision</span><strong id="field-lease-grand-total">$ 0,00</strong></div>
               <div><span>Vencimiento</span><strong id="field-lease-due-preview">-</strong></div>
             </div>
+            <div class="advanced-subpanel">
+              <h3>Distribucion de esta cuota por partes</h3>
+              <p class="subtle">Control interno propio de Campos. Se calcula segun los porcentajes cargados en el contrato.</p>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Tipo</th><th>Parte</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Total cuota</th><th>Comision</th><th>Neto informado</th></tr></thead>
+                  <tbody id="field-lease-party-distribution-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="advanced-subpanel">
+              <h3>Cuenta minima de la cuota</h3>
+              <p class="subtle">Control interno de Campos: al arrendador se le descuenta la comision; al arrendatario se le suma cuando corresponda.</p>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Parte</th><th>Rol</th><th>Base cuota</th><th>Comision</th><th>Criterio</th><th>Neto informado</th></tr></thead>
+              <tbody id="field-lease-mini-ledger-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="advanced-subpanel fields-receipts-block">
+              <div class="panel-head">
+                <div>
+                  <h3>Pagos de esta cuota</h3>
+                  <p class="subtle">Registro interno de Campos de como se abono esta cuota. No impacta cuenta corriente de Hacienda.</p>
+                </div>
+                <div class="mini-summary">
+                  <span>Pagado: <strong id="field-payment-paid">$ 0,00</strong></span>
+                  <span>Comision/descuento: <strong id="field-payment-commission">$ 0,00</strong></span>
+                  <span>Saldo: <strong id="field-payment-balance">$ 0,00</strong></span>
+                </div>
+              </div>
+              <div class="advanced-subpanel soft-panel">
+                <div class="panel-head">
+                  <div>
+                    <h4>Registrar por tilde</h4>
+                    <p class="subtle">Camino recomendado: tilde cada concepto real de la cuota y registrelo una sola vez. Incluye facturado, efectivo y comisiones calculadas.</p>
+                  </div>
+                  <span class="subtle" id="field-payment-preset-summary">Sin items disponibles</span>
+                </div>
+                <div class="table-wrap compact-table">
+                  <table>
+                    <thead><tr><th></th><th>Item</th><th>Parte</th><th>Detalle</th><th>Importe</th></tr></thead>
+                    <tbody id="field-payment-preset-body"></tbody>
+                  </table>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" id="field-payment-preset-add">Registrar seleccionados</button>
+                </div>
+              </div>
+              <div class="advanced-subpanel soft-panel">
+                <h4>Comision manual / adicional</h4>
+                <p class="subtle" id="field-payment-commission-helper">Use este bloque solo para cargar una comision adicional/manual que no este en el listado de tilde.</p>
+                <div class="form-grid">
+                  <label>Que pasa con la comision
+                    <select id="field-payment-commission-mode">
+                      <option value="NO_APLICA">No registrar comision ahora</option>
+                      <option value="ARRENDATARIO_PAGA">La paga / se suma al arrendatario</option>
+                      <option value="ARRENDADOR_DESCUENTA">Se descuenta al arrendador</option>
+                      <option value="FACTURA_APARTE">Queda facturada aparte</option>
+                    </select>
+                  </label>
+                  <label>Importe de comision<input id="field-payment-commission-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                  <label>Tipo de comision
+                    <select id="field-payment-commission-bucket">
+                      <option value="GENERAL">General / total</option>
+                      <option value="FACTURADO">Sobre facturado</option>
+                      <option value="EFECTIVO">Sobre efectivo</option>
+                    </select>
+                  </label>
+                  <label>A quien corresponde
+                    <select id="field-payment-commission-party">
+                      <option value="ARRENDATARIO">Arrendatario / quien paga</option>
+                      <option value="ARRENDADOR">Arrendador / quien cobra</option>
+                    </select>
+                  </label>
+                  <label>Estado de la comision
+                    <select id="field-payment-commission-status">
+                      <option value="PENDIENTE">Pendiente</option>
+                      <option value="FACTURADA">Facturada</option>
+                      <option value="PAGADA">Pagada</option>
+                      <option value="DESCONTADA">Descontada</option>
+                      <option value="INFORMADA">Informada</option>
+                    </select>
+                  </label>
+                  <label>Detalle / factura / observacion<input id="field-payment-commission-reference" placeholder="Ej.: factura de comision, descuento aplicado, observacion"></label>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" id="field-payment-commission-register">Registrar comision manual</button>
+                </div>
+              </div>
+              <div class="advanced-subpanel soft-panel">
+                <h4>2. Pago real de esta cuota</h4>
+                <p class="subtle">Registre aca como se pago o cobro la cuota: transferencia, efectivo, echeq u otro medio.</p>
+                <div class="form-grid">
+                  <label>Fecha de pago<input id="field-payment-date" type="date"></label>
+                  <label>Quien recibe / paga
+                    <select id="field-payment-party-simple">
+                      <option value="ARRENDADOR">Pago al arrendador</option>
+                      <option value="ARRENDATARIO">Pago del arrendatario</option>
+                      <option value="AMBAS">Ambas partes / registro general</option>
+                    </select>
+                  </label>
+                  <label>Que se esta pagando
+                    <select id="field-payment-concept-simple">
+                      <option value="PAGO_CUOTA">Pago aplicado a la cuota</option>
+                      <option value="PAGO_FACTURADO">Parte facturada / contrato</option>
+                      <option value="PAGO_EFECTIVO">Parte efectivo</option>
+                      <option value="OTRO">Otro ajuste</option>
+                    </select>
+                  </label>
+                  <label>Medio
+                    <select id="field-payment-method">
+                      <option value="Transferencia">Transferencia</option>
+                      <option value="E-cheq">E-cheq</option>
+                      <option value="Efectivo">Efectivo</option>
+                      <option value="Cheque">Cheque</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                  </label>
+                  <label>Referencia / detalle<input id="field-payment-reference" placeholder="Banco, numero de echeq, comprobante, observacion"></label>
+                  <label>Importe pagado<input id="field-payment-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="ghost-button" id="field-payment-add">Registrar pago</button>
+                </div>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Fecha</th><th>Concepto</th><th>Parte</th><th>Detalle comision</th><th>Estado</th><th>Medio</th><th>Referencia</th><th>Importe aplicado</th><th>Accion</th></tr></thead>
+                  <tbody id="field-payment-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Ajustes / reliquidaciones</h3>
+                  <p class="subtle">Use este bloque cuando una parte de la cuota se paga fuera de termino y se acuerda recalcularla con otro promedio. No modifica el calculo original.</p>
+                </div>
+                <span class="subtle" id="field-adjustment-summary">Sin ajustes cargados</span>
+              </div>
+              <div class="form-grid">
+                <label>Fecha del ajuste / pago<input id="field-adjustment-date" type="date"></label>
+                <label>Parte afectada
+                  <select id="field-adjustment-part">
+                    <option value="FACTURADO">Facturado / contrato</option>
+                    <option value="EFECTIVO">Efectivo</option>
+                    <option value="TOTAL">Total cuota</option>
+                  </select>
+                </label>
+                <label>Motivo<input id="field-adjustment-reason" placeholder="Ej.: reajuste por pago fuera de termino"></label>
+                <label>Referencia / acuerdo<input id="field-adjustment-reference" placeholder="Transferencia, acuerdo entre partes, observacion"></label>
+                <label>Promedio original<input id="field-adjustment-original-quote" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Promedio nuevo<input id="field-adjustment-new-quote" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Importe original<input id="field-adjustment-original-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Importe reajustado<input id="field-adjustment-new-amount" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Diferencia calculada<input id="field-adjustment-difference" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Comision original<input id="field-adjustment-original-commission" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Comision reajustada<input id="field-adjustment-new-commission" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Diferencia comision<input id="field-adjustment-commission-difference" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
+                <label>Estado
+                  <select id="field-adjustment-status">
+                    <option value="PENDIENTE">Pendiente</option>
+                    <option value="PAGADO">Pagado</option>
+                    <option value="COMPENSADO">Compensado</option>
+                    <option value="INFORMATIVO">Informativo</option>
+                  </select>
+                </label>
+                <label>Observaciones<textarea id="field-adjustment-notes" rows="2" placeholder="Detalle de cotizaciones usadas o acuerdo aplicado."></textarea></label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-adjustment-add">Agregar ajuste</button>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Fecha</th><th>Parte</th><th>Motivo</th><th>Prom. original</th><th>Prom. nuevo</th><th>Original</th><th>Reajustado</th><th>Diferencia</th><th>Com. original</th><th>Com. reaj.</th><th>Dif. com.</th><th>Estado</th><th></th></tr></thead>
+                  <tbody id="field-adjustment-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="advanced-subpanel">
+              <div class="panel-head">
+                <div>
+                  <h3>Recibos individuales por parte</h3>
+                  <p class="subtle">Use estos botones cuando el contrato tenga varias partes y necesite emitir un recibo separado para cada arrendador o arrendatario.</p>
+                </div>
+                <span class="subtle" id="field-party-receipts-summary">Sin partes para recibo individual</span>
+              </div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Rol</th><th>Parte</th><th>%</th><th>Facturado</th><th>Efectivo</th><th>Comision</th><th>Neto</th><th>Accion</th></tr></thead>
+                  <tbody id="field-party-receipts-body"></tbody>
+                </table>
+              </div>
+            </div>
             <div class="form-actions">
-              <button type="button" class="ghost-button" id="field-lease-print">Ver / imprimir calculo</button>
+              <button type="button" class="ghost-button" id="field-lease-print-general">Reporte de cuota</button>
+              <button type="button" class="ghost-button" id="field-lease-receipt-landlord">Recibo arrendador</button>
+              <button type="button" class="ghost-button" id="field-lease-receipt-tenant">Recibo arrendatario</button>
               <button type="submit" class="primary-button">Guardar calculo</button>
             </div>
             <p class="form-message" id="field-lease-message"></p>
           </form>
         </div>
+        </div>
 
+        <div class="fields-tab-panel" data-fields-tab-panel="vencimientos">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Agenda de vencimientos de Campos</h2>
+              <p class="subtle">Control propio de arrendamientos. No impacta ni se mezcla con Hacienda.</p>
+            </div>
+            <button type="button" class="ghost-button" id="field-due-refresh">Actualizar agenda</button>
+          </div>
+          <div class="form-grid">
+            <label>Desde<input id="field-due-from" type="date"></label>
+            <label>Hasta<input id="field-due-to" type="date"></label>
+            <label>Estado
+              <select id="field-due-status">
+                <option value="TODOS">Todos</option>
+                <option value="PENDIENTE_CALCULO">Pendiente de calcular</option>
+                <option value="VENCIDA">Vencida sin calcular</option>
+                <option value="CALCULADA">Calculada / pendiente pago</option>
+                <option value="PARCIAL">Parcialmente pagada</option>
+                <option value="PAGADA">Pagada</option>
+              </select>
+            </label>
+            <label>Buscar contrato / parte / campo<input id="field-due-search" placeholder="Ej.: La Balbina, arrendador, campo"></label>
+          </div>
+          <div class="cc-grid">
+            <div><span>Vencimientos</span><strong id="field-due-count">-</strong></div>
+            <div><span>Pendientes de calcular</span><strong id="field-due-pending-count">-</strong></div>
+            <div><span>Vencidos sin calcular</span><strong id="field-due-overdue-count">-</strong></div>
+            <div><span>Total calculado en rango</span><strong id="field-due-calculated-total">$ 0,00</strong></div>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Vto.</th>
+                  <th>Contrato / campo</th>
+                  <th>Partes</th>
+                  <th>Cuota</th>
+                  <th>Estado</th>
+                  <th>Importe calculado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="field-due-body"></tbody>
+            </table>
+          </div>
+          <p class="form-message" id="field-due-message"></p>
+        </div>
+        </div>
+
+        <div class="fields-tab-panel" data-fields-tab-panel="historial">
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -653,12 +1120,33 @@
                   <th>Cereal</th>
                   <th>Has.</th>
                   <th>Total</th>
-                  <th>Cuotas</th>
+                  <th>Aplicado</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
               <tbody id="field-lease-body"></tbody>
             </table>
+          </div>
+        </div>
+        </div>
+        <div class="fields-tab-panel" data-fields-tab-panel="recibos">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Recibos y pagos de cuotas</h2>
+                <p class="subtle">Para registrar o imprimir recibos, primero abra o guarde un calculo de cuota. Los controles de pago estan dentro del calculo para mantener el contexto de la cuota seleccionada.</p>
+              </div>
+              <button type="button" class="primary-button" data-fields-tab-go="calculo">Ir al calculo de cuota</button>
+            </div>
+            <div class="advanced-subpanel">
+              <h3>Como usar esta parte</h3>
+              <p class="subtle">1. Busque o cargue el contrato. 2. Use el contrato en el calculo. 3. Registre pagos y genere recibos desde el bloque inferior del calculo.</p>
+              <div class="form-actions">
+                <button type="button" class="ghost-button" id="field-receipt-tab-landlord">Recibo arrendador</button>
+                <button type="button" class="ghost-button" id="field-receipt-tab-tenant">Recibo arrendatario</button>
+                <button type="button" class="primary-button" data-fields-tab-go="calculo">Registrar pagos</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -695,6 +1183,7 @@
           </div>
           <div class="form-actions">
             <button type="button" class="primary-button" id="cc-export-calendar">Descargar archivo calendario</button>
+            <button type="button" class="ghost-button" id="cc-export-calendar-csv">Descargar CSV Google</button>
           </div>
           <p class="form-message" id="cc-calendar-message"></p>
         </div>
@@ -755,7 +1244,7 @@
                   Accion
                   <select id="client-maintenance-action">
                     <option value="MERGE">Fusionar con cliente correcto</option>
-                    <option value="DELETE">Eliminar sÃ³lo si no tiene movimientos</option>
+                    <option value="DELETE">Eliminar sólo si no tiene movimientos</option>
                   </select>
                 </label>
               </div>
@@ -786,6 +1275,7 @@
               </label>
               <div class="form-actions">
                 <button type="button" class="ghost-button" id="renspa-add">Agregar RENSPA</button>
+                <button type="button" class="small-button" id="renspa-cancel" hidden>Cancelar edicion</button>
               </div>
               <p class="form-message" id="renspa-message"></p>
             </div>
@@ -944,7 +1434,7 @@
           <div class="operation-list-block">
             <div class="panel workflow-empty" id="operation-workflow-empty">
               <h2>Alta guiada</h2>
-              <p>Complete los datos principales y continÃºe a la carga de venta.</p>
+              <p>Complete los datos principales y continúe a la carga de venta.</p>
             </div>
             <div class="workflow-steps" id="operation-workflow-steps" hidden>
               <button type="button" class="workflow-step" data-operation-step="operation"><strong>1</strong><span>Operacion</span></button>
@@ -1010,6 +1500,7 @@
               <section class="sale-section">
                 <div class="section-head">
                   <h3>Agregar nueva linea</h3>
+                  <button type="submit" form="sale-form" class="primary-button" id="sale-line-save-top">Agregar linea</button>
                 </div>
               <form class="sale-form" id="sale-form">
                 <label>
@@ -1103,7 +1594,7 @@
                 </div>
                 <div class="advanced-subpanel sale-not-faena">
                   <h3>Correccion excepcional del calculo</h3>
-                  <p class="subtle">Usar sÃ³lo si la liquidaciÃ³n recibida toma otros kilos, promedio, precio final o importe. Si queda vacÃ­o, calcula automÃ¡tico.</p>
+                  <p class="subtle">Usar sólo si la liquidación recibida toma otros kilos, promedio, precio final o importe. Si queda vacío, calcula automático.</p>
                   <div class="form-grid">
                     <label class="check-line"><input id="sale-use-real-kg-vend" type="checkbox"> Usar kg reales con desbaste vendedor</label>
                     <label>Kg usado vendedor<input id="sale-kg-calc-vend" inputmode="decimal" placeholder="Automatico"></label>
@@ -1259,6 +1750,13 @@
                     <input id="liq-cash-percent" inputmode="decimal" placeholder="0">
                   </label>
                   <label>
+                    Tratamiento diferencia vendedor
+                    <select id="liq-cash-prod-treatment">
+                      <option value="EFECTIVO">Efectivo a pagar</option>
+                      <option value="AJUSTE_COMISION">Ajuste de precio a cargo de la consignataria / compensar con comision</option>
+                    </select>
+                  </label>
+                  <label>
                     Vencimiento facturado vendedor
                     <input id="liq-plan-fact-prod" placeholder="30-60 o 54,75@35-45,25@65">
                   </label>
@@ -1267,7 +1765,7 @@
                     <input id="liq-plan-fact-comp" placeholder="30-60 o $ 63.462.570,04@35">
                   </label>
                   <label>
-                    Vencimiento efectivo vendedor
+                    Vencimiento importe complementario vendedor
                     <input id="liq-plan-cash-prod" placeholder="0-30">
                   </label>
                   <label>
@@ -1296,7 +1794,12 @@
 
                 <div class="special-operation-box warning" id="anticipada-special-box" hidden>
                   <strong>Venta anticipada / operacion a termino</strong>
-                  <span>Esta operacion requiere circuito especial de anticipo, carga real y ajuste final. No debe liquidarse como operacion comun.</span>
+                  <span>El importe liquidado ahora se trata como anticipo/facturado. La diferencia no se toma como efectivo automatico: queda pendiente para ajustar cuando se cargue la hacienda real.</span>
+                  <div class="economic-box compact-economic-box">
+                    <div><span>Liquidado / anticipo</span><strong id="anticipada-liquidado">$ 0,00</strong></div>
+                    <div><span>Pendiente ajuste vendedor</span><strong id="anticipada-pendiente-vend">$ 0,00</strong></div>
+                    <div><span>Pendiente ajuste comprador</span><strong id="anticipada-pendiente-comp">$ 0,00</strong></div>
+                  </div>
                 </div>
 
                 <div class="advanced-subpanel consigned-only internal-cc-box">
@@ -1328,16 +1831,36 @@
                     </label>
                     <label class="check-line">
                       <input id="liq-comision-fact-prod-enabled" type="checkbox">
-                      Cobrar comision propia al vendedor sobre facturado
+                      Cobrar comision propia al vendedor
                     </label>
                     <label>
-                      % comision propia al vendedor sobre facturado
+                      % comision propia al vendedor
                       <input id="liq-comision-fact-prod-pct" inputmode="decimal" value="0">
                     </label>
                     <label>
-                      Comision propia al vendedor sobre facturado
+                      Base para calcular la comision
+                      <select id="liq-comision-fact-prod-base-mode">
+                        <option value="FACTURADO">Importe liquidado / facturado</option>
+                        <option value="BRUTO_VENDEDOR">Importe bruto total del vendedor</option>
+                        <option value="MANUAL">Importe manual</option>
+                      </select>
+                    </label>
+                    <label>
+                      Importe base de la comision
+                      <input id="liq-comision-fact-prod-base" class="money-input" inputmode="decimal" value="0">
+                    </label>
+                    <label>
+                      Comision total al vendedor
                       <input id="liq-comision-fact-prod" class="money-input" inputmode="decimal" value="0" readonly>
                     </label>
+                    <div class="advanced-subpanel commission-adjustment-summary" id="liq-commission-adjustment-summary" hidden>
+                      <h3>Compensacion de diferencia de precio</h3>
+                      <div class="economic-box compact-economic-box">
+                        <div><span>Comision total</span><strong id="liq-adjustment-commission-total">$ 0,00</strong></div>
+                        <div><span>Ajuste asumido</span><strong id="liq-adjustment-price-total">$ 0,00</strong></div>
+                        <div><span>Diferencia a facturar</span><strong id="liq-adjustment-invoice-difference">$ 0,00</strong></div>
+                      </div>
+                    </div>
                     <div class="advanced-subpanel consigned-only">
                       <h3>Gastos de liquidacion consignada</h3>
                       <div class="form-grid">
@@ -1357,8 +1880,8 @@
                       <strong id="liq-neto-liq-prod">$ 0,00</strong>
                     </div>
                     <div class="advanced-subpanel cash-block">
-                      <h3>Efectivo</h3>
-                      <label>Importe efectivo sin IVA si aplica<input id="liq-efectivo-prod" class="money-input" inputmode="decimal"></label>
+                      <h3 id="liq-cash-prod-title">Importe complementario vendedor</h3>
+                      <label><span id="liq-cash-prod-amount-label">Importe efectivo sin IVA si aplica</span><input id="liq-efectivo-prod" class="money-input" inputmode="decimal"></label>
                       <label>Concepto gasto efectivo<input id="liq-cash-exp-concept-prod" placeholder="Ej.: flete o descuento"></label>
                       <label>Gasto descontado del efectivo<input id="liq-cash-exp-prod" class="money-input" inputmode="decimal"></label>
                       <label class="check-line"><input id="liq-comision-efect-prod-enabled" type="checkbox"> Cobrar comision propia al vendedor sobre efectivo</label>
@@ -1501,6 +2024,7 @@
                     <th>Vendedor</th>
                     <th>Comprador</th>
                     <th>Total</th>
+                    <th>Estado</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -1559,13 +2083,19 @@
           <div class="form-grid cc-filters">
             <label>Ver por<select id="cc-view-mode"><option value="CLIENTE">Cliente</option><option value="CONSIGNATARIA">Consignataria</option><option value="COMISIONISTA">Comisionista</option></select></label>
             <label>Buscar cliente / consignataria<input id="cc-client-search" list="cc-client-list" autocomplete="off" placeholder="Escribir razon social, CUIT o concepto"></label>
+            <label>Palabra clave dentro de la cuenta<input id="cc-keyword-filter" autocomplete="off" placeholder="Comprobante, consignataria, cliente, concepto"></label>
             <label>Estado<select id="cc-status-filter"><option value="TODOS">Todos</option><option value="PENDIENTE">Pendientes</option><option value="PARCIAL">Parciales</option><option value="IMPUTADO">Imputados</option><option value="ANULADO">Anulados</option></select></label>
             <label>Concepto<select id="cc-concept-filter"><option value="TODOS">Todos</option><option value="COMISION">Comisiones pendientes</option></select></label>
+            <label>Tipo de operacion<select id="cc-operation-type-filter"><option value="TODOS">Todas</option><option value="DIRECTA">Directas</option><option value="CONSIGNADA">Consignadas</option></select></label>
             <label>Vencimiento<select id="cc-due-filter"><option value="TODOS">Todos</option><option value="VENCIDOS">Vencidos</option><option value="7">Proximos 7 dias</option><option value="15">Proximos 15 dias</option><option value="30">Proximos 30 dias</option></select></label>
             <label>Fecha desde<input id="cc-date-from" type="date"></label>
             <label>Fecha hasta<input id="cc-date-to" type="date"></label>
+            <label>Cuenta asociada<input id="cc-associated-account-filter" list="cc-associated-account-list" autocomplete="off" placeholder="Ej.: Pedro Alonso"></label>
+            <label>Tipo de origen<input id="cc-origin-type-filter" list="cc-origin-type-list" autocomplete="off" placeholder="Ej.: Remate, venta, adelanto"></label>
           </div>
           <datalist id="cc-client-list"></datalist>
+          <datalist id="cc-associated-account-list"></datalist>
+          <datalist id="cc-origin-type-list"></datalist>
           <div class="cc-entry-panel" id="cc-external-panel" hidden>
             <div class="panel-head"><h3 id="cc-external-title">Movimiento externo</h3><button type="button" class="ghost-button" id="cc-close-external">Cerrar</button></div>
             <div class="form-grid">
@@ -1576,9 +2106,9 @@
                 <option>Venta a Feria</option>
                 <option>Flete</option>
                 <option>Gastos DTe</option>
-                <option>Gastos GuÃ­as</option>
+                <option>Gastos Guías</option>
                 <option>Pesadas</option>
-                <option>VacunaciÃ³n</option>
+                <option>Vacunación</option>
                 <option>Gastos veterinarios</option>
                 <option>Otros gastos</option>
               </select></label>
@@ -1587,6 +2117,8 @@
               <label>Vencimiento<input id="cc-external-due" type="date"></label>
               <label id="cc-external-amount-wrap">Importe<input id="cc-external-amount" class="money-input" inputmode="decimal"></label>
               <label>Observacion<input id="cc-external-notes"></label>
+              <label>Cuenta asociada<input id="cc-external-associated-account" list="cc-associated-account-list" placeholder="Ej.: Pedro Alonso"></label>
+              <label>Tipo de origen<input id="cc-external-origin-type" list="cc-origin-type-list" placeholder="Ej.: Remate, venta, adelanto"></label>
             </div>
             <div class="cc-subpanel">
               <label class="check-field"><input type="checkbox" id="cc-external-multiple-due"> Cargar varios vencimientos para esta liquidacion</label>
@@ -1632,24 +2164,29 @@
             <div class="panel-head"><h3 id="cc-payment-title">Registrar pago / cobro</h3><button type="button" class="ghost-button" id="cc-close-payment">Cerrar</button></div>
             <div class="cc-mode-help" id="cc-payment-mode-help"></div>
             <div class="form-grid">
-              <label>Tipo<select id="cc-payment-type"><option value="COBRO">Cobro recibido</option><option value="PAGO">Pago realizado</option><option value="COMPENSACION">Compensacion / aplicacion de saldo</option></select></label>
+              <label>Tipo<select id="cc-payment-type"><option value="COBRO">Cobro recibido</option><option value="PAGO">Pago realizado</option><option value="FONDO">Fondos recibidos directamente por el cliente</option><option value="COMPENSACION">Aplicar saldo disponible</option></select></label>
               <label>Cliente<input id="cc-payment-client" list="cc-client-list"></label>
               <label>Fecha<input id="cc-payment-date" type="date"></label>
               <label>Importe<input id="cc-payment-amount" class="money-input" inputmode="decimal"></label>
-              <label>Medio<select id="cc-payment-method"><option>Transferencia</option><option>E-cheq</option><option>Cheque</option><option>Efectivo</option><option>Otro</option></select></label>
+              <label>Medio<select id="cc-payment-method"><option>Transferencia</option><option>E-cheq</option><option>Cheque</option><option>Efectivo</option><option>Dolares</option><option>Otro</option></select></label>
               <label>Referencia<input id="cc-payment-reference" placeholder="Comprobante, recibo o detalle"></label>
               <label>Observacion<input id="cc-payment-notes"></label>
+              <label>Cuenta asociada<input id="cc-payment-associated-account" list="cc-associated-account-list" placeholder="Ej.: Pedro Alonso"></label>
+              <label>Tipo de origen<input id="cc-payment-origin-type" list="cc-origin-type-list" placeholder="Ej.: Remate, adelanto, flete"></label>
             </div>
             <div class="cc-subpanel" id="cc-instrument-panel">
               <div class="panel-head"><h3>Detalle de instrumentos</h3><span class="subtle" id="cc-instrument-summary">Sin instrumentos cargados</span></div>
               <div class="form-grid">
-                <label>Medio<select id="cc-instrument-method"><option>E-cheq</option><option>Cheque</option><option>Transferencia</option><option>Efectivo</option><option>Otro</option></select></label>
+                <label>Medio<select id="cc-instrument-method"><option>E-cheq</option><option>Cheque</option><option>Transferencia</option><option>Efectivo</option><option>Dolares</option><option>Otro</option></select></label>
+                <label>Aplicacion<select id="cc-instrument-application"><option value="CLIENTE">Entrega al cliente</option><option value="GASTO">Pago de gasto / tercero</option></select></label>
                 <label>Vencimiento / fecha<input id="cc-instrument-date" type="date"></label>
                 <label>Importe<input id="cc-instrument-amount" class="money-input" inputmode="decimal"></label>
                 <label>Referencia<input id="cc-instrument-reference" placeholder="Numero, banco o detalle"></label>
+                <label id="cc-instrument-dollars-label" hidden>Total dolares<input id="cc-instrument-dollars" inputmode="decimal" placeholder="USD"></label>
+                <label id="cc-instrument-dollar-rate-label" hidden>Cotizacion en pesos<input id="cc-instrument-dollar-rate" class="money-input" inputmode="decimal" placeholder="$ 0,00"></label>
               </div>
               <div class="form-actions"><button type="button" class="ghost-button" id="cc-add-instrument">Agregar instrumento</button></div>
-              <div class="table-wrap compact-table"><table><thead><tr><th>Medio</th><th>Fecha</th><th>Referencia</th><th>Importe</th><th></th></tr></thead><tbody id="cc-instrument-body"></tbody></table></div>
+              <div class="table-wrap compact-table"><table><thead><tr><th>Medio</th><th>Aplicacion</th><th>Fecha</th><th>Referencia</th><th>Dolares</th><th>Cotizacion</th><th>Importe</th><th></th></tr></thead><tbody id="cc-instrument-body"></tbody></table></div>
             </div>
             <div class="cc-subpanel cc-counterparty-option">
               <div class="cc-counterparty-heading">
@@ -1679,7 +2216,18 @@
                 <div><span>Disponible que queda al cliente</span><strong id="cc-comp-balance-after">$ 0,00</strong></div>
               </div>
             </div>
-            <div class="cc-subpanel">
+            <div class="cc-subpanel" id="cc-fund-panel" hidden>
+              <div class="panel-head">
+                <h3>Origen del dinero disponible</h3>
+                <span class="subtle">Registra solamente el importe que efectivamente recibió el cliente en su cuenta. No genera un nuevo cobro ni modifica nuevamente la cuenta corriente.</span>
+              </div>
+              <div class="form-grid">
+                <label class="span-2">Tomar transferencia o instrumento de<select id="cc-fund-source"></select></label>
+                <label class="span-2">Identificacion del origen<input id="cc-fund-origin-label" placeholder="Ej.: Venta Ronchi - transferencia recibida por Odriozola"></label>
+              </div>
+              <p class="subtle" id="cc-fund-source-help">Primero seleccione el cliente para ver sus pagos registrados.</p>
+            </div>
+            <div class="cc-subpanel" id="cc-imputation-panel">
               <div class="panel-head"><h3 id="cc-imputation-title">Imputar pendientes / descontar comisiones y gastos</h3><span class="subtle" id="cc-imputation-summary">Seleccione un cliente</span></div>
               <label class="check-field"><input type="checkbox" id="cc-discount-only"> Descontar gastos/comisiones y dejar saldo pendiente</label>
               <div class="table-wrap compact-table"><table><thead><tr><th></th><th>Vto.</th><th>Concepto</th><th>Comprobante</th><th>Importe</th></tr></thead><tbody id="cc-imputation-body"></tbody></table></div>
@@ -1694,6 +2242,36 @@
             <div><span>Cliente</span><strong id="cc-selected-client">Todos</strong></div>
             <div><span>Saldo</span><strong id="cc-selected-balance">$ 0,00</strong></div>
             <div><span>Movimientos</span><strong id="cc-selected-count">0</strong></div>
+          </div>
+          <div class="cc-subpanel" id="cc-associated-balance-panel" hidden>
+            <div class="panel-head">
+              <div>
+                <h3>Saldos por cuenta asociada</h3>
+                <p class="subtle">Control independiente por negocio. No depende del filtro de estado de los movimientos.</p>
+              </div>
+              <span class="subtle" id="cc-associated-balance-total">Sin saldos asociados</span>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead><tr><th>Cliente</th><th>Cuenta asociada</th><th>Tipo de origen</th><th>Situacion</th><th>Saldo</th></tr></thead>
+                <tbody id="cc-associated-balance-body"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="cc-subpanel" id="cc-funds-summary-panel" hidden>
+            <div class="panel-head">
+              <div>
+                <h3>Fondos disponibles del cliente</h3>
+                <p class="subtle">Dinero recibido directamente por el cliente, separado por origen y con sus aplicaciones.</p>
+              </div>
+              <span class="subtle" id="cc-funds-summary-total">Disponible $ 0,00</span>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead><tr><th>Origen</th><th>Recibido</th><th>Aplicado</th><th>Disponible</th><th>Acciones</th></tr></thead>
+                <tbody id="cc-funds-summary-body"></tbody>
+              </table>
+            </div>
           </div>
           <div class="cc-subpanel" id="cc-commission-summary-panel" hidden>
             <div class="panel-head">
@@ -1716,6 +2294,37 @@
                 <tbody id="cc-commission-summary-body"></tbody>
               </table>
             </div>
+          </div>
+          <div class="cc-subpanel" id="cc-commission-invoice-panel">
+            <div class="panel-head">
+              <div>
+                <h3>Facturar comisiones del cliente</h3>
+                <p class="subtle">Asocia una factura a comisiones ya cargadas. No duplica la cuenta corriente.</p>
+              </div>
+              <span class="subtle" id="cc-commission-invoice-count">Busque un cliente</span>
+            </div>
+            <div class="form-grid">
+              <label>Numero de factura emitida<input id="cc-commission-invoice-number" placeholder="Ej. F A-0001-00000012"></label>
+              <label>Fecha factura<input id="cc-commission-invoice-date" type="date"></label>
+              <label class="span-2">Observacion<input id="cc-commission-invoice-note" placeholder="Periodo, detalle interno o referencia"></label>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Vto.</th>
+                    <th>Cliente</th>
+                    <th>Comision</th>
+                    <th>Comprobante</th>
+                    <th>Importe</th>
+                  </tr>
+                </thead>
+                <tbody id="cc-commission-invoice-body"></tbody>
+              </table>
+            </div>
+            <div class="form-actions"><button type="button" class="primary-button" id="cc-commission-invoice-save">Registrar factura de comisiones</button></div>
+            <p class="form-message" id="cc-commission-invoice-message"></p>
           </div>
           <div class="table-wrap compact-table">
             <table>
@@ -1855,6 +2464,24 @@
             </div>
             <button type="button" class="ghost-button" id="cash-print">Imprimir / PDF</button>
           </div>
+          <div class="form-grid cc-filters">
+            <label>Estado
+              <select id="cash-filter-status">
+                <option value="TODOS">Todos</option>
+                <option value="PENDIENTE">Pendientes</option>
+                <option value="RECUPERADO">Recuperados / rendidos</option>
+              </select>
+            </label>
+            <label>Origen<input id="cash-filter-source" list="cash-source-list" placeholder="Caja, cuenta o efectivo"></label>
+            <label>Adelantado por<input id="cash-filter-paid-by" list="cash-paid-by-list" placeholder="Persona"></label>
+            <label>Categoria<select id="cash-filter-category"><option value="">Todas</option></select></label>
+          </div>
+          <datalist id="cash-source-list"></datalist>
+          <datalist id="cash-paid-by-list"></datalist>
+          <div class="panel-head compact-head">
+            <span class="subtle" id="cash-filter-summary">Sin filtros aplicados.</span>
+            <button type="button" class="ghost-button" id="cash-clear-filters">Limpiar filtros</button>
+          </div>
           <div class="table-wrap compact-table">
             <table>
               <thead>
@@ -1933,7 +2560,7 @@
               <div class="form-grid">
                 <label>Fecha recibido<input id="cash-rec-date" type="date" required></label>
                 <label>Recibido de<input id="cash-rec-client" list="cc-client-list" placeholder="Cliente / persona" required></label>
-                <label>Referencia<input id="cash-rec-reference" placeholder="Ej.: efectivo venta, sobre, operaciÃ³n"></label>
+                <label>Referencia<input id="cash-rec-reference" placeholder="Ej.: efectivo venta, sobre, operación"></label>
                 <label>Importe recibido<input id="cash-rec-amount" inputmode="decimal" placeholder="$ 0,00" required></label>
               </div>
               <label>Observaciones<textarea id="cash-rec-notes" rows="2" placeholder="Detalle interno"></textarea></label>
@@ -2078,7 +2705,7 @@
               <h2 id="document-preview-title">Vista del comprobante</h2>
               <p class="subtle" id="document-preview-subtitle">Selecciona un PDF para verlo en pantalla.</p>
             </div>
-            <a class="ghost-button" id="document-preview-open" href="#" target="_blank" rel="noopener">Abrir en otra pestaÃ±a</a>
+            <a class="ghost-button" id="document-preview-open" href="#" target="_blank" rel="noopener">Abrir en otra pestaña</a>
           </div>
           <iframe id="document-preview-frame" class="document-preview-frame" title="Vista previa PDF"></iframe>
         </div>
@@ -2135,14 +2762,29 @@
         <div class="panel">
           <div class="panel-head">
             <div>
-              <h2>Facturar comisiones del periodo</h2>
+              <h2>Facturar comisiones pendientes</h2>
               <p class="subtle">Asocia una factura emitida a comisiones pendientes ya creadas. No genera deuda nueva.</p>
             </div>
+            <span class="subtle" id="commissionist-invoice-summary">Sin comisiones listas para facturar</span>
           </div>
           <div class="form-grid">
             <label>Numero de factura emitida<input id="commissionist-invoice-number" placeholder="Ej. F A-0001-00000012"></label>
             <label>Fecha factura<input id="commissionist-invoice-date" type="date"></label>
             <label class="span-2">Observacion<input id="commissionist-invoice-note" placeholder="Periodo, detalle interno o referencia"></label>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Facturar</th>
+                  <th>Fecha</th>
+                  <th>Comprobante</th>
+                  <th>Cliente / detalle</th>
+                  <th>Total pendiente</th>
+                </tr>
+              </thead>
+              <tbody id="commissionist-invoice-body"></tbody>
+            </table>
           </div>
           <div class="form-actions">
             <button type="button" class="primary-button" id="commissionist-invoice-generate">Registrar factura de comisiones</button>
@@ -2174,6 +2816,7 @@
                   <th>Total</th>
                   <th>Pendiente</th>
                   <th>Estado</th>
+                  <th>Accion</th>
                 </tr>
               </thead>
               <tbody id="commissionist-status-body"></tbody>
@@ -2197,6 +2840,7 @@
                   <th>Liquido a</th>
                   <th>Cliente liquidado</th>
                   <th>Contraparte</th>
+                  <th>Tipo comision</th>
                   <th>Comprobante</th>
                   <th>Comision a facturar</th>
                 </tr>
@@ -2204,13 +2848,16 @@
               <tbody id="commissionist-body"></tbody>
             </table>
           </div>
+          <div class="table-pagination" id="commissionist-pagination"></div>
         </div>
       </section>
     </main>
 
-    <script src="/app.js?v=20260713-campos-calculo-directo-v5"></script>
+  <script src="/app.js?v=20261102-saldos-asociados-v26"></script>
   </body>
 </html>
+
+
 
 
 
