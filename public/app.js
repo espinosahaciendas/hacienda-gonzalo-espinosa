@@ -12,6 +12,7 @@ const state = {
   editingRenspa: "",
   showAllClients: false,
   selectedOperationId: "",
+  operationReadOnly: false,
   categorias: [],
   tabRules: [],
   currentOperation: null,
@@ -5154,7 +5155,7 @@ function renderOperationSearchPage() {
           <td>${plainNumberValue(summary.heads)}</td>
           <td>${plainNumberValue(summary.kilos)} kgs</td>
           <td>${moneyValue(summary.amount)}</td>
-          <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? `<div class="operation-row-actions"><span class="subtle">Registro comercial</span><button type="button" class="operation-action-button operation-action-reactivate" data-reactivate-operation="${escapeHtml(operation.id)}" title="Reactivar operacion" aria-label="Reactivar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8634;</span></button></div>` : `<button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button>`}</td>
+          <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? `<div class="operation-row-actions"><span class="subtle">Registro comercial</span><button type="button" class="operation-action-button operation-action-view" data-view-derived-operation="${escapeHtml(operation.id)}" title="Ver carga original" aria-label="Ver carga original de la operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#128065;</span></button><button type="button" class="operation-action-button operation-action-reactivate" data-reactivate-operation="${escapeHtml(operation.id)}" title="Reactivar operacion" aria-label="Reactivar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8634;</span></button></div>` : `<button type="button" class="small-button" data-open-operation-search="${escapeHtml(operation.id)}">Abrir</button>`}</td>
         </tr>`;
       }).join("")
     : `<tr><td colspan="11">No hay operaciones para los filtros aplicados.</td></tr>`;
@@ -5792,8 +5793,9 @@ function matchesCurrentAccountCommissionistSearch(movement, words, exactCommissi
   const commissionist = movementCommissionistAccountKey(movement);
   if (exactCommissionist) return commissionist === exactCommissionist;
   if (!words.length) return Boolean(commissionist);
+  if (!commissionist) return false;
   const detail = commissionistDetailFromObservation(movement.observacion);
-  const haystack = normalizeSearch(`${detail?.comisionista || ""} ${movement.comisionista || ""} ${movement.cliente || ""} ${movement.comprobante || ""} ${movement.concepto || ""}`);
+  const haystack = normalizeSearch(`${commissionist} ${detail?.comisionista || ""} ${movement.comisionista || ""}`);
   return words.every((word) => haystack.includes(word));
 }
 
@@ -6021,6 +6023,51 @@ function renderCurrentAccountClassificationOptions() {
   render("#cc-origin-type-list", origins);
 }
 
+function renderAssociatedAccountBalances({ viewMode, words, exactClient, associatedAccountFilter, originTypeFilter }) {
+  const panel = $("#cc-associated-balance-panel");
+  const body = $("#cc-associated-balance-body");
+  const totalNode = $("#cc-associated-balance-total");
+  if (!panel || !body || !totalNode) return;
+  if (viewMode !== "CLIENTE") {
+    panel.hidden = true;
+    return;
+  }
+  const groups = new Map();
+  (state.cuenta?.movimientos || [])
+    .filter((movement) => String(movement.estado || "").toUpperCase() !== "ANULADO")
+    .filter((movement) => movement.cuentaAsociada || movement.tipoOrigen)
+    .filter((movement) => matchesCurrentAccountClientSearch(movement, words, exactClient))
+    .filter((movement) => !associatedAccountFilter || normalizeSearch(movement.cuentaAsociada || "").includes(associatedAccountFilter))
+    .filter((movement) => !originTypeFilter || normalizeSearch(movement.tipoOrigen || "").includes(originTypeFilter))
+    .forEach((movement) => {
+      const client = movement.cliente || "Sin cliente";
+      const account = movement.cuentaAsociada || "Sin cuenta informada";
+      const origin = movement.tipoOrigen || "Sin origen informado";
+      const key = [normalizeSearch(client), normalizeSearch(account), normalizeSearch(origin)].join("|");
+      const row = groups.get(key) || { client, account, origin, balance: 0 };
+      row.balance += Number(movement.importe || 0);
+      groups.set(key, row);
+    });
+  const rows = [...groups.values()]
+    .filter((row) => Math.abs(row.balance) > 0.01)
+    .sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance) || a.account.localeCompare(b.account, "es"));
+  panel.hidden = !rows.length;
+  if (!rows.length) {
+    body.innerHTML = "";
+    totalNode.textContent = "Sin saldos asociados";
+    return;
+  }
+  const total = rows.reduce((sum, row) => sum + row.balance, 0);
+  totalNode.textContent = `Saldo asociado ${moneyValue(total)}`;
+  body.innerHTML = rows.map((row) => `<tr>
+    <td>${escapeHtml(row.client)}</td>
+    <td><strong>${escapeHtml(row.account)}</strong></td>
+    <td>${escapeHtml(row.origin)}</td>
+    <td class="${row.balance > 0 ? "positive" : "negative"}">${row.balance > 0 ? "A recuperar / cobrar" : "Disponible / a pagar"}</td>
+    <td class="amount ${row.balance > 0 ? "positive" : "negative"}">${moneyValue(Math.abs(row.balance))}</td>
+  </tr>`).join("");
+}
+
 function renderCuentaCorriente() {
   if (!state.cuenta) return;
   renderCurrentAccountClassificationOptions();
@@ -6076,6 +6123,7 @@ function renderCuentaCorriente() {
   $("#cc-selected-balance").textContent = moneyValue(balance);
   $("#cc-selected-balance").className = amountClass(balance);
   $("#cc-selected-count").textContent = movements.length;
+  renderAssociatedAccountBalances({ viewMode, words, exactClient, associatedAccountFilter, originTypeFilter });
   renderClientFundsSummary(viewMode === "CLIENTE" ? exactClient : "");
   const commissionRows = commissionSplitSummary(movements, viewMode);
   const commissionTotals = commissionSplitTotals(commissionRows);
@@ -8302,12 +8350,13 @@ function commissionistAccountMovementApplies(movement, commissionist) {
     || origin === "COMISION"
     || concept.includes("comision");
   if (!isCommissionLike) return false;
+  const detailCommissionist = normalizeSearch(commissionistDetailFromObservation(movement.observacion)?.comisionista || "");
+  if (detailCommissionist) return detailCommissionist === key;
   if (origin === "CONSIGNATARIA") {
     return normalizeSearch(movement.cliente) === key
       || normalizeSearch(movement.consignataria) === key;
   }
-  return normalizeSearch(movement.cliente) === key
-    || normalizeSearch(movement.comisionista) === key;
+  return normalizeSearch(movement.comisionista) === key;
 }
 
 function commissionistAccountOperationIds(commissionist) {
@@ -8941,7 +8990,7 @@ function renderOperaciones() {
         <td>${escapeHtml(operation.comprador || operation.consignataria || "-")}</td>
         <td>${escapeHtml(operation.total || "-")}</td>
         <td>${escapeHtml(statusInfo.label.toUpperCase())}</td>
-        <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? `<div class="operation-row-actions"><span class="subtle">Registro comercial</span><button type="button" class="operation-action-button operation-action-reactivate" data-reactivate-operation="${escapeHtml(operation.id)}" title="Reactivar operacion" aria-label="Reactivar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8634;</span></button></div>` : `<div class="operation-row-actions"><button type="button" class="operation-action-button operation-action-open" data-open-sale="${escapeHtml(operation.id)}" title="Continuar operacion" aria-label="Continuar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8594;</span></button>${statusInfo.pending ? `<button type="button" class="operation-action-button operation-action-derive" data-derive-operation="${escapeHtml(operation.id)}" title="Derivar a movimiento externo" aria-label="Derivar operacion ${escapeHtml(operation.id)} a movimiento externo"><span aria-hidden="true">&#8599;</span></button>` : ""}</div>`}</td>
+        <td>${statusInfo.annulled ? '<span class="subtle">Sin acciones</span>' : statusInfo.derived ? `<div class="operation-row-actions"><span class="subtle">Registro comercial</span><button type="button" class="operation-action-button operation-action-view" data-view-derived-operation="${escapeHtml(operation.id)}" title="Ver carga original" aria-label="Ver carga original de la operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#128065;</span></button><button type="button" class="operation-action-button operation-action-reactivate" data-reactivate-operation="${escapeHtml(operation.id)}" title="Reactivar operacion" aria-label="Reactivar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8634;</span></button></div>` : `<div class="operation-row-actions"><button type="button" class="operation-action-button operation-action-open" data-open-sale="${escapeHtml(operation.id)}" title="Continuar operacion" aria-label="Continuar operacion ${escapeHtml(operation.id)}"><span aria-hidden="true">&#8594;</span></button>${statusInfo.pending ? `<button type="button" class="operation-action-button operation-action-derive" data-derive-operation="${escapeHtml(operation.id)}" title="Derivar a movimiento externo" aria-label="Derivar operacion ${escapeHtml(operation.id)} a movimiento externo"><span aria-hidden="true">&#8599;</span></button>` : ""}</div>`}</td>
       </tr>
     `;})
     .join("");
@@ -9169,9 +9218,9 @@ function renderSaleLines(lines) {
           <td>${escapeHtml(line.kgNetoVend || 0)}</td>
           <td>${currency.format(Number(line.precioVend || 0))}</td>
           <td>${currency.format(Number(line.importeVend || 0))}</td>
-          <td class="row-actions">
+          <td class="row-actions">${state.operationReadOnly ? '<span class="subtle">Solo lectura</span>' : `
             <button type="button" class="small-button" data-edit-sale-line="${escapeHtml(line.id)}">Editar</button>
-            <button type="button" class="small-button danger-button" data-delete-sale-line="${escapeHtml(line.id)}">Quitar</button>
+            <button type="button" class="small-button danger-button" data-delete-sale-line="${escapeHtml(line.id)}">Quitar</button>`}
           </td>
         </tr>
       `).join("") + (showKgTotal ? `<tr class="report-total"><td colspan="2">Total kilos</td><td>${kgValue(totalKgBruto)}</td><td colspan="3"></td></tr>` : "")
@@ -9298,7 +9347,7 @@ function renderPartialBilling() {
         <td>${moneyValue(line.importeNeto)}</td>
         <td>${moneyValue(line.iva)}</td>
         <td>${escapeHtml(line.observaciones || "-")}</td>
-        <td><button type="button" class="small-button danger-button" data-partial-delete="${escapeHtml(line.id)}">Eliminar</button></td>
+        <td>${state.operationReadOnly ? '<span class="subtle">Solo lectura</span>' : `<button type="button" class="small-button danger-button" data-partial-delete="${escapeHtml(line.id)}">Eliminar</button>`}</td>
       </tr>
     `).join("")
     : `<tr><td colspan="10">Sin facturacion parcial cargada.</td></tr>`;
@@ -10340,8 +10389,25 @@ function showOperationHistory() {
 
 function setOperationModeExisting(operation) {
   $("#operation-form-title").textContent = `Operacion ${operation.id}`;
-  $("#operation-form-subtitle").textContent = "Operacion cargada o pendiente. Puede revisar datos y continuar venta, liquidacion o reporte.";
+  $("#operation-form-subtitle").textContent = state.operationReadOnly
+    ? "Carga original conservada como registro comercial. Consulta habilitada sin posibilidad de modificar."
+    : "Operacion cargada o pendiente. Puede revisar datos y continuar venta, liquidacion o reporte.";
   $("#operation-new").hidden = false;
+}
+
+function isDerivedOperation(operation) {
+  return String(operation?.estado || "").trim().toUpperCase() === "DERIVADA_EXTERNO";
+}
+
+function applyOperationReadOnlyMode(readOnly) {
+  state.operationReadOnly = Boolean(readOnly);
+  $("#operation-layout").classList.toggle("operation-readonly", state.operationReadOnly);
+  $("#operation-readonly-banner").hidden = !state.operationReadOnly;
+  const controls = $all("#operation-form input, #operation-form select, #operation-form textarea, #operation-form button, #sale-panel input, #sale-panel select, #sale-panel textarea, #sale-panel button, #liquidation-form input, #liquidation-form select, #liquidation-form textarea, #liquidation-form button");
+  controls.forEach((control) => {
+    if (control.id === "operation-new" || control.matches("[data-operation-step]")) return;
+    control.disabled = state.operationReadOnly;
+  });
 }
 
 function setOperationStep(step) {
@@ -10389,6 +10455,7 @@ async function openSale(operationId, step = "sale") {
   const operation = response.item;
   state.currentOperation = operation;
   state.selectedOperationId = operationId;
+  applyOperationReadOnlyMode(isDerivedOperation(operation));
   await fillOperationForm(operation);
   setOperationModeExisting(operation);
   $("#sale-operation-label").textContent = `${operation.id} - ${operation.vendedor || ""} / ${operation.comprador || operation.consignataria || ""}`;
@@ -10400,9 +10467,10 @@ async function openSale(operationId, step = "sale") {
   renderCategoryAdmin();
   fillLiquidationForm(operation.liquidacion || {});
   renderReport();
-  setOperationStep(step);
+  setOperationStep(state.operationReadOnly ? "sale" : step);
   syncSaleMode();
   renderSalePreview();
+  applyOperationReadOnlyMode(state.operationReadOnly);
   setSaleMessage("");
   setLiquidationMessage("");
 }
@@ -10465,6 +10533,7 @@ function resetOperationForm() {
   $("#operation-id").value = "";
   state.selectedOperationId = "";
   state.currentOperation = null;
+  applyOperationReadOnlyMode(false);
   state.editingSaleLineId = "";
   $("#sale-panel").hidden = true;
   $("#liquidation-panel").hidden = true;
@@ -10561,6 +10630,10 @@ function syncOperationType() {
 
 async function saveOperation(event) {
   event.preventDefault();
+  if (state.operationReadOnly) {
+    setOperationMessage("Esta operacion derivada se conserva como registro comercial y no se puede modificar.", "error");
+    return;
+  }
   setOperationMessage("Guardando borrador...");
   const originManual = $("#operation-renspa-origin-manual").value.trim();
   const destinationManual = $("#operation-renspa-destination-manual").value.trim();
@@ -10667,6 +10740,7 @@ function fillSaleLineForm(line) {
 
 async function deleteSaleLine(lineId) {
   if (!state.selectedOperationId || !lineId) return;
+  if (state.operationReadOnly) return;
   const confirmed = window.confirm("Se quitará sólo esta línea de venta. La operación queda cargada. ¿Continuar?");
   if (!confirmed) return;
   setSaleMessage("Quitando linea...");
@@ -10688,6 +10762,7 @@ async function deleteSaleLine(lineId) {
 
 async function savePartialBilling() {
   if (!state.selectedOperationId) return;
+  if (state.operationReadOnly) return;
   $("#partial-message").textContent = "Guardando parcial...";
   $("#partial-message").className = "form-message";
   try {
@@ -10724,6 +10799,7 @@ async function savePartialBilling() {
 
 async function deletePartialBilling(lineId) {
   if (!state.selectedOperationId || !lineId) return;
+  if (state.operationReadOnly) return;
   const confirmed = window.confirm("Se quitará este parcial y su movimiento de cuenta corriente si tenía impacto. ¿Continuar?");
   if (!confirmed) return;
   try {
@@ -10741,6 +10817,10 @@ async function deletePartialBilling(lineId) {
 
 async function saveSaleLine(event) {
   event.preventDefault();
+  if (state.operationReadOnly) {
+    setSaleMessage("La carga original es de solo lectura.", "error");
+    return;
+  }
   if (!state.selectedOperationId) {
     setSaleMessage("Primero hay que abrir una operacion.", "error");
     return;
@@ -10804,6 +10884,10 @@ async function saveSaleLine(event) {
 
 async function saveLiquidation(event) {
   event.preventDefault();
+  if (state.operationReadOnly) {
+    setLiquidationMessage("La liquidacion de esta operacion se gestiona como movimiento externo.", "error");
+    return;
+  }
   if (!state.selectedOperationId) {
     setLiquidationMessage("Primero hay que abrir una operacion.", "error");
     return;
@@ -12417,6 +12501,11 @@ async function init() {
     editClient(button.dataset.editClient);
   });
   $("#operaciones-body").addEventListener("click", (event) => {
+    const viewButton = event.target.closest("[data-view-derived-operation]");
+    if (viewButton) {
+      openSale(viewButton.dataset.viewDerivedOperation, "sale");
+      return;
+    }
     const reactivateButton = event.target.closest("[data-reactivate-operation]");
     if (reactivateButton) {
       reactivateDerivedOperation(reactivateButton.dataset.reactivateOperation);
@@ -12432,6 +12521,12 @@ async function init() {
     openSale(button.dataset.openSale);
   });
   $("#operation-search-body").addEventListener("click", (event) => {
+    const viewButton = event.target.closest("[data-view-derived-operation]");
+    if (viewButton) {
+      setView("operaciones");
+      openSale(viewButton.dataset.viewDerivedOperation, "sale");
+      return;
+    }
     const reactivateButton = event.target.closest("[data-reactivate-operation]");
     if (reactivateButton) {
       reactivateDerivedOperation(reactivateButton.dataset.reactivateOperation);

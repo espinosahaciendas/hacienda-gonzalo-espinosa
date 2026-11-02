@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-  <link rel="stylesheet" href="/styles.css?v=20261030-instrumentos-aplicacion-v17">
+  <link rel="stylesheet" href="/styles.css?v=20261102-operacion-derivada-v19">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -1432,6 +1432,10 @@
           </form>
 
           <div class="operation-list-block">
+            <div class="cc-mode-help operation-readonly-banner" id="operation-readonly-banner" hidden>
+              <strong>Registro comercial derivado - solo lectura</strong>
+              <span>Esta es la carga original de la operacion. La liquidacion se gestiona como movimiento externo y estos datos no se pueden modificar.</span>
+            </div>
             <div class="panel workflow-empty" id="operation-workflow-empty">
               <h2>Alta guiada</h2>
               <p>Complete los datos principales y continúe a la carga de venta.</p>
@@ -1497,7 +1501,7 @@
                   </table>
                 </div>
               </section>
-              <section class="sale-section">
+              <section class="sale-section sale-entry-section">
                 <div class="section-head">
                   <h3>Agregar nueva linea</h3>
                   <button type="submit" form="sale-form" class="primary-button" id="sale-line-save-top">Agregar linea</button>
@@ -2243,6 +2247,21 @@
             <div><span>Saldo</span><strong id="cc-selected-balance">$ 0,00</strong></div>
             <div><span>Movimientos</span><strong id="cc-selected-count">0</strong></div>
           </div>
+          <div class="cc-subpanel" id="cc-associated-balance-panel" hidden>
+            <div class="panel-head">
+              <div>
+                <h3>Saldos por cuenta asociada</h3>
+                <p class="subtle">Control independiente por negocio. No depende del filtro de estado de los movimientos.</p>
+              </div>
+              <span class="subtle" id="cc-associated-balance-total">Sin saldos asociados</span>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead><tr><th>Cliente</th><th>Cuenta asociada</th><th>Tipo de origen</th><th>Situacion</th><th>Saldo</th></tr></thead>
+                <tbody id="cc-associated-balance-body"></tbody>
+              </table>
+            </div>
+          </div>
           <div class="cc-subpanel" id="cc-funds-summary-panel" hidden>
             <div class="panel-head">
               <div>
@@ -2838,7 +2857,7 @@
       </section>
     </main>
 
-  <script src="/app.js?v=20261030-instrumentos-aplicacion-v25"></script>
+  <script src="/app.js?v=20261102-comisionista-explicito-v28"></script>
   </body>
 </html>
 

@@ -1231,6 +1231,16 @@ label textarea {
   background: #174440;
 }
 
+.operation-action-view {
+  background: #eef4f2;
+  border-color: #7d9d95;
+  color: #214f46;
+}
+
+.operation-action-view:hover {
+  background: #dfece8;
+}
+
 .operation-action-derive {
   background: var(--accent-soft);
   border-color: var(--accent);
@@ -1249,6 +1259,26 @@ label textarea {
 
 .operation-action-reactivate:hover {
   background: #d2e9e2;
+}
+
+.operation-readonly-banner {
+  margin-bottom: 12px;
+}
+
+.operation-readonly .sale-calculator-panel,
+.operation-readonly .sale-entry-section,
+.operation-readonly .partial-billing-section > .form-grid,
+.operation-readonly .partial-billing-section > .form-actions,
+.operation-readonly .category-admin,
+.operation-readonly #liquidation-form button[type="submit"] {
+  display: none !important;
+}
+
+.operation-readonly input:disabled,
+.operation-readonly select:disabled,
+.operation-readonly textarea:disabled {
+  color: var(--ink);
+  opacity: 1;
 }
 
 .liquidation-form {
