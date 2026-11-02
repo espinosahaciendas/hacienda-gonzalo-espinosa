@@ -54,6 +54,15 @@ function sendJson(res, statusCode, payload) {
   res.end(body);
 }
 
+async function assertOperationEditable(operationId) {
+  const operation = await dataSource.getOperacionDetalle(operationId);
+  if (String(operation?.estado || "").trim().toUpperCase() !== "DERIVADA_EXTERNO") return;
+  const error = new Error("La operacion fue derivada a movimiento externo y su carga original es de solo lectura. Reactivela antes de modificarla.");
+  error.statusCode = 409;
+  error.code = "OPERACION_DERIVADA_SOLO_LECTURA";
+  throw error;
+}
+
 function requestIp(req) {
   const forwarded = String(req?.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
   return forwarded || req?.socket?.remoteAddress || "sistema";
@@ -660,6 +669,7 @@ async function handleApi(req, res) {
     }
     if (req.method === "POST") {
       const body = await readBody(req);
+      if (body.id) await assertOperationEditable(body.id);
       sendJson(res, 200, { item: await dataSource.saveOperacion(body) });
       return;
     }
@@ -731,6 +741,7 @@ async function handleApi(req, res) {
 
   const ventaLineaMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/venta-lineas$/);
   if (ventaLineaMatch && req.method === "POST") {
+    await assertOperationEditable(decodeURIComponent(ventaLineaMatch[1]));
     const body = await readBody(req);
     sendJson(res, 200, { item: await dataSource.saveVentaLinea(decodeURIComponent(ventaLineaMatch[1]), body) });
     return;
@@ -738,6 +749,7 @@ async function handleApi(req, res) {
 
   const ventaLineaItemMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/venta-lineas\/([^/]+)$/);
   if (ventaLineaItemMatch && req.method === "PUT") {
+    await assertOperationEditable(decodeURIComponent(ventaLineaItemMatch[1]));
     const body = await readBody(req);
     sendJson(res, 200, {
       item: await dataSource.updateVentaLinea(
@@ -749,6 +761,7 @@ async function handleApi(req, res) {
     return;
   }
   if (ventaLineaItemMatch && req.method === "DELETE") {
+    await assertOperationEditable(decodeURIComponent(ventaLineaItemMatch[1]));
     sendJson(res, 200, {
       item: await dataSource.deleteVentaLinea(
         decodeURIComponent(ventaLineaItemMatch[1]),
@@ -760,6 +773,7 @@ async function handleApi(req, res) {
 
   const facturacionParcialMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/facturacion-parcial$/);
   if (facturacionParcialMatch && req.method === "POST") {
+    await assertOperationEditable(decodeURIComponent(facturacionParcialMatch[1]));
     const body = await readBody(req);
     sendJson(res, 200, { item: await dataSource.saveFacturacionParcial(decodeURIComponent(facturacionParcialMatch[1]), body) });
     return;
@@ -767,6 +781,7 @@ async function handleApi(req, res) {
 
   const facturacionParcialItemMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/facturacion-parcial\/([^/]+)$/);
   if (facturacionParcialItemMatch && req.method === "DELETE") {
+    await assertOperationEditable(decodeURIComponent(facturacionParcialItemMatch[1]));
     sendJson(res, 200, {
       item: await dataSource.deleteFacturacionParcial(
         decodeURIComponent(facturacionParcialItemMatch[1]),
@@ -778,6 +793,7 @@ async function handleApi(req, res) {
 
   const liquidacionMatch = parsed.pathname.match(/^\/api\/operaciones\/([^/]+)\/liquidacion$/);
   if (liquidacionMatch && req.method === "POST") {
+    await assertOperationEditable(decodeURIComponent(liquidacionMatch[1]));
     const body = await readBody(req);
     sendJson(res, 200, { item: await dataSource.saveLiquidacion(decodeURIComponent(liquidacionMatch[1]), body) });
     return;
