@@ -6033,8 +6033,16 @@ function renderAssociatedAccountBalances({ viewMode, words, exactClient, associa
     return;
   }
   const groups = new Map();
+  const addBalance = ({ client, account, origin, amount }) => {
+    if (!Number(amount)) return;
+    const key = [normalizeSearch(client), normalizeSearch(account), normalizeSearch(origin)].join("|");
+    const row = groups.get(key) || { client, account, origin, balance: 0 };
+    row.balance += Number(amount);
+    groups.set(key, row);
+  };
   (state.cuenta?.movimientos || [])
     .filter((movement) => String(movement.estado || "").toUpperCase() !== "ANULADO")
+    .filter((movement) => !movement.paymentId)
     .filter((movement) => movement.cuentaAsociada || movement.tipoOrigen)
     .filter((movement) => matchesCurrentAccountClientSearch(movement, words, exactClient))
     .filter((movement) => !associatedAccountFilter || normalizeSearch(movement.cuentaAsociada || "").includes(associatedAccountFilter))
@@ -6043,10 +6051,24 @@ function renderAssociatedAccountBalances({ viewMode, words, exactClient, associa
       const client = movement.cliente || "Sin cliente";
       const account = movement.cuentaAsociada || "Sin cuenta informada";
       const origin = movement.tipoOrigen || "Sin origen informado";
-      const key = [normalizeSearch(client), normalizeSearch(account), normalizeSearch(origin)].join("|");
-      const row = groups.get(key) || { client, account, origin, balance: 0 };
-      row.balance += Number(movement.importe || 0);
-      groups.set(key, row);
+      addBalance({ client, account, origin, amount: signedPendingAmount(movement) });
+    });
+  (state.cuenta?.pagos || [])
+    .filter((payment) => !payment.anulado && Number(payment.saldoFavor || 0) > 0.01)
+    .filter((payment) => payment.cuentaAsociada || payment.tipoOrigen)
+    .filter((payment) => matchesCurrentAccountClientSearch(payment, words, exactClient))
+    .filter((payment) => !associatedAccountFilter || normalizeSearch(payment.cuentaAsociada || "").includes(associatedAccountFilter))
+    .filter((payment) => !originTypeFilter || normalizeSearch(payment.tipoOrigen || "").includes(originTypeFilter))
+    .forEach((payment) => {
+      const type = String(payment.tipo || "").toUpperCase();
+      const sign = type === "PAGO" ? 1 : type === "COBRO" ? -1 : 0;
+      if (!sign) return;
+      addBalance({
+        client: payment.cliente || "Sin cliente",
+        account: payment.cuentaAsociada || "Sin cuenta informada",
+        origin: payment.tipoOrigen || "Sin origen informado",
+        amount: sign * Math.abs(Number(payment.saldoFavor || 0))
+      });
     });
   const rows = [...groups.values()]
     .filter((row) => Math.abs(row.balance) > 0.01)
