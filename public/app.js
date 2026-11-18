@@ -32,6 +32,7 @@ const state = {
   commissionistPage: 1,
   operationSearchRows: [],
   operationSearchPage: 1,
+  buyerSummaryRows: [],
   fieldQuoteRows: [],
   editingFieldQuoteId: "",
   fieldLeasePaymentRows: [],
@@ -63,7 +64,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20261026-cotizaciones-editables-v20";
+const APP_BUILD = "20261118-resumen-comprador-v30";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -5160,6 +5161,214 @@ function renderOperationSearchPage() {
       }).join("")
     : `<tr><td colspan="11">No hay operaciones para los filtros aplicados.</td></tr>`;
   renderPagination("#operation-search-pagination", page, "operation-search");
+}
+
+function buyerSummaryMetrics(operation) {
+  const lines = operation.saleLines || operation.draftData?.saleLines || [];
+  const lineTotals = lines.reduce((acc, line) => {
+    const calc = saleLineCalcValue(line, "comp");
+    const kilos = Number(calc.kgCalculo || line.kgComp || line.kgNetoVend || line.kgBruto || 0);
+    acc.heads += Number(line.cabezas || 0);
+    acc.kilos += kilos;
+    acc.gross += Number(line.importeComp || line.importeVend || 0);
+    return acc;
+  }, { heads: 0, kilos: 0, gross: 0 });
+  const liquidation = operation.liquidacion || operation.draftData?.liquidacion || {};
+  const gross = Number(liquidation.brutoComp || lineTotals.gross || operation.total || 0);
+  const invoiced = Number(liquidation.importeFacturado || 0);
+  const iva = Number(liquidation.ivaComp || 0);
+  const cash = Number(liquidation.efectivoComp || 0);
+  const settled = invoiced + cash;
+  const buyerTotal = settled + iva;
+  return {
+    ...lineTotals,
+    gross,
+    invoiced,
+    iva,
+    cash,
+    settled,
+    buyerTotal,
+    difference: gross - settled,
+    price: lineTotals.kilos ? gross / lineTotals.kilos : 0
+  };
+}
+
+function buyerSummaryTotals(rows = []) {
+  return rows.reduce((acc, row) => {
+    const metrics = row.metrics || buyerSummaryMetrics(row.operation || {});
+    acc.operations += 1;
+    acc.heads += metrics.heads;
+    acc.kilos += metrics.kilos;
+    acc.gross += metrics.gross;
+    acc.invoiced += metrics.invoiced;
+    acc.iva += metrics.iva;
+    acc.cash += metrics.cash;
+    acc.settled += metrics.settled;
+    acc.buyerTotal += metrics.buyerTotal;
+    acc.difference += metrics.difference;
+    return acc;
+  }, { operations: 0, heads: 0, kilos: 0, gross: 0, invoiced: 0, iva: 0, cash: 0, settled: 0, buyerTotal: 0, difference: 0 });
+}
+
+function selectedBuyerSummaryRows() {
+  return (state.buyerSummaryRows || []).filter((row) => row.selected);
+}
+
+function buyerSummaryGroups(rows = selectedBuyerSummaryRows()) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const label = String(row.troop || "Sin identificar").trim() || "Sin identificar";
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(row);
+  });
+  return Array.from(groups.entries())
+    .map(([label, items]) => ({ label, items, totals: buyerSummaryTotals(items) }))
+    .sort((a, b) => a.label.localeCompare(b.label, "es", { numeric: true }));
+}
+
+function buyerSummaryDifferenceClass(value) {
+  return Math.abs(Number(value || 0)) <= 0.02 ? "buyer-summary-ok" : "buyer-summary-warning";
+}
+
+function renderBuyerSummary() {
+  const rows = state.buyerSummaryRows || [];
+  const selected = selectedBuyerSummaryRows();
+  const totals = buyerSummaryTotals(selected);
+  const groups = buyerSummaryGroups(selected);
+  $("#buyer-summary-body").innerHTML = rows.length
+    ? rows.map((row) => {
+        const operation = row.operation;
+        const metrics = row.metrics;
+        return `<tr class="${buyerSummaryDifferenceClass(metrics.difference)}">
+          <td><input type="checkbox" data-buyer-summary-select="${escapeHtml(operation.id)}" ${row.selected ? "checked" : ""}></td>
+          <td><input class="buyer-summary-troop-input" data-buyer-summary-troop="${escapeHtml(operation.id)}" value="${escapeHtml(row.troop)}" aria-label="Tropa de ${escapeHtml(operation.id)}"></td>
+          <td>${escapeHtml(operation.id || "-")}</td>
+          <td>${escapeHtml(operation.fecha || operation.draftData?.fecha || "-")}</td>
+          <td>${escapeHtml(operation.vendedor || operation.draftData?.vendedor || "-")}</td>
+          <td>${plainNumberValue(metrics.heads)}</td>
+          <td>${plainNumberValue(metrics.kilos)} kgs</td>
+          <td>${moneyValue(metrics.price)}</td>
+          <td>${moneyValue(metrics.gross)}</td>
+          <td>${moneyValue(metrics.invoiced)}</td>
+          <td>${moneyValue(metrics.iva)}</td>
+          <td>${moneyValue(metrics.cash)}</td>
+          <td>${moneyValue(metrics.buyerTotal)}</td>
+          <td class="${buyerSummaryDifferenceClass(metrics.difference)}">${moneyValue(metrics.difference)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="14">Busque un comprador para seleccionar las operaciones.</td></tr>`;
+  $("#buyer-summary-groups-body").innerHTML = groups.length
+    ? groups.map((group) => `<tr class="${buyerSummaryDifferenceClass(group.totals.difference)}">
+        <td>${escapeHtml(group.label)}</td>
+        <td>${group.totals.operations}</td>
+        <td>${plainNumberValue(group.totals.heads)}</td>
+        <td>${plainNumberValue(group.totals.kilos)} kgs</td>
+        <td>${moneyValue(group.totals.kilos ? group.totals.gross / group.totals.kilos : 0)}</td>
+        <td>${moneyValue(group.totals.gross)}</td>
+        <td>${moneyValue(group.totals.invoiced)}</td>
+        <td>${moneyValue(group.totals.iva)}</td>
+        <td>${moneyValue(group.totals.cash)}</td>
+        <td>${moneyValue(group.totals.buyerTotal)}</td>
+        <td class="${buyerSummaryDifferenceClass(group.totals.difference)}">${moneyValue(group.totals.difference)}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="11">Sin operaciones seleccionadas.</td></tr>`;
+  $("#buyer-summary-count").textContent = totals.operations;
+  $("#buyer-summary-heads").textContent = plainNumberValue(totals.heads);
+  $("#buyer-summary-kilos").textContent = `${plainNumberValue(totals.kilos)} kgs`;
+  $("#buyer-summary-gross").textContent = moneyValue(totals.gross);
+  $("#buyer-summary-settled").textContent = moneyValue(totals.settled);
+  $("#buyer-summary-difference").textContent = moneyValue(totals.difference);
+  $("#buyer-summary-difference").className = buyerSummaryDifferenceClass(totals.difference);
+  $("#buyer-summary-print").disabled = !selected.length;
+}
+
+async function loadBuyerSummaryOperations() {
+  const buyerText = $("#buyer-summary-client").value.trim();
+  const buyer = normalizeSearch(buyerText);
+  const message = $("#buyer-summary-message");
+  if (!buyer) {
+    message.textContent = "Ingrese el comprador para buscar sus operaciones.";
+    message.className = "form-message error";
+    return;
+  }
+  const from = parseInputDate($("#buyer-summary-from").value);
+  const to = parseInputDate($("#buyer-summary-to").value);
+  const button = $("#buyer-summary-load");
+  button.disabled = true;
+  button.textContent = "Buscando...";
+  message.textContent = "Leyendo las planillas cargadas...";
+  message.className = "form-message";
+  try {
+    const candidates = state.operaciones.filter((operation) => {
+      const status = operationSearchStatusInfo(operation);
+      if (status.annulled || status.derived) return false;
+      const operationBuyer = normalizeSearch(operation.comprador || operation.draftData?.comprador || "");
+      if (!(operationBuyer === buyer || operationBuyer.includes(buyer))) return false;
+      const date = operationSearchDate(operation);
+      if (!date) return !from && !to;
+      if (from && date < dateOnly(from)) return false;
+      if (to && date > dateOnly(to)) return false;
+      return true;
+    });
+    const details = await Promise.all(candidates.map((operation) =>
+      fetchJson(`/api/operaciones/${encodeURIComponent(operation.id)}`)
+        .then((response) => ({ ...operation, ...(response.item || {}) }))
+        .catch(() => operation)
+    ));
+    state.buyerSummaryRows = details
+      .map((operation) => ({ operation, metrics: buyerSummaryMetrics(operation), selected: true, troop: "1" }))
+      .sort((a, b) => (operationSearchDate(a.operation)?.getTime() || 0) - (operationSearchDate(b.operation)?.getTime() || 0));
+    renderBuyerSummary();
+    message.textContent = state.buyerSummaryRows.length
+      ? `${state.buyerSummaryRows.length} operacion/es encontradas. Asigne el numero de tropa y quite la seleccion de las que no correspondan.`
+      : "No se encontraron operaciones del comprador en ese periodo.";
+    message.className = `form-message ${state.buyerSummaryRows.length ? "ok" : ""}`.trim();
+  } catch (error) {
+    message.textContent = error.message;
+    message.className = "form-message error";
+  } finally {
+    button.disabled = false;
+    button.textContent = "Buscar operaciones";
+  }
+}
+
+function buyerSummarySellerGroups(rows = selectedBuyerSummaryRows()) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const name = row.operation.vendedor || row.operation.draftData?.vendedor || "Sin vendedor";
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(row);
+  });
+  return Array.from(groups.entries())
+    .map(([name, items]) => ({ name, totals: buyerSummaryTotals(items) }))
+    .sort((a, b) => a.name.localeCompare(b.name, "es"));
+}
+
+function printBuyerSummary() {
+  const rows = selectedBuyerSummaryRows();
+  if (!rows.length) return;
+  const groups = buyerSummaryGroups(rows);
+  const sellers = buyerSummarySellerGroups(rows);
+  const totals = buyerSummaryTotals(rows);
+  const mode = $("#buyer-summary-mode").value;
+  const buyer = $("#buyer-summary-client").value.trim() || rows[0].operation.comprador || "Comprador";
+  const period = [$("#buyer-summary-from").value, $("#buyer-summary-to").value].filter(Boolean).join(" a ") || "Periodo seleccionado";
+  const operationRows = (items) => items.map((row) => {
+    const operation = row.operation;
+    const metrics = row.metrics;
+    return `<tr><td>${escapeHtml(operation.id || "-")}</td><td>${escapeHtml(operation.fecha || operation.draftData?.fecha || "-")}</td><td>${escapeHtml(operation.vendedor || operation.draftData?.vendedor || "-")}</td><td class="amount">${plainNumberValue(metrics.heads)}</td><td class="amount">${plainNumberValue(metrics.kilos)}</td><td class="amount">${moneyValue(metrics.price)}</td><td class="amount">${moneyValue(metrics.gross)}</td><td class="amount">${moneyValue(metrics.invoiced)}</td><td class="amount">${moneyValue(metrics.iva)}</td><td class="amount">${moneyValue(metrics.cash)}</td><td class="amount">${moneyValue(metrics.buyerTotal)}</td><td class="amount ${buyerSummaryDifferenceClass(metrics.difference)}">${moneyValue(metrics.difference)}</td></tr>`;
+  }).join("");
+  const groupSections = groups.map((group) => `<section><h2>Tropa ${escapeHtml(group.label)}</h2><table><thead><tr><th>Operacion</th><th>Fecha</th><th>Vendedor</th><th>Cabezas</th><th>Kilos</th><th>Precio prom.</th><th>Importe base</th><th>Facturado</th><th>IVA</th><th>Efectivo</th><th>Total comprador</th><th>Diferencia</th></tr></thead><tbody>${operationRows(group.items)}<tr class="total"><td colspan="3">Total tropa ${escapeHtml(group.label)}</td><td class="amount">${plainNumberValue(group.totals.heads)}</td><td class="amount">${plainNumberValue(group.totals.kilos)}</td><td class="amount">${moneyValue(group.totals.kilos ? group.totals.gross / group.totals.kilos : 0)}</td><td class="amount">${moneyValue(group.totals.gross)}</td><td class="amount">${moneyValue(group.totals.invoiced)}</td><td class="amount">${moneyValue(group.totals.iva)}</td><td class="amount">${moneyValue(group.totals.cash)}</td><td class="amount">${moneyValue(group.totals.buyerTotal)}</td><td class="amount ${buyerSummaryDifferenceClass(group.totals.difference)}">${moneyValue(group.totals.difference)}</td></tr></tbody></table></section>`).join("");
+  const sellerRows = sellers.map((seller) => `<tr><td>${escapeHtml(seller.name)}</td><td class="amount">${plainNumberValue(seller.totals.heads)}</td><td class="amount">${plainNumberValue(seller.totals.kilos)}</td><td class="amount">${moneyValue(seller.totals.gross)}</td><td class="amount">${moneyValue(seller.totals.invoiced)}</td><td class="amount">${moneyValue(seller.totals.iva)}</td><td class="amount">${moneyValue(seller.totals.cash)}</td><td class="amount">${moneyValue(seller.totals.buyerTotal)}</td></tr>`).join("");
+  const consolidated = `<section><h2>Composicion consolidada</h2><table><thead><tr><th>Vendedor / beneficiario</th><th>Cabezas</th><th>Kilos</th><th>Importe base</th><th>Facturado</th><th>IVA</th><th>Efectivo</th><th>Total comprador</th></tr></thead><tbody>${sellerRows}<tr class="total"><td>Total general</td><td class="amount">${plainNumberValue(totals.heads)}</td><td class="amount">${plainNumberValue(totals.kilos)}</td><td class="amount">${moneyValue(totals.gross)}</td><td class="amount">${moneyValue(totals.invoiced)}</td><td class="amount">${moneyValue(totals.iva)}</td><td class="amount">${moneyValue(totals.cash)}</td><td class="amount">${moneyValue(totals.buyerTotal)}</td></tr></tbody></table></section>`;
+  const popup = window.open("", "_blank", "width=1250,height=850");
+  if (!popup) return;
+  const filename = safePdfTitle("Resumen_comprador", buyer, new Date().toISOString().slice(0, 10));
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(filename)}</title><style>
+    body{font-family:Arial,sans-serif;margin:9mm;color:#173632;font-size:9px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #173632;padding-bottom:7px}header img{width:68px;height:68px;object-fit:contain;background:#173632;border-radius:5px;padding:4px}h1{font-size:18px;margin:0 0 4px}h2{font-size:11px;margin:12px 0 4px;text-transform:uppercase}.muted{color:#52706b;margin:2px 0}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0}.box{border:1px solid #cbd7d4;background:#edf3f1;padding:6px}.box span{display:block;color:#52706b;font-size:8px;text-transform:uppercase}.box strong{display:block;font-size:14px;margin-top:3px}table{width:100%;border-collapse:collapse;margin-top:4px;font-size:8px}th,td{border:1px solid #cbd7d4;padding:3px;text-align:left;vertical-align:top}th{background:#edf3f1}.amount{text-align:right;white-space:nowrap}.total{font-weight:700;background:#edf3f1}.buyer-summary-ok{color:#087a55;font-weight:700}.buyer-summary-warning{color:#a1261c;font-weight:700}.control{border:2px solid #173632;padding:8px;margin-top:12px;display:flex;justify-content:space-between;align-items:center}.control strong{font-size:17px}.note{margin-top:10px;color:#52706b;font-size:8px}.actions{margin-top:14px}@media print{@page{size:A4 landscape;margin:7mm}body{margin:0}.actions{display:none}section{break-inside:avoid}tr{break-inside:avoid}}
+  </style></head><body><header><div><h1>Resumen de operaciones para comprador</h1><p><strong>${escapeHtml(buyer)}</strong></p><p class="muted">${escapeHtml(period)} | Emitido ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p></div><img src="${window.location.origin}/logo-espinosa-blanco.png"></header><div class="summary"><div class="box"><span>Operaciones</span><strong>${totals.operations}</strong></div><div class="box"><span>Cabezas</span><strong>${plainNumberValue(totals.heads)}</strong></div><div class="box"><span>Kilos</span><strong>${plainNumberValue(totals.kilos)}</strong></div><div class="box"><span>Importe base</span><strong>${moneyValue(totals.gross)}</strong></div></div>${mode !== "TOTAL" ? groupSections : ""}${mode !== "TROPAS" ? consolidated : ""}<div class="control"><span>Control: importe base menos facturado neto y efectivo</span><strong class="${buyerSummaryDifferenceClass(totals.difference)}">${moneyValue(totals.difference)}</strong></div><p class="note">El IVA se informa por separado y se suma al total financiero del comprador. Este resumen no expone precios vendedor, diferencias internas, comisiones ni condiciones de capitalizacion.</p><div class="actions"><button type="button" data-print-popup>Imprimir / guardar PDF</button></div></body></html>`);
+  finishPrintPopup(popup);
+  popup.focus();
 }
 
 function movementDateForRealCommission(movement) {
@@ -11700,6 +11909,37 @@ async function init() {
   $("#download-backup").addEventListener("click", downloadBackup);
   $("#dashboard-period-run").addEventListener("click", renderPeriodStats);
   $("#operation-search-run").addEventListener("click", renderOperationSearch);
+  $("#buyer-summary-load").addEventListener("click", loadBuyerSummaryOperations);
+  $("#buyer-summary-print").addEventListener("click", printBuyerSummary);
+  $("#buyer-summary-mode").addEventListener("change", renderBuyerSummary);
+  $("#buyer-summary-body").addEventListener("change", (event) => {
+    const select = event.target.closest("[data-buyer-summary-select]");
+    if (select) {
+      const row = state.buyerSummaryRows.find((item) => String(item.operation.id) === String(select.dataset.buyerSummarySelect));
+      if (row) row.selected = select.checked;
+      renderBuyerSummary();
+      return;
+    }
+    const troop = event.target.closest("[data-buyer-summary-troop]");
+    if (troop) {
+      const row = state.buyerSummaryRows.find((item) => String(item.operation.id) === String(troop.dataset.buyerSummaryTroop));
+      if (row) row.troop = troop.value.trim() || "Sin identificar";
+      renderBuyerSummary();
+    }
+  });
+  $("#buyer-summary-body").addEventListener("input", (event) => {
+    const troop = event.target.closest("[data-buyer-summary-troop]");
+    if (!troop) return;
+    const row = state.buyerSummaryRows.find((item) => String(item.operation.id) === String(troop.dataset.buyerSummaryTroop));
+    if (row) row.troop = troop.value.trim() || "Sin identificar";
+    const groupsBody = $("#buyer-summary-groups-body");
+    if (groupsBody) {
+      const groups = buyerSummaryGroups();
+      groupsBody.innerHTML = groups.length
+        ? groups.map((group) => `<tr class="${buyerSummaryDifferenceClass(group.totals.difference)}"><td>${escapeHtml(group.label)}</td><td>${group.totals.operations}</td><td>${plainNumberValue(group.totals.heads)}</td><td>${plainNumberValue(group.totals.kilos)} kgs</td><td>${moneyValue(group.totals.kilos ? group.totals.gross / group.totals.kilos : 0)}</td><td>${moneyValue(group.totals.gross)}</td><td>${moneyValue(group.totals.invoiced)}</td><td>${moneyValue(group.totals.iva)}</td><td>${moneyValue(group.totals.cash)}</td><td>${moneyValue(group.totals.buyerTotal)}</td><td class="${buyerSummaryDifferenceClass(group.totals.difference)}">${moneyValue(group.totals.difference)}</td></tr>`).join("")
+        : `<tr><td colspan="11">Sin operaciones seleccionadas.</td></tr>`;
+    }
+  });
   $("#real-commission-run").addEventListener("click", renderRealCommissionSummary);
   ["#real-commission-from", "#real-commission-to", "#real-commission-client", "#real-commission-status", "#real-commission-kind"].forEach((selector) => {
     $(selector).addEventListener("input", renderRealCommissionSummary);
@@ -12660,6 +12900,8 @@ async function init() {
   $("#dashboard-period-to").value = today;
   $("#operation-search-from").value = today.slice(0, 8) + "01";
   $("#operation-search-to").value = today;
+  $("#buyer-summary-from").value = today.slice(0, 8) + "01";
+  $("#buyer-summary-to").value = today;
   $("#cash-rec-report-from").value = today.slice(0, 8) + "01";
   $("#cash-rec-report-to").value = today;
   $("#cc-calendar-from").value = dateToInputValue(new Date());

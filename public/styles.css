@@ -1754,6 +1754,67 @@ label textarea {
   background: var(--soft);
 }
 
+.buyer-summary-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.buyer-summary-filters {
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.buyer-summary-filters label {
+  min-width: 135px;
+}
+
+.buyer-summary-filters label:nth-child(3) {
+  min-width: 230px;
+}
+
+.buyer-summary-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.buyer-summary-table-wrap {
+  overflow-x: auto;
+}
+
+.buyer-summary-table-wrap table {
+  min-width: 1500px;
+}
+
+.buyer-summary-troop-input {
+  width: 78px;
+  min-width: 78px;
+}
+
+.buyer-summary-ok {
+  color: #087a55;
+  font-weight: 700;
+}
+
+.buyer-summary-warning {
+  color: #a1261c;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .buyer-summary-panel .panel-head,
+  .buyer-summary-filters {
+    align-items: stretch;
+  }
+
+  .buyer-summary-filters label,
+  .buyer-summary-filters label:nth-child(3) {
+    min-width: 100%;
+  }
+
+  .buyer-summary-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
 .cc-workspace {
   display: grid;
   gap: 14px;

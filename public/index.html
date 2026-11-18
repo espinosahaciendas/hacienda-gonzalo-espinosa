@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="/logo-espinosa-blanco.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>Gonzalo Espinosa Hacienda</title>
-  <link rel="stylesheet" href="/styles.css?v=20261102-operacion-derivada-v19">
+  <link rel="stylesheet" href="/styles.css?v=20261118-resumen-comprador-v20">
   </head>
   <body>
     <section class="login-screen" id="login-screen" hidden>
@@ -364,6 +364,70 @@
           </div>
           <div class="table-pagination" id="operation-search-pagination"></div>
           <p class="form-message" id="operation-search-message"></p>
+        </div>
+
+        <div class="panel buyer-summary-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Resumen consolidado para comprador</h2>
+              <p class="subtle">Agrupa operaciones ya cargadas y controla kilos, precio comprador, liquidacion, IVA y efectivo sin modificar las planillas.</p>
+            </div>
+            <div class="form-actions buyer-summary-filters">
+              <label>Desde<input id="buyer-summary-from" type="date"></label>
+              <label>Hasta<input id="buyer-summary-to" type="date"></label>
+              <label>Comprador<input id="buyer-summary-client" list="cc-client-list" autocomplete="off" placeholder="Buscar comprador"></label>
+              <label>Presentacion
+                <select id="buyer-summary-mode">
+                  <option value="COMPLETO">Por tropa y consolidado</option>
+                  <option value="TROPAS">Solamente por tropa</option>
+                  <option value="TOTAL">Solamente consolidado</option>
+                </select>
+              </label>
+              <button type="button" class="ghost-button" id="buyer-summary-load">Buscar operaciones</button>
+              <button type="button" class="primary-button" id="buyer-summary-print" disabled>PDF comprador</button>
+            </div>
+          </div>
+          <div class="cc-grid buyer-summary-metrics">
+            <div><span>Operaciones seleccionadas</span><strong id="buyer-summary-count">0</strong></div>
+            <div><span>Cabezas</span><strong id="buyer-summary-heads">-</strong></div>
+            <div><span>Kilos comprador</span><strong id="buyer-summary-kilos">-</strong></div>
+            <div><span>Importe por kilos / precio</span><strong id="buyer-summary-gross">$ 0,00</strong></div>
+            <div><span>Facturado + efectivo</span><strong id="buyer-summary-settled">$ 0,00</strong></div>
+            <div><span>Diferencia de control</span><strong id="buyer-summary-difference">$ 0,00</strong></div>
+          </div>
+          <div class="table-wrap compact-table buyer-summary-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Incluir</th>
+                  <th>Tropa</th>
+                  <th>Operacion</th>
+                  <th>Fecha</th>
+                  <th>Vendedor</th>
+                  <th>Cabezas</th>
+                  <th>Kilos</th>
+                  <th>Precio prom.</th>
+                  <th>Importe comprador</th>
+                  <th>Facturado</th>
+                  <th>IVA</th>
+                  <th>Efectivo</th>
+                  <th>Total comprador con IVA</th>
+                  <th>Diferencia</th>
+                </tr>
+              </thead>
+              <tbody id="buyer-summary-body">
+                <tr><td colspan="14">Busque un comprador para seleccionar las operaciones.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-wrap compact-table buyer-summary-groups-wrap">
+            <h3>Control por tropa</h3>
+            <table>
+              <thead><tr><th>Tropa</th><th>Operaciones</th><th>Cabezas</th><th>Kilos</th><th>Precio promedio</th><th>Importe base</th><th>Facturado</th><th>IVA</th><th>Efectivo</th><th>Total comprador</th><th>Diferencia</th></tr></thead>
+              <tbody id="buyer-summary-groups-body"><tr><td colspan="11">Sin operaciones seleccionadas.</td></tr></tbody>
+            </table>
+          </div>
+          <p class="form-message" id="buyer-summary-message"></p>
         </div>
 
         <div class="panel">
@@ -2857,7 +2921,7 @@
       </section>
     </main>
 
-  <script src="/app.js?v=20261102-saldo-asociado-real-v29"></script>
+  <script src="/app.js?v=20261118-resumen-comprador-v30"></script>
   </body>
 </html>
 
