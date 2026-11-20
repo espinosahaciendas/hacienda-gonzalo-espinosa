@@ -64,7 +64,7 @@ let operationSearchRequestId = 0;
 let periodStatsTimer = null;
 let operationSearchTimer = null;
 const TABLE_PAGE_SIZE = 25;
-const APP_BUILD = "20261118-resumen-comprador-v31";
+const APP_BUILD = "20261120-imputacion-parcial-v32";
 
 const currency = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -7205,21 +7205,23 @@ function renderCurrentAccountImputations() {
       Array.from(group.comprobantes).filter(Boolean).join(" / "),
       Array.from(group.operaciones).filter(Boolean).join(" / ")
     ].filter(Boolean).join(" - ");
-    return `<tr class="cc-detail-row"><td><input type="checkbox" data-cc-impute-group="${escapeHtml(group.id)}" data-cc-group-items="${items}" data-cc-pending="${group.total}" data-cc-signed-pending="${group.total}" data-cc-concepto="${escapeHtml(`Factura comision ${group.numero}`)}" data-cc-comprobante="${escapeHtml(group.numero)}"></td><td>${escapeHtml(group.vencimiento || group.fecha || "-")}</td><td>Factura de comisiones ${escapeHtml(group.numero)}${detail ? `<br><small>${escapeHtml(detail)}</small>` : ""}</td><td>${escapeHtml(group.numero || "-")}</td><td>${moneyValue(group.total)}</td></tr>`;
+    return `<tr class="cc-detail-row"><td><input type="checkbox" data-cc-impute-group="${escapeHtml(group.id)}" data-cc-group-items="${items}" data-cc-pending="${group.total}" data-cc-signed-pending="${group.total}" data-cc-concepto="${escapeHtml(`Factura comision ${group.numero}`)}" data-cc-comprobante="${escapeHtml(group.numero)}"></td><td>${escapeHtml(group.vencimiento || group.fecha || "-")}</td><td>Factura de comisiones ${escapeHtml(group.numero)}${detail ? `<br><small>${escapeHtml(detail)}</small>` : ""}</td><td>${escapeHtml(group.numero || "-")}</td><td>${moneyValue(group.total)}</td><td><input class="money-input cc-imputation-amount" data-cc-apply-amount value="${escapeHtml(moneyValue(group.total))}" inputmode="decimal" aria-label="Importe a aplicar" disabled></td></tr>`;
   }).join("");
   const movementRows = visibleMovements.map((movement) => {
         const pending = Number(movement.importePendiente ?? Math.abs(movement.importe));
         const signedPending = Math.sign(Number(movement.importe || 0)) * pending;
-        return `<tr><td><input type="checkbox" data-cc-impute="${escapeHtml(movement.id)}" data-cc-pending="${pending}" data-cc-signed-pending="${signedPending}" data-cc-concepto="${escapeHtml(movement.concepto || "")}" data-cc-comprobante="${escapeHtml(movement.comprobante || "")}"></td><td>${escapeHtml(movement.vencimiento || "-")}</td><td>${escapeHtml(movement.concepto || "-")}</td><td>${escapeHtml(movement.comprobante || "-")}</td><td>${moneyValue(pending)}</td></tr>`;
+        return `<tr><td><input type="checkbox" data-cc-impute="${escapeHtml(movement.id)}" data-cc-pending="${pending}" data-cc-signed-pending="${signedPending}" data-cc-concepto="${escapeHtml(movement.concepto || "")}" data-cc-comprobante="${escapeHtml(movement.comprobante || "")}"></td><td>${escapeHtml(movement.vencimiento || "-")}</td><td>${escapeHtml(movement.concepto || "-")}</td><td>${escapeHtml(movement.comprobante || "-")}</td><td>${moneyValue(pending)}</td><td><input class="money-input cc-imputation-amount" data-cc-apply-amount value="${escapeHtml(moneyValue(pending))}" inputmode="decimal" aria-label="Importe a aplicar" disabled></td></tr>`;
       }).join("");
   $("#cc-imputation-body").innerHTML = availableCount
     ? `${invoiceRows}${movementRows}`
-    : `<tr><td colspan="5">Sin pendientes para imputar.</td></tr>`;
+    : `<tr><td colspan="6">Sin pendientes para imputar.</td></tr>`;
 }
 
 function updateCurrentAccountImputationSummary({ selector, summarySelector, availableText, updatePaymentAmount = false }) {
   const selected = $all(selector);
-  const total = selected.reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccPending || 0), 0);
+  const total = selector.includes("data-cc-impute")
+    ? selectedCurrentAccountImputationRows(selector).reduce((sum, row) => sum + Number(row.pending || 0), 0)
+    : selected.reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccPending || 0), 0);
   $(summarySelector).textContent = selected.length
     ? `${selected.length} seleccionado/s - ${moneyValue(total)}`
     : availableText;
@@ -7233,9 +7235,13 @@ function refreshPrimaryImputationSummary() {
   const selected = $all("[data-cc-impute]:checked, [data-cc-impute-group]:checked");
   const selectedRows = selectedCurrentAccountImputationRows("[data-cc-impute]:checked, [data-cc-impute-group]:checked");
   const signedTotal = selectedRows.reduce((sum, row) => sum + Number(row.signedPending || 0), 0);
-  const positiveTotal = selected
-    .filter((item) => Number(item.dataset.ccSignedPending || 0) > 0)
-    .reduce((sum, checkbox) => sum + Number(checkbox.dataset.ccPending || 0), 0);
+  $all("[data-cc-impute], [data-cc-impute-group]").forEach((checkbox) => {
+    const input = checkbox.closest("tr")?.querySelector("[data-cc-apply-amount]");
+    if (input) input.disabled = !checkbox.checked;
+  });
+  const positiveTotal = selectedRows
+    .filter((item) => Number(item.signedPending || 0) > 0)
+    .reduce((sum, row) => sum + Number(row.pending || 0), 0);
   const compensationOffset = compensationOffsetAmount(selectedRows);
   const compensationSigned = compensationAppliedSignedTotal(selectedRows);
   const discountOnly = $("#cc-discount-only")?.checked;
@@ -9011,12 +9017,22 @@ async function generateClientCommissionInvoice() {
 
 function selectedCurrentAccountImputationRows(selector) {
   return $all(selector).flatMap((checkbox) => {
+    const available = Number(checkbox.dataset.ccPending || 0);
+    const amountInput = checkbox.closest("tr")?.querySelector("[data-cc-apply-amount]");
+    const requested = amountInput ? Math.min(Math.max(parseMoneyInput(amountInput.value), 0), available) : available;
     if (checkbox.dataset.ccGroupItems) {
       try {
-        return JSON.parse(decodeURIComponent(checkbox.dataset.ccGroupItems)).map((item) => ({
+        const items = JSON.parse(decodeURIComponent(checkbox.dataset.ccGroupItems)).map((item) => ({
           movementId: item.movementId,
           pending: Number(item.pending || 0),
           signedPending: Number(item.signedPending || item.pending || 0)
+        }));
+        const allocated = allocateCurrentAccountRows(items, requested);
+        const source = new Map(items.map((item) => [String(item.movementId), item]));
+        return allocated.map((item) => ({
+          movementId: item.movementId,
+          pending: item.importe,
+          signedPending: Math.sign(Number(source.get(String(item.movementId))?.signedPending || 0)) * item.importe
         }));
       } catch (error) {
         return [];
@@ -9024,8 +9040,8 @@ function selectedCurrentAccountImputationRows(selector) {
     }
     return [{
       movementId: checkbox.dataset.ccImpute || checkbox.dataset.ccCounterpartyImpute,
-      pending: Number(checkbox.dataset.ccPending || 0),
-      signedPending: Number(checkbox.dataset.ccSignedPending || 0)
+      pending: requested,
+      signedPending: Math.sign(Number(checkbox.dataset.ccSignedPending || 0)) * requested
     }];
   }).filter((item) => item.movementId && item.pending > 0);
 }
@@ -12478,7 +12494,22 @@ async function init() {
     renderCurrentAccountInstruments();
   });
   $("#cc-imputation-body").addEventListener("change", (event) => {
-    if (event.target.matches("[data-cc-impute], [data-cc-impute-group]")) refreshPrimaryImputationSummary();
+    if (event.target.matches("[data-cc-impute], [data-cc-impute-group]")) {
+      refreshPrimaryImputationSummary();
+      return;
+    }
+    if (event.target.matches("[data-cc-apply-amount]")) {
+      const checkbox = event.target.closest("tr")?.querySelector("[data-cc-impute], [data-cc-impute-group]");
+      const available = Number(checkbox?.dataset.ccPending || 0);
+      event.target.value = moneyValue(Math.min(Math.max(parseMoneyInput(event.target.value), 0), available));
+      refreshPrimaryImputationSummary();
+    }
+  });
+  $("#cc-imputation-body").addEventListener("input", (event) => {
+    if (!event.target.matches("[data-cc-apply-amount]")) return;
+    const checkbox = event.target.closest("tr")?.querySelector("[data-cc-impute], [data-cc-impute-group]");
+    if (checkbox && !checkbox.checked) checkbox.checked = true;
+    refreshPrimaryImputationSummary();
   });
   $("#cc-discount-only").addEventListener("change", refreshPrimaryImputationSummary);
   $("#cc-counterparty-body").addEventListener("change", (event) => {

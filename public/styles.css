@@ -1146,6 +1146,11 @@ label textarea {
   padding: 8px 10px;
 }
 
+.cc-imputation-amount {
+  min-width: 120px;
+  width: 140px;
+}
+
 .selected-row {
   background: var(--accent-soft);
 }
